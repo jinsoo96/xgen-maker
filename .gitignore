@@ -1,0 +1,16 @@
+# 파이썬
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# 파생 산출물 — kg build/merge/enrich/domains/dashboard 로 재생성 (내부 코드베이스 구조 포함이라 커밋 제외)
+kg/
+
+# UA 평가용 회사 소스 슬라이스 사본 (이 프로젝트 코드 아님) + 파생 KG + 실행 로그
+_ua-eval/slice/
+_ua-eval/slice.repo.json
+_ua-eval/ua-run.log
+
+# 로컬 임시
+*.log
+.tmp/
