@@ -38,11 +38,19 @@ worklogs/        세션 journal
 tests/           unittest 35개
 ```
 
-## 설치 (정식 CLI)
+## 설치 & 로그인 (Claude 하나로 전부)
 
 ```powershell
 cd D:\xgen-maker
-pip install -e .        # → 어디서든 `maker` 명령 사용 가능
+pip install -e .        # → 어디서든 `maker` 명령
+maker login             # claude CLI 구독 로그인 감지 → 코딩+판단+요약 전부 이 로그인으로 (API 키 불필요)
+maker whoami            # 현재 provider 확인
+maker doctor --config maker.config.json   # 자가검증 — 모든 능력이 실제로 되는지 점검
+```
+
+로그인 provider 3종: `claude_cli`(기본, 키 불필요) · `anthropic`(--api-key) · `vllm`(--base/--model).
+
+```powershell
 maker chat --config D:\xgen-maker\maker.config.json                # 대화형 (openxgen 스타일, KG 1회 로드)
 maker run "쿼리" --config D:\xgen-maker\maker.observe.config.json   # 원샷, 실시간 진행 로그 스트리밍
 ```

@@ -205,6 +205,56 @@ def cmd_chat(args) -> None:
     run_chat(args.config)
 
 
+def cmd_login(args) -> None:
+    from .auth import Auth, save_auth, claude_cli_status, load_auth
+    provider = args.provider
+    if provider is None:
+        # 자동: claude CLI 로그인돼 있으면 그걸로, 아니면 안내
+        status = claude_cli_status()
+        if status["authenticated"]:
+            provider = "claude_cli"
+            print("✓ claude CLI 로그인 감지 — provider=claude_cli (API 키 불필요)")
+        else:
+            print("claude CLI 미인증. 다음 중 하나:")
+            print("  1) 터미널에서 `claude` 실행해 로그인 후 `maker login` 재실행")
+            print("  2) `maker login --provider anthropic --api-key sk-ant-...`")
+            print("  3) `maker login --provider vllm --base http://... --model ...`")
+            return
+    auth = Auth(provider=provider, model=args.model or "",
+                api_key=args.api_key or "", base=args.base or "")
+    if provider == "claude_cli":
+        status = claude_cli_status()
+        if not status["authenticated"]:
+            print(f"✗ claude CLI 미인증: {status['reason']}\n  터미널에서 `claude` 로그인 후 재시도.")
+            return
+    elif provider == "anthropic" and not auth.api_key:
+        print("✗ --api-key 필요 (anthropic)")
+        return
+    path = save_auth(auth)
+    print(f"✓ 로그인 저장: provider={provider} model={auth.resolved_model()} → {path}")
+    print("  이제 `maker chat` / `maker run` 이 이 로그인으로 코딩+판단+요약을 전부 처리합니다.")
+
+
+def cmd_whoami(args) -> None:
+    from .auth import load_auth, claude_cli_status, AUTH_FILE
+    auth = load_auth()
+    print(f"provider : {auth.provider}")
+    print(f"model    : {auth.resolved_model()}")
+    print(f"base     : {auth.resolved_base()}")
+    print(f"key set  : {'yes' if auth.api_key else 'no (구독 로그인)' if auth.provider=='claude_cli' else 'no'}")
+    print(f"저장위치 : {AUTH_FILE} ({'있음' if AUTH_FILE.exists() else '없음(기본 claude_cli)'})")
+    if auth.provider == "claude_cli":
+        status = claude_cli_status()
+        print(f"claude CLI: {'✓ 인증됨' if status['authenticated'] else '✗ ' + status['reason']}")
+
+
+def cmd_doctor(args) -> None:
+    from .doctor import run_doctor
+    ok = run_doctor(args.config)
+    if not ok:
+        sys.exit(1)
+
+
 def main(argv: list[str] | None = None) -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -305,6 +355,20 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("chat", help="대화형 터미널 (openxgen 스타일) — KG 1회 로드, 연속 쿼리")
     p.add_argument("--config", default=None)
     p.set_defaults(func=cmd_chat)
+
+    p = sub.add_parser("login", help="로그인 — Claude 하나로 코딩+판단+요약 통합 (API 키 불필요)")
+    p.add_argument("--provider", choices=["claude_cli", "anthropic", "vllm"], default=None)
+    p.add_argument("--api-key", default=None)
+    p.add_argument("--model", default=None)
+    p.add_argument("--base", default=None)
+    p.set_defaults(func=cmd_login)
+
+    p = sub.add_parser("whoami", help="현재 로그인/프로바이더 상태")
+    p.set_defaults(func=cmd_whoami)
+
+    p = sub.add_parser("doctor", help="자가검증 — MAKER 목적(R1~R20)이 실제로 되는지 점검")
+    p.add_argument("--config", default=None)
+    p.set_defaults(func=cmd_doctor)
 
     args = parser.parse_args(argv)
     args.func(args)

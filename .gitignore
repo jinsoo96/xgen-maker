@@ -17,3 +17,7 @@ _ua-eval/ua-run.log
 
 # pip install -e . 빌드 아티팩트
 xgen_maker.egg-info/
+
+# 로그인 자격(홈 디렉토리 저장이지만 방어적)
+.xgen-maker/
+auth.json

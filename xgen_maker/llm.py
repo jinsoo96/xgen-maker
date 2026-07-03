@@ -8,6 +8,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
+import subprocess
 import urllib.request
 import urllib.error
 
@@ -56,8 +58,28 @@ def _chat_anthropic(model: str, messages: list[dict], max_tokens: int,
         return None
 
 
+def _chat_claude_cli(messages: list[dict], timeout: int) -> str | None:
+    """claude CLI 구독 로그인으로 단발 완성 — API 키 불필요."""
+    from .auth import claude_command
+    prompt = "\n\n".join(f"[{m['role']}]\n{m['content']}" for m in messages)
+    command = claude_command(["-p", prompt])
+    if command is None:
+        return None
+    try:
+        result = subprocess.run(
+            command, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=timeout)
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    return (result.stdout or "").strip() or None
+
+
 def chat(base: str, model: str, messages: list[dict], max_tokens: int = 800,
          temperature: float = 0.2, timeout: int = 60) -> str | None:
+    if base == "claude_cli":
+        return _chat_claude_cli(messages, timeout)
     if base.startswith("anthropic"):
         return _chat_anthropic(model, messages, max_tokens, temperature, timeout)
     return _chat_openai(base, model, messages, max_tokens, temperature, timeout)

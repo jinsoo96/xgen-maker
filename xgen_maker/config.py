@@ -60,7 +60,21 @@ class MakerConfig:
             config.kg_path = str(base / config.kg_path)
         if not Path(config.worklogs_dir).is_absolute():
             config.worklogs_dir = str(base / config.worklogs_dir)
+        # config에 provider가 명시되지 않았으면 저장된 로그인(auth)을 따른다
+        if "llm_base" not in data or "llm_model" not in data:
+            config.apply_auth()
         return config
+
+    def apply_auth(self) -> None:
+        """저장된 maker login(auth)을 LLM/에이전트 설정에 반영."""
+        try:
+            from .auth import load_auth, apply_to_env
+        except ImportError:
+            return
+        auth = load_auth()
+        apply_to_env(auth)
+        self.llm_base = auth.resolved_base()
+        self.llm_model = auth.resolved_model()
 
 
 def is_protected_branch(name: str) -> bool:
