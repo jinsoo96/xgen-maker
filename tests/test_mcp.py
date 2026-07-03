@@ -33,7 +33,7 @@ class TestMcpServer(unittest.TestCase):
     def test_tools_list(self):
         response = self.server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
         names = {t["name"] for t in response["result"]["tools"]}
-        self.assertEqual(names, {"kg_search", "kg_node", "kg_impact", "kg_stats"})
+        self.assertEqual(names, {"kg_search", "kg_node", "kg_impact", "kg_stats", "maker_plan"})
 
     def test_tools_call_search(self):
         response = self.server.handle({

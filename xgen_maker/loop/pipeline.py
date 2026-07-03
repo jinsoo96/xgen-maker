@@ -26,6 +26,12 @@ class MakerLoop:
     def __init__(self, config: MakerConfig, graph: Graph | None = None):
         self.config = config
         self.graph = graph if graph is not None else Graph.load(config.kg_path)
+        if graph is None:
+            # 사람 편집(오버레이) 반영 — deprecated 노드 착지 회피 등 (R8)
+            from ..kg.overlay import load_overlay, apply_overlay
+            overlay = load_overlay(Path(config.kg_path).parent / "overlay.json")
+            if overlay["node_overrides"] or overlay["custom_edges"]:
+                apply_overlay(self.graph, overlay)
 
     # ---- 단계 구현 ----
     def _answer_question(self, query: str, landing: list[dict], journal: Journal) -> dict:

@@ -31,19 +31,30 @@ def run_agent(repo_path: str | Path, prompt: str, session_dir: Path,
     prompt_path = session_dir / "agent-prompt.md"
     prompt_path.write_text(prompt, encoding="utf-8")
 
+    stdin_payload = None
     if agent_cmd:
         command = agent_cmd.format(prompt_path=str(prompt_path))
         shell = True
     else:
-        if not shutil.which("claude"):
+        exe = shutil.which("claude")
+        if not exe:
             return {"ok": False, "output": "", "error": "claude CLI 미발견 — config.agent_cmd 필요"}
-        command = ["claude", "--permission-mode", "acceptEdits", "-p", prompt]
+        # 프롬프트는 stdin으로 전달 — 멀티라인 argv의 셸 인용 문제 회피.
+        # Windows npm 심(.cmd/.ps1)은 CreateProcess 직접 실행 불가 → cmd /c 경유.
+        command = [exe, "--permission-mode", "acceptEdits", "-p"]
+        if exe.lower().endswith((".cmd", ".bat", ".ps1")):
+            base = exe[:-4] + ".cmd" if exe.lower().endswith(".ps1") else exe
+            command = ["cmd", "/c", base, "--permission-mode", "acceptEdits", "-p"]
+        stdin_payload = prompt
         shell = False
     try:
         result = subprocess.run(command, cwd=repo_path, shell=shell, capture_output=True,
-                                text=True, encoding="utf-8", errors="replace", timeout=timeout)
+                                input=stdin_payload, text=True, encoding="utf-8",
+                                errors="replace", timeout=timeout)
     except subprocess.TimeoutExpired:
         return {"ok": False, "output": "", "error": f"에이전트 타임아웃({timeout}s)"}
+    except (OSError, FileNotFoundError) as error:
+        return {"ok": False, "output": "", "error": f"에이전트 실행 실패: {error}"}
     output = (result.stdout or "") + (result.stderr or "")
     (session_dir / "agent-output.log").write_text(output, encoding="utf-8")
     return {"ok": result.returncode == 0, "output": output[-4000:],

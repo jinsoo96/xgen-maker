@@ -69,7 +69,12 @@ python -m xgen_maker run "ontology graph 조회 API 버그 고쳐줘" --config m
 # 6) KG를 MCP 툴로 (Claude Code/하네스 ToolSource 연결)
 python -m xgen_maker mcp --kg kg\merged.json
 
-# 7) 증분 동기화 — 코드가 바뀌면 KG가 따라온다
+# 7) 그래프 사람 편집 (R8 수정가능) — 오버레이로 영속, 재빌드에도 유실 없음
+python -m xgen_maker kg annotate "xgen-core:some/legacy.py" --deprecate --redirect "xgen-core:some/modern.py" --note "신규 작업은 modern으로"
+python -m xgen_maker kg annotate --list
+#   → deprecated 노드는 검색 점수 페널티로 루프 착지에서 제외됨
+
+# 8) 증분 동기화 — 코드가 바뀌면 KG가 따라온다
 python -m xgen_maker kg sync --kg kg\merged.json          # 수동/스크립트: 변경 파일만 재추출
 python -m xgen_maker kg hook install --repo-path D:\xgen2.0\xgen-core --kg D:\xgen-maker\kg\merged.json
 #   → post-commit/post-merge/post-checkout 훅이 커밋·풀·브랜치전환마다 sync 자동 실행 (UA --auto-update 대응)

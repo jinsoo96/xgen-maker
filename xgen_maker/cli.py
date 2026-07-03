@@ -23,6 +23,20 @@ from .kg.search import search, impact
 from .kg.dashboard import render_dashboard
 
 
+def _overlay_path(kg_path: str) -> Path:
+    return Path(kg_path).parent / "overlay.json"
+
+
+def _apply_overlay_and_save(graph: Graph, kg_path: str) -> None:
+    from .kg.overlay import load_overlay, apply_overlay
+    overlay = load_overlay(_overlay_path(kg_path))
+    if overlay["node_overrides"] or overlay["custom_edges"]:
+        result = apply_overlay(graph, overlay)
+        graph.save(kg_path)
+        print(f"[kg overlay] 사람 편집 {result['applied']}건 재적용"
+              + (f" (미존재 {len(result['missing'])}건)" if result["missing"] else ""))
+
+
 def _parse_repo_spec(spec: str) -> tuple[str, str, str | None]:
     """NAME=PATH 또는 NAME=PATH::SCOPE (윈도우 드라이브 콜론과 충돌 없게 '::' 사용)."""
     name, _, rest = spec.partition("=")
@@ -49,6 +63,7 @@ def cmd_kg_merge(args) -> None:
     merged.save(args.out)
     print(f"[kg merge] {json.dumps(merged.stats(), ensure_ascii=False)}")
     print(f"[kg merge] crossrepo resolves_to 링크 {links}개 → {args.out}")
+    _apply_overlay_and_save(merged, args.out)
 
 
 def cmd_kg_dashboard(args) -> None:
@@ -112,10 +127,33 @@ def cmd_kg_sync(args) -> None:
     if total or any(r.get("action") for r in results):
         enrich_deterministic(graph)  # 새 노드에만 요약 채움
         graph.save(args.kg)
+        _apply_overlay_and_save(graph, args.kg)
     if not args.quiet:
         for result in results:
             print(f"[kg sync] {json.dumps(result, ensure_ascii=False)}")
         print(f"[kg sync] 총 {total}개 파일 증분 반영 → {args.kg}")
+
+
+def cmd_kg_annotate(args) -> None:
+    from .kg.overlay import annotate, add_custom_edge, load_overlay
+    overlay_path = _overlay_path(args.kg)
+    if args.list:
+        overlay = load_overlay(overlay_path)
+        print(json.dumps(overlay, ensure_ascii=False, indent=1))
+        return
+    if args.edge_to:
+        add_custom_edge(overlay_path, args.node_id, args.edge_to,
+                        kind=args.edge_kind, note=args.note or "")
+        print(f"[kg annotate] 커스텀 엣지 {args.node_id} -{args.edge_kind}-> {args.edge_to}")
+    else:
+        deprecated = True if args.deprecate else (False if args.undeprecate else None)
+        edits = annotate(overlay_path, args.node_id, summary=args.summary,
+                         note=args.note, deprecated=deprecated,
+                         redirect=args.redirect,
+                         tags=args.tag if args.tag else None)
+        print(f"[kg annotate] {args.node_id}: {json.dumps(edits, ensure_ascii=False)}")
+    graph = Graph.load(args.kg)
+    _apply_overlay_and_save(graph, args.kg)
 
 
 def cmd_kg_hook(args) -> None:
@@ -147,7 +185,7 @@ def cmd_run(args) -> None:
 
 def cmd_mcp(args) -> None:
     from .mcp_server import main as mcp_main
-    mcp_main(args.kg)
+    mcp_main(args.kg, args.config)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -207,6 +245,20 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--limit", type=int, default=30)
     p.set_defaults(func=cmd_kg_tour)
 
+    p = kg_sub.add_parser("annotate", help="그래프 사람 편집 — 오버레이 영속(R8 수정가능)")
+    p.add_argument("node_id", nargs="?", default="")
+    p.add_argument("--kg", default="kg/merged.json")
+    p.add_argument("--summary", default=None)
+    p.add_argument("--note", default=None)
+    p.add_argument("--deprecate", action="store_true")
+    p.add_argument("--undeprecate", action="store_true")
+    p.add_argument("--redirect", default=None)
+    p.add_argument("--tag", action="append", default=None)
+    p.add_argument("--edge-to", default=None, help="커스텀 엣지 대상 노드")
+    p.add_argument("--edge-kind", default="relates_to")
+    p.add_argument("--list", action="store_true", help="오버레이 전체 출력")
+    p.set_defaults(func=cmd_kg_annotate)
+
     p = kg_sub.add_parser("sync", help="git 기준 증분 동기화 (변경 파일만 재추출)")
     p.add_argument("--kg", default="kg/merged.json")
     p.add_argument("--quiet", action="store_true")
@@ -226,8 +278,9 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--mode", choices=["observe", "act"], default=None)
     p.set_defaults(func=cmd_run)
 
-    p = sub.add_parser("mcp", help="KG MCP 서버 (stdio)")
+    p = sub.add_parser("mcp", help="KG MCP 서버 (stdio) — kg_* 4툴 + maker_plan")
     p.add_argument("--kg", default="kg/merged.json")
+    p.add_argument("--config", default=None, help="maker_plan용 MakerConfig json")
     p.set_defaults(func=cmd_mcp)
 
     args = parser.parse_args(argv)

@@ -32,12 +32,22 @@ TOOLS = [
     {"name": "kg_stats",
      "description": "그래프 통계(노드/엣지 kind별 개수, 레포 목록).",
      "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "maker_plan",
+     "description": "MAKER 루프 plan-only 실행 — 쿼리를 intent 분류·착지·영향분석해 MR 초안(계획)까지 생성. 실레포는 건드리지 않는다.",
+     "inputSchema": {"type": "object", "required": ["query"],
+                     "properties": {"query": {"type": "string"}}}},
 ]
 
 
 class KgMcpServer:
-    def __init__(self, kg_path: str):
+    def __init__(self, kg_path: str, config_path: str | None = None):
+        from pathlib import Path
+        from .kg.overlay import load_overlay, apply_overlay
         self.graph = Graph.load(kg_path)
+        self.config_path = config_path
+        overlay = load_overlay(Path(kg_path).parent / "overlay.json")
+        if overlay["node_overrides"] or overlay["custom_edges"]:
+            apply_overlay(self.graph, overlay)
 
     def _call_tool(self, name: str, args: dict) -> dict:
         if name == "kg_search":
@@ -57,6 +67,14 @@ class KgMcpServer:
             stats = self.graph.stats()
             stats["repos"] = sorted({n["repo"] for n in self.graph.nodes.values()})
             return stats
+        if name == "maker_plan":
+            from .config import MakerConfig
+            from .loop.pipeline import MakerLoop
+            config = (MakerConfig.from_file(self.config_path)
+                      if self.config_path else MakerConfig())
+            config.allow_write = False  # MCP 경유는 항상 plan-only 강제
+            loop = MakerLoop(config, graph=self.graph)
+            return loop.run(args["query"])
         return {"error": f"알 수 없는 툴: {name}"}
 
     def handle(self, message: dict) -> dict | None:
@@ -107,5 +125,5 @@ class KgMcpServer:
                 sys.stdout.flush()
 
 
-def main(kg_path: str) -> None:
-    KgMcpServer(kg_path).serve()
+def main(kg_path: str, config_path: str | None = None) -> None:
+    KgMcpServer(kg_path, config_path).serve()
