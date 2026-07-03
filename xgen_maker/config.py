@@ -40,6 +40,8 @@ class MakerConfig:
     preview_base: str = ""
     check_timeout: int = 600                               # 자동 테스트(checks) 타임아웃
     verbose: bool = True                                   # 진행 로그 실시간 출력
+    deploy_mode: str = "off"                               # off | dry_run | live (live=이중 인터록)
+    deploy_env: str = "dev"
     worklogs_dir: str = "worklogs"
 
     @property
@@ -48,9 +50,17 @@ class MakerConfig:
 
     @classmethod
     def from_file(cls, path: str | Path) -> "MakerConfig":
-        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        path = Path(path)
+        data = json.loads(path.read_text(encoding="utf-8"))
         known = {f.name for f in cls.__dataclass_fields__.values()}  # type: ignore[attr-defined]
-        return cls(**{k: v for k, v in data.items() if k in known})
+        config = cls(**{k: v for k, v in data.items() if k in known})
+        # 상대 경로는 config 파일 위치 기준으로 해석 — 어느 cwd에서든 maker 실행 가능
+        base = path.resolve().parent
+        if not Path(config.kg_path).is_absolute():
+            config.kg_path = str(base / config.kg_path)
+        if not Path(config.worklogs_dir).is_absolute():
+            config.worklogs_dir = str(base / config.worklogs_dir)
+        return config
 
 
 def is_protected_branch(name: str) -> bool:
