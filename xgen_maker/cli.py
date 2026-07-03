@@ -188,6 +188,11 @@ def cmd_mcp(args) -> None:
     mcp_main(args.kg, args.config)
 
 
+def cmd_chat(args) -> None:
+    from .chat import run_chat
+    run_chat(args.config)
+
+
 def main(argv: list[str] | None = None) -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -282,6 +287,10 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--kg", default="kg/merged.json")
     p.add_argument("--config", default=None, help="maker_plan용 MakerConfig json")
     p.set_defaults(func=cmd_mcp)
+
+    p = sub.add_parser("chat", help="대화형 터미널 (openxgen 스타일) — KG 1회 로드, 연속 쿼리")
+    p.add_argument("--config", default=None)
+    p.set_defaults(func=cmd_chat)
 
     args = parser.parse_args(argv)
     args.func(args)

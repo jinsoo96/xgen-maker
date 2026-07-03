@@ -43,8 +43,16 @@ tests/           unittest 35개
 ```powershell
 cd D:\xgen-maker
 pip install -e .        # → 어디서든 `maker` 명령 사용 가능
-maker run "쿼리" --config D:\xgen-maker\maker.observe.config.json   # 실시간 진행 로그 스트리밍
+maker chat --config D:\xgen-maker\maker.config.json                # 대화형 (openxgen 스타일, KG 1회 로드)
+maker run "쿼리" --config D:\xgen-maker\maker.observe.config.json   # 원샷, 실시간 진행 로그 스트리밍
 ```
+
+`maker chat` 안에서: 자연어 쿼리 = 루프 실행 · `/search` `/impact` `/stats` `/mode plan|observe|act` `/help` `/quit`.
+
+### openxgen 연동
+[jinsoo96/openxgen](https://github.com/jinsoo96/openxgen)(터미널 XGEN 코딩 에이전트)과 상보 —
+openxgen이 챗 표면·코딩, MAKER가 코드 지식그래프·개발 루프. openxgen MCP 탭에 MAKER MCP 서버를
+등록하면 에이전트가 `kg_search`/`kg_impact`/`maker_plan`을 쓴다. 상세: [docs/OPENXGEN-INTEGRATION.md](docs/OPENXGEN-INTEGRATION.md).
 
 루프 순서: 쿼리 → intent → KG착지 → 레거시확인 → 브랜치 → 에이전트 구현 →
 **checks(자동 검증: py_compile+pytest+node test — 실패 시 MR 차단)** → judge 게이트 → MR → KG갱신.
