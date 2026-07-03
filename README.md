@@ -87,9 +87,10 @@ python -m xgen_maker kg tour --repo xgen-core --kg kg\merged.json --out kg\TOUR-
 python -m xgen_maker kg dashboard --kg kg\merged.json     # --no-open 으로 자동열기 끄기
 python -m xgen_maker kg domains --kg kg\merged.json
 
-# 4) 검색·영향분석
+# 4) 검색·영향분석·체인검색
 python -m xgen_maker kg search "ontology graph" --kg kg\merged.json
 python -m xgen_maker kg impact "xgen-core:main.py" --kg kg\merged.json
+python -m xgen_maker kg chain "ontology graph data" --kg kg\merged.json   # 단일매치 아닌 워크플로우 체인(FE→BE)
 
 # 5) MAKER 루프 (기본 = plan-only: 실레포 미접촉, MR 초안까지)
 python -m xgen_maker run "ontology graph 조회 API 버그 고쳐줘" --config maker.config.json

@@ -19,7 +19,7 @@ from pathlib import Path
 from .config import MakerConfig
 from .kg.graph import Graph
 from .kg.build import build_repo, merge_and_link
-from .kg.search import search, impact
+from .kg.search import search, impact, retrieve_chain
 from .kg.dashboard import render_dashboard
 
 
@@ -85,6 +85,19 @@ def cmd_kg_search(args) -> None:
     graph = Graph.load(args.kg)
     for hit in search(graph, args.query, k=args.k):
         print(f"{hit['score']:>6}  [{hit['kind']}] {hit['name']}  {hit['repo']}:{hit['path']}")
+
+
+def cmd_kg_chain(args) -> None:
+    graph = Graph.load(args.kg)
+    result = retrieve_chain(graph, args.query, k=args.k, hops=args.hops)
+    print(f"[seeds] {len(result['seeds'])}")
+    for hit in result["seeds"]:
+        print(f"  {hit['score']:>6}  [{hit['kind']}] {hit['name']}  {hit['repo']}:{hit['path']}")
+    print(f"[chain — RRF 융합, 관계: {list(result['by_relation'])}]")
+    for node in result["chain"]:
+        if node["hop"] > 0:
+            print(f"  hop{node['hop']} ({'/'.join(node['relation'])})  [{node['kind']}] "
+                  f"{node['name']}  {node['repo']}:{node['path']}")
 
 
 def cmd_kg_impact(args) -> None:
@@ -293,6 +306,13 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--kg", default="kg/merged.json")
     p.add_argument("--depth", type=int, default=3)
     p.set_defaults(func=cmd_kg_impact)
+
+    p = kg_sub.add_parser("chain", help="체인 검색 — 단일 매치가 아니라 워크플로우 체인(graph-tool-call wRRF)")
+    p.add_argument("query")
+    p.add_argument("--kg", default="kg/merged.json")
+    p.add_argument("-k", type=int, default=6)
+    p.add_argument("--hops", type=int, default=2)
+    p.set_defaults(func=cmd_kg_chain)
 
     p = kg_sub.add_parser("enrich", help="의미층 주입 (결정론 + LLM 요약)")
     p.add_argument("--kg", default="kg/merged.json")

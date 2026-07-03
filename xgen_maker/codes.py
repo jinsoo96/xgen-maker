@@ -23,6 +23,7 @@ class Event(str, Enum):
     KG_SEARCH = "kg_search"
     ANSWER = "answer"
     IMPACT = "impact"
+    CHAIN = "chain"
     LEGACY_CHECK = "legacy_check"
     PLAN_ONLY = "plan_only"
     BRANCH = "branch"

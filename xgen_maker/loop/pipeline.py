@@ -12,7 +12,7 @@ from .. import llm
 from ..codes import Outcome, ErrorCode
 from ..config import MakerConfig
 from ..kg.graph import Graph
-from ..kg.search import search, impact
+from ..kg.search import search, impact, retrieve_chain
 from ..kg.build import refresh_files
 from .intent import classify
 from .git_ops import GitRepo, GitOpsError
@@ -115,6 +115,12 @@ class MakerLoop:
         impact_nodes = impact(self.graph, top["id"], depth=3)
         journal.event("impact", "ok", target=top["id"], affected=len(impact_nodes))
 
+        # ③-2 체인 검색 (graph-tool-call wRRF 차용) — 착지 파일의 워크플로우 체인
+        chain_result = retrieve_chain(self.graph, query, k=6, hops=2)
+        chain_nodes = chain_result["chain"]
+        journal.event("chain", "ok", nodes=len(chain_nodes),
+                      relations=list(chain_result["by_relation"].keys()))
+
         # ④ 레거시 확인
         legacy_notes = self._legacy_notes(landing, repo_path)
         journal.event("legacy_check", "ok" if legacy_notes else "skipped",
@@ -152,8 +158,8 @@ class MakerLoop:
             return report
         journal.event("branch", "ok", branch=branch, base=base_branch)
 
-        # ⑥ 구현 (코딩에이전트)
-        prompt = build_prompt(query, intent, landing, legacy_notes)
+        # ⑥ 구현 (코딩에이전트) — 착지점 + 워크플로우 체인 공급
+        prompt = build_prompt(query, intent, landing, legacy_notes, chain=chain_nodes)
         agent_result = run_agent(repo_path, prompt, journal.dir,
                                  config.agent_cmd, config.agent_timeout)
         journal.event("implement", "ok" if agent_result["ok"] else "fail",

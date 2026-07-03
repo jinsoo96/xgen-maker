@@ -16,13 +16,23 @@ RULES = """[규칙 — 반드시 준수]
 4. 커밋은 하지 않는다(루프가 수행)."""
 
 
-def build_prompt(query: str, intent: str, landing: list[dict], legacy_notes: str) -> str:
+def build_prompt(query: str, intent: str, landing: list[dict], legacy_notes: str,
+                 chain: list[dict] | None = None) -> str:
     landing_lines = "\n".join(
         f"- [{n['kind']}] {n['name']} — {n['repo']}:{n['path']}:{n.get('line', 0)}"
         for n in landing[:8])
+    chain_block = ""
+    if chain:
+        chain_lines = "\n".join(
+            f"- [{c['kind']}] {c['name']} ({'/'.join(c['relation'])}, hop {c['hop']}) "
+            f"— {c['repo']}:{c['path']}"
+            for c in chain[:12] if c.get("hop", 0) > 0)
+        if chain_lines:
+            chain_block = ("\n[연결된 워크플로우 체인 — 착지점과 import/call/endpoint로 이어진 곳. "
+                           "같이 봐야 회귀를 막는다]\n" + chain_lines + "\n")
     return (f"[요청]\n{query}\n\n[intent] {intent}\n\n"
-            f"[지식그래프 착지점 — 여기부터 조사]\n{landing_lines}\n\n"
-            f"[레거시 확인 메모]\n{legacy_notes or '(없음)'}\n\n{RULES}\n"
+            f"[지식그래프 착지점 — 여기부터 조사]\n{landing_lines}\n"
+            f"{chain_block}\n[레거시 확인 메모]\n{legacy_notes or '(없음)'}\n\n{RULES}\n"
             f"위 요청을 이 저장소에서 구현하라.")
 
 
