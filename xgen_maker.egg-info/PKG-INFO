@@ -1,5 +1,0 @@
-Metadata-Version: 2.4
-Name: xgen-maker
-Version: 0.1.0
-Summary: XGEN MAKER - query-driven dev automation: code knowledge graph + harness loop (query -> branch -> implement -> checks -> judge -> MR)
-Requires-Python: >=3.10

@@ -14,3 +14,6 @@ _ua-eval/ua-run.log
 # 로컬 임시
 *.log
 .tmp/
+
+# pip install -e . 빌드 아티팩트
+xgen_maker.egg-info/
