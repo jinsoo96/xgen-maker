@@ -56,6 +56,7 @@ class TestPipelineE2E(unittest.TestCase):
             mode="observe",
             allow_write=True,
             llm_enabled=False,
+            verbose=False,
             agent_cmd=f'"{sys.executable}" "{stub}"',
             worklogs_dir=str(self.base / "worklogs"))
 
@@ -110,6 +111,20 @@ class TestPipelineE2E(unittest.TestCase):
         self.assertEqual(report["outcome"], "answered")
         self.assertIn("farewell", report["answer"])
         self.assertEqual(self._current_branch(), "trunk")
+
+    def test_broken_syntax_blocked_by_checks(self):
+        stub_bad = self.base / "stub_bad.py"
+        stub_bad.write_text(
+            'import pathlib\n'
+            'pathlib.Path("app.py").write_text("def greet(:\\n    return\\n", encoding="utf-8")\n'
+            'print("stub: wrote broken syntax")\n', encoding="utf-8")
+        self.config.agent_cmd = f'"{sys.executable}" "{stub_bad}"'
+        loop = MakerLoop(self.config)
+        report = loop.run("greet 함수 버그 고쳐줘")
+        self.assertEqual(report["outcome"], "checks_failed")
+        self.assertEqual(report["checks"]["py_syntax"], "failed")
+        # MR 초안이 만들어지지 않아야 함 (게이트 차단)
+        self.assertNotIn("mr_draft", report)
 
     def test_dirty_worktree_blocks_branch(self):
         (self.repo_root / "dirty.txt").write_text("x", encoding="utf-8")

@@ -20,8 +20,9 @@ def slugify(text: str, fallback: str = "task") -> str:
 
 
 class Journal:
-    def __init__(self, worklogs_dir: str | Path, query: str):
+    def __init__(self, worklogs_dir: str | Path, query: str, verbose: bool = False):
         self.slug = slugify(query)
+        self.verbose = verbose
         stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d-%H%M%S")
         self.dir = Path(worklogs_dir) / f"{stamp}-{self.slug}"
         self.dir.mkdir(parents=True, exist_ok=True)
@@ -36,6 +37,15 @@ class Journal:
         self.events.append(record)
         with self.file.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+        if self.verbose:
+            # 실시간 진행 로그 — "지금 뭘 하는지"를 사람이 따라 읽는 표면
+            extras = json.dumps(data, ensure_ascii=False, default=str) if data else ""
+            if len(extras) > 220:
+                extras = extras[:220] + "…"
+            mark = {"ok": "✓", "pass": "✓", "fail": "✗", "empty": "·",
+                    "skipped": "·", "observe": "◇"}.get(status, "▸")
+            print(f"{mark} [{record['iso'][11:19]}] {step:<14} {status:<8} {extras}",
+                  flush=True)
 
     def close(self, outcome: str) -> Path:
         self.event("session_end", outcome)

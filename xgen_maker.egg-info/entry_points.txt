@@ -1,0 +1,2 @@
+[console_scripts]
+maker = xgen_maker.cli:main

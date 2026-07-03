@@ -19,6 +19,7 @@ from .implement import build_prompt, run_agent
 from .judge import judge
 from .journal import Journal
 from .mr import build_mr_draft, save_draft, create_gitlab_mr
+from .testing import run_checks
 from .verify import verify
 
 
@@ -70,7 +71,7 @@ class MakerLoop:
     # ---- 메인 ----
     def run(self, query: str) -> dict:
         config = self.config
-        journal = Journal(config.worklogs_dir, query)
+        journal = Journal(config.worklogs_dir, query, verbose=config.verbose)
         report: dict = {"query": query, "session_dir": str(journal.dir)}
 
         # ② intent
@@ -163,13 +164,25 @@ class MakerLoop:
         changed = repo_git.staged_files(base_branch)
         diff_text = repo_git.staged_diff(base_branch)
 
-        # ⑦ 로컬 검증 (리소스 가드 내장)
+        # ⑦-1 자동 검증(checks) — 회귀를 기계가 먼저 잡는다. 실패 시 MR 진행 차단.
+        checks = run_checks(repo_path, changed, test_timeout=config.check_timeout)
+        journal.event("checks", "fail" if checks["blocked"] else "ok", **checks["summary"])
+        report["checks"] = checks["summary"]
+        if checks["blocked"]:
+            failed_detail = [r for r in checks["checks"] if r["status"] == "failed"]
+            journal.event("checks_detail", "fail", detail=failed_detail)
+            journal.close("checks_failed")
+            report.update({"outcome": "checks_failed", "failed": failed_detail,
+                           "note": f"브랜치 {branch} 보존 — 검증 실패 원인 조사용"})
+            return report
+
+        # ⑦-2 로컬 프리뷰 검증 (리소스 가드 내장)
         verify_report = verify(config.enable_verify, [repo], journal.dir, config.preview_base)
         journal.event("verify", "skipped" if verify_report.get("skipped") else "ok",
                       **verify_report)
 
         # ⑧ judge 게이트
-        judge_result = judge(config, query, diff_text, changed)
+        judge_result = judge(config, query, diff_text, changed, checks=checks["summary"])
         journal.event("judge", "pass" if judge_result["passed"] else "fail", **judge_result)
         report["judge"] = judge_result
         if not judge_result["passed"]:
@@ -182,7 +195,8 @@ class MakerLoop:
         diff_stat = "\n".join(diff_text.splitlines()[:60])
         title, body = build_mr_draft(query, intent, branch, config.target_branch,
                                      changed, diff_stat, impact_nodes, judge_result,
-                                     agent_summary=agent_result["output"][:500])
+                                     agent_summary=agent_result["output"][:500],
+                                     checks=checks["checks"])
         draft = save_draft(journal.dir, title, body)
         commit = repo_git.commit_all(title, body)
         journal.event("commit", "ok", sha=commit[:12], files=len(changed))

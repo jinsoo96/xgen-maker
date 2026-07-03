@@ -17,7 +17,8 @@ from ..config import MakerConfig
 def build_mr_draft(query: str, intent: str, branch: str, target_branch: str,
                    changed_files: list[str], diff_stat: str,
                    impact_nodes: list[dict], judge_result: dict,
-                   agent_summary: str = "") -> tuple[str, str]:
+                   agent_summary: str = "",
+                   checks: list[dict] | None = None) -> tuple[str, str]:
     """반환 = (title, body_markdown)."""
     title_prefix = {"bug": "fix", "feature": "feat", "refactor": "refactor"}.get(intent, "chore")
     title = f"{title_prefix}: {query[:80]}"
@@ -45,6 +46,9 @@ def build_mr_draft(query: str, intent: str, branch: str, target_branch: str,
 
 ## 영향 (지식그래프 분석)
 {impact_lines}
+
+## 자동 검증 (checks)
+{chr(10).join(f"- {c['name']}: **{c['status']}**" + (f" — {c.get('reason', '')}" if c.get('reason') else "") for c in (checks or [])) or "- (미실행)"}
 
 ## 품질 게이트
 - judge: **{judge_result.get('score')}** (θ={judge_result.get('theta')}, {judge_result.get('source')})

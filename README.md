@@ -38,6 +38,17 @@ worklogs/        세션 journal
 tests/           unittest 35개
 ```
 
+## 설치 (정식 CLI)
+
+```powershell
+cd D:\xgen-maker
+pip install -e .        # → 어디서든 `maker` 명령 사용 가능
+maker run "쿼리" --config D:\xgen-maker\maker.observe.config.json   # 실시간 진행 로그 스트리밍
+```
+
+루프 순서: 쿼리 → intent → KG착지 → 레거시확인 → 브랜치 → 에이전트 구현 →
+**checks(자동 검증: py_compile+pytest+node test — 실패 시 MR 차단)** → judge 게이트 → MR → KG갱신.
+
 ## 빠른 시작
 
 ```powershell

@@ -38,6 +38,8 @@ class MakerConfig:
     target_branch: str = "develop"
     enable_verify: bool = False                            # 로컬 스택+Playwright 검증 (리소스 가드로 기본 off)
     preview_base: str = ""
+    check_timeout: int = 600                               # 자동 테스트(checks) 타임아웃
+    verbose: bool = True                                   # 진행 로그 실시간 출력
     worklogs_dir: str = "worklogs"
 
     @property
