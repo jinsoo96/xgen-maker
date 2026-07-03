@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .. import llm
+from ..codes import Outcome, ErrorCode
 from ..config import MakerConfig
 from ..kg.graph import Graph
 from ..kg.search import search, impact
@@ -146,7 +147,8 @@ class MakerLoop:
         except GitOpsError as error:
             journal.event("branch", "fail", error=str(error))
             journal.close("branch_failed")
-            report.update({"outcome": "branch_failed", "error": str(error)})
+            report.update({"outcome": Outcome.BRANCH_FAILED.value,
+                           "code": ErrorCode.GIT_DIRTY.value, "error": str(error)})
             return report
         journal.event("branch", "ok", branch=branch, base=base_branch)
 
@@ -158,7 +160,9 @@ class MakerLoop:
                       error=agent_result.get("error"))
         if not agent_result["ok"]:
             journal.close("implement_failed")
-            report.update({"outcome": "implement_failed", "error": agent_result.get("error")})
+            report.update({"outcome": Outcome.IMPLEMENT_FAILED.value,
+                           "code": ErrorCode.AGENT_EXIT.value,
+                           "error": agent_result.get("error")})
             return report
 
         repo_git.stage_all()
@@ -173,7 +177,11 @@ class MakerLoop:
             failed_detail = [r for r in checks["checks"] if r["status"] == "failed"]
             journal.event("checks_detail", "fail", detail=failed_detail)
             journal.close("checks_failed")
-            report.update({"outcome": "checks_failed", "failed": failed_detail,
+            syntax_failed = any(r["name"] == "py_syntax" for r in failed_detail)
+            report.update({"outcome": Outcome.CHECKS_FAILED.value,
+                           "code": (ErrorCode.CHECKS_SYNTAX if syntax_failed
+                                    else ErrorCode.CHECKS_TEST).value,
+                           "failed": failed_detail,
                            "note": f"브랜치 {branch} 보존 — 검증 실패 원인 조사용"})
             return report
 
@@ -188,7 +196,9 @@ class MakerLoop:
         report["judge"] = judge_result
         if not judge_result["passed"]:
             journal.close("judge_failed")
-            report.update({"outcome": "judge_failed",
+            report.update({"outcome": Outcome.JUDGE_FAILED.value,
+                           "code": (ErrorCode.JUDGE_INFRA_VETO.value if judge_result.get("veto")
+                                    else ErrorCode.JUDGE_BELOW_THETA.value),
                            "note": f"브랜치 {branch}는 조사용으로 보존"})
             return report
 
@@ -210,7 +220,9 @@ class MakerLoop:
             except GitOpsError as error:
                 journal.event("push", "fail", error=str(error))
                 journal.close("push_failed")
-                report.update({"outcome": "push_failed", "error": str(error)})
+                report.update({"outcome": Outcome.PUSH_FAILED.value,
+                               "code": ErrorCode.GIT_PROTECTED_PUSH.value,
+                               "error": str(error)})
                 return report
             mr_result = create_gitlab_mr(config, repo, branch, title, body)
             journal.event("mr_create", "ok" if mr_result["ok"] else "fail", **mr_result)

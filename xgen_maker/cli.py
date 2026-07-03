@@ -68,8 +68,17 @@ def cmd_kg_merge(args) -> None:
 
 def cmd_kg_dashboard(args) -> None:
     graph = Graph.load(args.kg)
+    _apply_overlay_and_save(graph, args.kg) if False else None  # 오버레이는 로드 시 별도 적용
+    from .kg.overlay import load_overlay, apply_overlay
+    overlay = load_overlay(_overlay_path(args.kg))
+    if overlay["node_overrides"] or overlay["custom_edges"]:
+        apply_overlay(graph, overlay)
     out = render_dashboard(graph, args.out, max_nodes=args.max_nodes)
     print(f"[kg dashboard] {out} ({out.stat().st_size:,} bytes)")
+    if not args.no_open:
+        import webbrowser
+        webbrowser.open(out.resolve().as_uri())
+        print(f"[kg dashboard] 브라우저에서 열기 → {out.resolve().as_uri()}")
 
 
 def cmd_kg_search(args) -> None:
@@ -109,6 +118,9 @@ def cmd_kg_domains(args) -> None:
     out = render_domain_map(graph, args.out)
     print(f"[kg domains] 도메인 {created}개 생성 → {args.kg}")
     print(f"[kg domains] 도메인 맵 → {out} ({out.stat().st_size:,} bytes)")
+    if not args.no_open:
+        import webbrowser
+        webbrowser.open(out.resolve().as_uri())
 
 
 def cmd_kg_tour(args) -> None:
@@ -217,6 +229,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--kg", default="kg/merged.json")
     p.add_argument("--out", default="kg/dashboard.html")
     p.add_argument("--max-nodes", type=int, default=1200)
+    p.add_argument("--no-open", action="store_true", help="브라우저 자동 열기 비활성화")
     p.set_defaults(func=cmd_kg_dashboard)
 
     p = kg_sub.add_parser("search")
@@ -241,6 +254,7 @@ def main(argv: list[str] | None = None) -> None:
     p = kg_sub.add_parser("domains", help="도메인/플로우 뷰 생성 (UI/UX KG)")
     p.add_argument("--kg", default="kg/merged.json")
     p.add_argument("--out", default="kg/domain-map.html")
+    p.add_argument("--no-open", action="store_true")
     p.set_defaults(func=cmd_kg_domains)
 
     p = kg_sub.add_parser("tour", help="가이드 투어(의존성 읽기 순서) 생성")

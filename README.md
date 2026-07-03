@@ -75,8 +75,9 @@ python -m xgen_maker kg enrich --kg kg\merged.json --config maker.config.json --
 python -m xgen_maker kg domains --kg kg\merged.json --out kg\domain-map.html
 python -m xgen_maker kg tour --repo xgen-core --kg kg\merged.json --out kg\TOUR-xgen-core.md
 
-# 3) 확인가능 — 대시보드/도메인맵 (브라우저로 열기)
-python -m xgen_maker kg dashboard --kg kg\merged.json --out kg\dashboard.html
+# 3) 확인가능 — 대시보드/도메인맵 (실행하면 브라우저 자동 오픈, 노드 클릭 시 의미층 요약 표시)
+python -m xgen_maker kg dashboard --kg kg\merged.json     # --no-open 으로 자동열기 끄기
+python -m xgen_maker kg domains --kg kg\merged.json
 
 # 4) 검색·영향분석
 python -m xgen_maker kg search "ontology graph" --kg kg\merged.json
