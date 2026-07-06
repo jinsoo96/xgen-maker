@@ -57,12 +57,25 @@ def cmd_kg_build(args) -> None:
               f" scope={scope or '-'} → {out_path}")
 
 
+def cmd_kg_infra(args) -> None:
+    from .kg.extract_infra import extract_infra
+    graph = extract_infra(args.path)
+    out = args.out or "kg/xgen-infra.repo.json"
+    graph.save(out)
+    print(f"[kg infra] {json.dumps(graph.stats()['nodes_by_kind'], ensure_ascii=False)} → {out}")
+    for p in graph.nodes_by_kind("deploy_project"):
+        print(f"  · {p['name']}: ns={p['meta']['namespace']} domains={p['meta']['domains']}")
+
+
 def cmd_kg_merge(args) -> None:
+    from .kg.extract_infra import link_infra_to_code
     graphs = [Graph.load(p) for p in args.inputs]
     merged, links = merge_and_link(graphs)
+    infra_links = link_infra_to_code(merged)  # helm_app ↔ 코드 레포 연결
+    merged.meta["infra_code_links"] = infra_links
     merged.save(args.out)
     print(f"[kg merge] {json.dumps(merged.stats(), ensure_ascii=False)}")
-    print(f"[kg merge] crossrepo resolves_to 링크 {links}개 → {args.out}")
+    print(f"[kg merge] crossrepo {links} · infra→code {infra_links} 링크 → {args.out}")
     _apply_overlay_and_save(merged, args.out)
 
 
@@ -382,6 +395,11 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("inputs", nargs="+")
     p.add_argument("--out", default="kg/merged.json")
     p.set_defaults(func=cmd_kg_merge)
+
+    p = kg_sub.add_parser("infra", help="인프라 KG 추출(ArgoCD·Helm·도메인) — LLM이 배포 토폴로지 인지")
+    p.add_argument("--path", default="D:\\xgen2.0\\xgen-infra")
+    p.add_argument("--out", default="kg/xgen-infra.repo.json")
+    p.set_defaults(func=cmd_kg_infra)
 
     p = kg_sub.add_parser("dashboard")
     p.add_argument("--kg", default="kg/merged.json")

@@ -225,6 +225,12 @@ class MakerLoop:
                        "reason": "enable_deploy_test=False"}
         if config.enable_deploy_test:
             from .deploy import deploy_render_test
+            from ..kg.extract_infra import deploy_targets
+            targets = deploy_targets(self.graph, repo)
+            if targets:
+                journal.event("deploy_test", "targets",
+                              domains=[t["domain"] for t in targets if t["domain"]])
+                report["deploy_targets"] = targets
             deploy_test = deploy_render_test(config, repo)
             journal.event("deploy_test", deploy_test["status"], **deploy_test)
             report["deploy_test"] = deploy_test

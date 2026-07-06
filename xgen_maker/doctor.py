@@ -224,6 +224,19 @@ def run_doctor(config_path: str | None = None) -> bool:
     except Exception as e:
         check.warn("UI/UX 검증", str(e)[:80])
 
+    # 목적 6-1: 인프라 KG (LLM이 배포 토폴로지 인지)
+    if graph is not None:
+        projects = graph.nodes_by_kind("deploy_project")
+        apps = graph.nodes_by_kind("helm_app")
+        if projects:
+            from .kg.extract_infra import deploy_targets
+            tgt = deploy_targets(graph, "xgen-core")
+            domains = sorted({t["domain"] for t in tgt if t["domain"]})
+            check.ok("인프라 KG", f"배포 프로젝트 {len(projects)}·helm앱 {len(apps)} "
+                     f"· xgen-core→도메인 {len(domains)}개")
+        else:
+            check.warn("인프라 KG", "인프라 미포함 — maker kg infra 후 재병합")
+
     # 목적 6-2: 배포 렌더 검증 (상사님 tmp 방식 — MR 전 배포통과 확인)
     try:
         from .loop.deploy import _find_helm, deploy_render_test

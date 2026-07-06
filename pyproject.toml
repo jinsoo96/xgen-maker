@@ -12,6 +12,8 @@ dependencies = []
 
 [project.optional-dependencies]
 harness = ["xgen-harness>=1.23"]
+infra = ["PyYAML>=6.0"]        # 인프라 KG(ArgoCD·Helm YAML 파싱)
+ui = ["Pillow>=10.0"]          # UI/UX 픽셀 diff
 
 [project.scripts]
 maker = "xgen_maker.cli:main"
