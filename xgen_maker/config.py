@@ -55,6 +55,7 @@ class MakerConfig:
     enable_deploy_test: bool = False                       # MR 전 배포 렌더 검증(T1, 상사님 tmp 방식)
     infra_path: str = "D:\\xgen2.0\\xgen-infra"           # Helm 차트 위치
     worklogs_dir: str = "worklogs"
+    learnings_dir: str = "learnings"                       # 작업 학습 메모리(실수 방지 참고)
 
     @property
     def gitlab_token(self) -> str:
@@ -79,6 +80,8 @@ class MakerConfig:
             config.kg_path = str(base / config.kg_path)
         if not Path(config.worklogs_dir).is_absolute():
             config.worklogs_dir = str(base / config.worklogs_dir)
+        if not Path(config.learnings_dir).is_absolute():
+            config.learnings_dir = str(base / config.learnings_dir)
         # config에 provider가 명시되지 않았으면 저장된 로그인(auth)을 따른다
         if "llm_base" not in data or "llm_model" not in data:
             config.apply_auth()

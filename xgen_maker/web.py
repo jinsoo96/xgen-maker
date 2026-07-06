@@ -17,33 +17,48 @@ from .kg.graph import Graph
 
 _PAGE = """<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
 <title>XGEN MAKER</title><style>
- *{box-sizing:border-box} body{margin:0;font:14px/1.5 'Segoe UI',sans-serif;background:#0b1220;color:#e5e7eb;height:100vh;display:flex;flex-direction:column}
- header{padding:10px 18px;border-bottom:1px solid #1f2937;display:flex;align-items:center;gap:16px}
- header b{font-size:16px;color:#fbbf24} header .info{color:#9ca3af;font-size:12px}
- header .mode{margin-left:auto;font-size:12px;color:#9ca3af}
- nav{display:flex;gap:2px;padding:0 18px;border-bottom:1px solid #1f2937;background:#0f172a}
- nav button{padding:9px 16px;background:none;border:none;border-bottom:2px solid transparent;color:#9ca3af;cursor:pointer;font-size:13px}
- nav button.on{color:#fbbf24;border-bottom-color:#fbbf24}
- .tab{flex:1;overflow-y:auto;padding:14px 18px;display:none} .tab.on{display:block}
+ /* 디자인 토큰 — CocoRoF/Geny 다크 라벤더 팔레트 차용 (muted 그라디언트·soft glow, 눈 안 아프게) */
+ :root{--radius:10px;--radius-lg:16px;--t-fast:120ms ease;--t:200ms ease;
+  --primary:#8573b8;--primary-hover:#74639f;--primary-subtle:rgba(141,121,201,.13);
+  --success:#4ade80;--warning:#fbbf24;--danger:#f47171;
+  --bg:#1a1726;--bg2:#1f1b2d;--bg3:#28233a;--card:#1f1b2d;--hover:#28233a;
+  --text:#efecf6;--text2:#aca6bf;--muted:#797292;--border:#2f2942;--border2:#3c3553;
+  --grad:linear-gradient(135deg,#6f64a6 0%,#897ab4 100%);--grad-text:linear-gradient(118deg,#8b7cbe,#9b8dc8 55%,#ab9ed2);
+  --hero:radial-gradient(120% 130% at 82% -10%,rgba(133,115,184,.09),rgba(133,115,184,.028) 36%,transparent 64%);
+  --glow:0 0 16px rgba(133,115,184,.14);--shadow:0 4px 16px rgba(0,0,0,.5)}
+ *{box-sizing:border-box} body{margin:0;font:14px/1.5 'Segoe UI',sans-serif;background:var(--bg);background-image:var(--hero);color:var(--text);height:100vh;display:flex;flex-direction:column}
+ header{padding:12px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:16px}
+ header b{font-size:16px;font-weight:700;background:var(--grad-text);-webkit-background-clip:text;background-clip:text;color:transparent}
+ header .info{color:var(--text2);font-size:12px} header .mode{margin-left:auto;font-size:12px;color:var(--muted)}
+ nav{display:flex;gap:4px;padding:0 20px;border-bottom:1px solid var(--border);background:var(--bg2)}
+ nav button{padding:10px 16px;background:none;border:none;border-bottom:2px solid transparent;color:var(--text2);cursor:pointer;font-size:13px;transition:color var(--t-fast)}
+ nav button:hover{color:var(--text)} nav button.on{color:var(--text);border-bottom-color:var(--primary)}
+ .tab{flex:1;overflow-y:auto;padding:16px 20px;display:none} .tab.on{display:block}
  #log{font-family:Consolas,monospace;font-size:13px;min-height:200px}
- .ev{padding:3px 0;border-bottom:1px solid #111827;white-space:pre-wrap;word-break:break-all}
- .ok{color:#34d399} .fail{color:#f87171} .info{color:#9ca3af} .step{color:#60a5fa;font-weight:600}
- .result{margin-top:10px;padding:10px;background:#1f2937;border-radius:8px;border-left:3px solid #fbbf24}
- form{display:flex;gap:8px;padding:14px 18px;border-top:1px solid #1f2937;background:#0f172a}
- input[type=text]{flex:1;padding:10px 12px;background:#1f2937;border:1px solid #374151;color:#e5e7eb;border-radius:8px;font-size:14px}
- select,button.act{padding:10px 14px;background:#374151;border:none;color:#e5e7eb;border-radius:8px;cursor:pointer}
- button.act{background:#2563eb;font-weight:600} button.act:disabled{opacity:.5}
- table{width:100%;border-collapse:collapse;font-size:13px} th,td{text-align:left;padding:6px 10px;border-bottom:1px solid #1f2937}
- th{color:#9ca3af;font-weight:600} tr:hover td{background:#111827}
- .badge{padding:1px 7px;border-radius:4px;font-size:11px} .merged{background:#065f46} .opened{background:#1e40af}
- .closed{background:#4b5563} .Synced{background:#065f46} .OutOfSync{background:#78350f} .Healthy{color:#34d399}
- a{color:#60a5fa} h3{color:#fbbf24;margin:14px 0 8px;font-size:14px} .muted{color:#6b7280}
+ .ev{padding:3px 0;border-bottom:1px solid var(--border);white-space:pre-wrap;word-break:break-all}
+ .ok{color:var(--success)} .fail{color:var(--danger)} .info{color:var(--text2)} .step{color:var(--primary);font-weight:600}
+ .result{margin-top:12px;padding:12px 14px;background:var(--card);border-radius:var(--radius);border-left:3px solid var(--primary);box-shadow:var(--glow)}
+ form{display:flex;gap:10px;padding:14px 20px;border-top:1px solid var(--border);background:var(--bg2)}
+ input[type=text]{flex:1;padding:11px 14px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);border-radius:var(--radius);font-size:14px;transition:border var(--t-fast)}
+ input[type=text]:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-subtle)}
+ select{padding:11px 12px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);border-radius:var(--radius);cursor:pointer}
+ button.act{padding:11px 20px;background:var(--grad);border:none;color:#fff;border-radius:var(--radius);cursor:pointer;font-weight:600;box-shadow:var(--glow);transition:transform var(--t-fast)}
+ button.act:hover{transform:translateY(-1px)} button.act:disabled{opacity:.5;transform:none}
+ table{width:100%;border-collapse:collapse;font-size:13px} th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--border)}
+ th{color:var(--text2);font-weight:600} tr:hover td{background:var(--hover)}
+ .badge{padding:2px 8px;border-radius:6px;font-size:11px;font-weight:500} .merged{background:#2f5741;color:#8ff0b8}
+ .opened{background:#3a3564;color:#c9b8ff} .closed{background:#3c3553;color:var(--text2)}
+ .Synced{background:#2f5741;color:#8ff0b8} .OutOfSync{background:#5c4326;color:#f0c88a} .Healthy{color:var(--success)}
+ .pitfall{background:#5c2b2b;color:#f0a0a0} .fix{background:#2f5741;color:#8ff0b8} .convention{background:#3a3564;color:#c9b8ff} .note{background:#3c3553;color:var(--text2)}
+ a{color:#a898da;text-decoration:none} a:hover{text-decoration:underline}
+ h3{margin:16px 0 8px;font-size:14px;background:var(--grad-text);-webkit-background-clip:text;background-clip:text;color:transparent} .muted{color:var(--muted)}
 </style></head><body>
 <header><b>⚒ XGEN MAKER</b><span class="info">CLI(maker run) = 이 대시보드. 같은 엔진·같은 로그·같은 결과.</span>
  <span class="mode" id="mode"></span></header>
 <nav>
  <button class="on" data-t="run">실행</button>
  <button data-t="history">작업 이력</button>
+ <button data-t="learn">학습</button>
  <button data-t="mrs">MR</button>
  <button data-t="deploy">배포 상태</button>
 </nav>
@@ -51,6 +66,7 @@ _PAGE = """<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
  <div id="log"><div class="ev info">쿼리를 입력하면 MAKER 루프가 돕니다. 진행 로그가 실시간으로 흐르고, 결과가 아래에 뜹니다.</div></div>
 </div>
 <div class="tab" id="tab-history"><div class="muted">불러오는 중…</div></div>
+<div class="tab" id="tab-learn"><div class="muted">불러오는 중…</div></div>
 <div class="tab" id="tab-mrs"><div class="muted">불러오는 중…</div></div>
 <div class="tab" id="tab-deploy"><div class="muted">불러오는 중…</div></div>
 <form id="f"><input type="text" id="q" placeholder="예: 온톨로지 그래프 재빌드 후 안 바뀌는 버그 고쳐줘" autofocus>
@@ -74,6 +90,12 @@ function render(t){
  if(t==='history') fetch('/api/history').then(r=>r.json()).then(d=>{
   el.innerHTML='<h3>MAKER 작업 이력</h3><table><tr><th>결과</th><th>쿼리</th><th>브랜치</th><th>env</th><th>MR</th></tr>'+
    d.sessions.map(s=>`<tr><td><span class="badge ${s.outcome}">${esc(s.outcome)}</span></td><td>${esc(s.query).slice(0,60)}</td><td class="muted">${esc(s.branch)}</td><td>${esc(s.env)}</td><td>${s.mr?`<a href="${esc(s.mr)}" target=_blank>MR</a>`:''}</td></tr>`).join('')+'</table>';});
+ if(t==='learn') fetch('/api/learnings').then(r=>r.json()).then(d=>{
+  let h='<h3>작업 학습 메모리 <span class=muted>(하네스가 다음 작업 시 참고 — 실수 방지)</span></h3>';
+  if(!d.learnings.length){h+='<div class=muted>아직 없음. 작업이 쌓이면 실패/성공 교훈이 자동 기록됩니다.</div>';}
+  else h+='<table><tr><th>종류</th><th>레포</th><th>영역</th><th>교훈</th></tr>'+
+   d.learnings.map(e=>`<tr><td><span class="badge ${esc(e.kind)}">${esc(e.kind)}</span></td><td class=muted>${esc(e.repo)}</td><td class=muted>${esc(e.area)}</td><td>${esc(e.note)}</td></tr>`).join('')+'</table>';
+  el.innerHTML=h;});
  if(t==='mrs') fetch('/api/mrs').then(r=>r.json()).then(d=>{
   const row=m=>`<tr><td>!${m.iid}</td><td><span class="badge ${m.state}">${m.state}</span></td><td>${esc(m.source)}→${esc(m.target)}</td><td>${esc(m.title).slice(0,50)}</td><td><a href="${esc(m.url)}" target=_blank>열기</a></td></tr>`;
   el.innerHTML='<h3>MAKER가 만든 MR</h3><table><tr><th>#</th><th>상태</th><th>브랜치</th><th>제목</th><th></th></tr>'+(d.maker.map(row).join('')||'<tr><td colspan=5 class=muted>없음</td></tr>')+'</table>'+
@@ -168,6 +190,16 @@ class MakerWebHandler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/history":
             from .loop.history import read_sessions
             self._json({"sessions": read_sessions(self.config.worklogs_dir, 30)})
+        elif parsed.path == "/api/learnings":
+            from .loop.learnings import _all
+            from pathlib import Path as _P
+            ld = _P(self.config.learnings_dir)
+            entries = []
+            if ld.is_dir():
+                for f in ld.glob("*.jsonl"):
+                    entries += _all(ld, f.stem)
+            entries.sort(key=lambda e: e.get("ts", ""), reverse=True)
+            self._json({"learnings": entries[:40]})
         elif parsed.path == "/api/mrs":
             from .loop.gitlab_observe import my_mrs, maker_mrs
             self._json({"mine": my_mrs(self.config, "all", 15),

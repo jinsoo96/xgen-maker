@@ -278,6 +278,16 @@ def run_doctor(config_path: str | None = None) -> bool:
     except Exception as e:
         check.warn("배포 렌더검증", str(e)[:80])
 
+    # 목적 5-1: 작업 학습 메모리 (하네스가 과거 참고 — 실수 방지)
+    try:
+        from pathlib import Path as _P
+        from .loop.learnings import _all
+        ld = _P(getattr(config, "learnings_dir", "learnings")) if config else _P("learnings")
+        total = sum(len(_all(ld, f.stem)) for f in ld.glob("*.jsonl")) if ld.is_dir() else 0
+        check.ok("학습 메모리", f"{total}건 — 구현 전 이 영역 과거 교훈을 프롬프트에 주입(실수 방지)")
+    except Exception as e:
+        check.warn("학습 메모리", str(e)[:80])
+
     # 목적 0: 사용 표면 (CLI + 웹 UI)
     try:
         from . import web  # noqa: F401

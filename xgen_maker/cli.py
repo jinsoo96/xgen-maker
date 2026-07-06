@@ -434,6 +434,20 @@ def cmd_branches(args) -> None:
         print(f"    {merged} {w['name'][:50]:50} {w['when']} {w['author']}")
 
 
+def cmd_learn(args) -> None:
+    from .loop.learnings import record, retrieve, _all
+    config = MakerConfig.from_file(args.config) if args.config else MakerConfig()
+    if args.note:  # 기록
+        record(config.learnings_dir, args.repo, args.area or "general",
+               args.kind, args.note)
+        print(f"[learn] 기록됨 → {config.learnings_dir} ({args.repo}/{args.area})")
+    else:  # 조회
+        entries = _all(config.learnings_dir, args.repo)
+        print(f"═══ {args.repo} 학습 {len(entries)}건 ═══")
+        for e in entries[-20:]:
+            print(f"  ({e['kind']}) {e.get('area','')}: {e['note']}")
+
+
 def cmd_history(args) -> None:
     from .loop.history import read_sessions
     config = MakerConfig.from_file(args.config) if args.config else MakerConfig()
@@ -648,6 +662,14 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--repo", default="xgen-frontend-features")
     p.add_argument("--config", default=None)
     p.set_defaults(func=cmd_branches)
+
+    p = sub.add_parser("learn", help="작업 학습 메모리 — 기록/조회 (하네스가 다음 작업 시 참고, 실수방지)")
+    p.add_argument("--repo", default="xgen-workflow")
+    p.add_argument("--area", default=None)
+    p.add_argument("--kind", default="note", choices=["pitfall", "fix", "convention", "note"])
+    p.add_argument("--note", default=None, help="기록할 학습(없으면 조회)")
+    p.add_argument("--config", default=None)
+    p.set_defaults(func=cmd_learn)
 
     p = sub.add_parser("history", help="MAKER 본인 작업 이력 (worklogs journal)")
     p.add_argument("--limit", type=int, default=20)

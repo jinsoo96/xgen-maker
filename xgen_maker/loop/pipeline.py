@@ -126,6 +126,15 @@ class MakerLoop:
         journal.event("legacy_check", "ok" if legacy_notes else "skipped",
                       bytes=len(legacy_notes))
 
+        # ④-2 과거 학습 조회 — 이 영역에서 겪은 실수/교훈을 꺼내 구현에 주입(실수 방지)
+        from .learnings import retrieve, as_prompt_block, area_of, record
+        area = area_of(landing)
+        past = retrieve(config.learnings_dir, repo,
+                        [top["name"], area, *query.split()], limit=5)
+        if past:
+            legacy_notes = (as_prompt_block(past) + "\n\n" + legacy_notes).strip()
+            journal.event("learnings", "ok", count=len(past), area=area)
+
         # 브랜치명: 착지점(예: ontology-graph-section) 기반으로 의미있게 (팀 규칙: js·251205 금지)
         from ..config import suggest_branch, branch_name_issue
         prefix = intent_info["branch_prefix"] or "fix/"
@@ -193,6 +202,11 @@ class MakerLoop:
                 failed_detail = ([sandbox] if sandbox["status"] == "failed" else []) + \
                     [r for r in checks["checks"] if r["status"] == "failed"]
                 journal.event("checks_detail", "fail", detail=failed_detail)
+                # 실수 방지 학습 기록 — 다음에 이 영역 작업 시 참고됨
+                fnames = ", ".join(r.get("name", "?") for r in failed_detail)
+                record(config.learnings_dir, repo, area, "pitfall",
+                       f"{conv['iterations']}회 시도해도 검증({fnames}) 미통과 — 이 영역 변경 시 해당 검증 먼저 확인",
+                       query)
                 journal.close("checks_failed")
                 syntax_failed = sandbox["status"] == "failed" or \
                     any(r["name"] == "py_syntax" for r in failed_detail)
@@ -202,6 +216,9 @@ class MakerLoop:
                                "failed": failed_detail,
                                "note": f"{conv['iterations']}회 시도 후에도 검증 미통과 — 브랜치 {branch} 보존"})
                 return report
+            record(config.learnings_dir, repo, area, "pitfall",
+                   f"품질 게이트 미달(judge {(judge_result or {}).get('score')}) — 이 영역은 "
+                   f"{', '.join((judge_result or {}).get('reasons', [])[:2])}", query)
             journal.close("judge_failed")
             report["judge"] = judge_result
             report.update({"outcome": Outcome.JUDGE_FAILED.value,
@@ -299,6 +316,9 @@ class MakerLoop:
             journal.event("kg_refresh", "ok", files=refreshed)
         except (OSError, KeyError) as error:
             journal.event("kg_refresh", "fail", error=str(error))
+        # 성공 학습 — 이 영역에서 통과한 접근 기록(다음 작업 참고)
+        record(config.learnings_dir, repo, area, "fix",
+               f"'{query[:60]}' → {conv['iterations']}회 수렴 통과, 변경 {len(changed)}파일", query)
         journal.close("mr_prepared")
         report["outcome"] = "mr_prepared"
         return report

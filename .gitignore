@@ -27,3 +27,6 @@ auth.json
 
 # portable 도구(helm 등) — 커밋 제외
 .tools/
+
+# 작업 학습 메모리(로컬 러닝, 머신별) — 코드 아님
+learnings/

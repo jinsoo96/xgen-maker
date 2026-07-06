@@ -25,6 +25,7 @@ class Event(str, Enum):
     IMPACT = "impact"
     CHAIN = "chain"
     LEGACY_CHECK = "legacy_check"
+    LEARNINGS = "learnings"
     PLAN_ONLY = "plan_only"
     BRANCH = "branch"
     IMPLEMENT = "implement"
