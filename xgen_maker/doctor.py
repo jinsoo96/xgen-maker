@@ -286,6 +286,17 @@ def run_doctor(config_path: str | None = None) -> bool:
     except Exception as e:
         check.fail("MCP 노출", str(e)[:80])
 
+    # 목적 8-2: R3 엔진 stage 등록 (MAKER가 엔진 정식 스테이지)
+    try:
+        from .engine_stage import register
+        r = register()
+        if r["ok"]:
+            check.ok("엔진 stage 등록(R3)", f"{r['stage_id']} → {r['engine']} {r['version']}")
+        else:
+            check.warn("엔진 stage 등록(R3)", r["reason"][:60])
+    except Exception as e:
+        check.warn("엔진 stage 등록(R3)", str(e)[:80])
+
     # 목적 9: 수렴 루프 + 하네스 샌드박스 (통과까지 자가수정)
     try:
         from .loop.converge import (decide, HAS_HARNESS, HARNESS_VERSION,

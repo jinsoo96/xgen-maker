@@ -359,6 +359,17 @@ def cmd_doctor(args) -> None:
         sys.exit(1)
 
 
+def cmd_engine(args) -> None:
+    from .engine_stage import register, STAGE_ID
+    r = register()
+    if r["ok"]:
+        print(f"✓ MAKER 스테이지 '{r['stage_id']}' 등록됨 → {r['engine']} {r['version']}")
+        print("  엔진 Pipeline이 MAKER를 정식 stage로 인지·실행 (phase=act, role=maker)")
+    else:
+        print(f"✗ 등록 실패: {r['reason']}")
+        sys.exit(1)
+
+
 def cmd_status(args) -> None:
     """read-only 관측 — Jenkins 빌드 + ArgoCD 배포 상태. MAKER는 트리거 안 함."""
     from .loop import jenkins, argocd
@@ -604,6 +615,10 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("doctor", help="자가검증 — MAKER 목적(R1~R20)이 실제로 되는지 점검")
     p.add_argument("--config", default=None)
     p.set_defaults(func=cmd_doctor)
+
+    p = sub.add_parser("engine", help="MAKER를 xgen-harness 엔진 정식 stage로 등록(R3)")
+    p.add_argument("engine_action", nargs="?", default="register", choices=["register"])
+    p.set_defaults(func=cmd_engine)
 
     p = sub.add_parser("status", help="배포 상태 관측(read-only) — Jenkins·ArgoCD. MAKER는 배포 안 함")
     p.set_defaults(func=cmd_status)
