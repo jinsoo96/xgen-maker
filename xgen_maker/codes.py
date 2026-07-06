@@ -39,6 +39,7 @@ class Event(str, Enum):
     JUDGE = "judge"
     DEPLOY_TEST = "deploy_test"
     RELEASE = "release"
+    COST = "cost"
     COMMIT = "commit"
     PUSH = "push"
     MR_CREATE = "mr_create"

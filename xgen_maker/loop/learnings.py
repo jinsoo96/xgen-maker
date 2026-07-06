@@ -22,11 +22,23 @@ def _store(learnings_dir: str | Path, repo: str) -> Path:
     return d / f"{safe}.jsonl"
 
 
+def _norm(text: str) -> str:
+    return re.sub(r"\s+", " ", text.lower()).strip()
+
+
 def record(learnings_dir: str | Path, repo: str, area: str, kind: str,
            note: str, query: str = "") -> None:
-    """학습 1건 기록. kind: pitfall(함정)·fix(해결)·convention(규약)·note."""
+    """학습 1건 기록. kind: pitfall(함정)·fix(해결)·convention(규약)·note.
+
+    dedup: 같은 area에 정규화 note가 이미 있으면 스킵(중복·노이즈 방지).
+    """
+    note = note[:400]
+    key = (_norm(area), _norm(note))
+    for e in _all(learnings_dir, repo):
+        if (_norm(e.get("area", "")), _norm(e.get("note", ""))) == key:
+            return  # 중복 — 기록 안 함
     entry = {"ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-             "repo": repo, "area": area, "kind": kind, "note": note[:400], "query": query[:120]}
+             "repo": repo, "area": area, "kind": kind, "note": note, "query": query[:120]}
     with _store(learnings_dir, repo).open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
 

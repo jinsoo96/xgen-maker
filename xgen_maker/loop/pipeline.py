@@ -74,6 +74,8 @@ class MakerLoop:
     def run(self, query: str) -> dict:
         config = self.config
         journal = Journal(config.worklogs_dir, query, verbose=config.verbose)
+        from .cost import CostTracker
+        cost = CostTracker()
         report: dict = {"query": query, "session_dir": str(journal.dir)}
 
         # ② intent
@@ -199,7 +201,7 @@ class MakerLoop:
 
         # ⑥~⑧ 수렴 루프 — 구현 → 샌드박스+checks → judge → 실패 시 되먹여 재시도(통과까지)
         conv = converge(config, repo_path, repo, query, intent, landing, chain_nodes,
-                        legacy_notes, base_branch, repo_git, journal)
+                        legacy_notes, base_branch, repo_git, journal, cost=cost)
         report["iterations"] = conv["iterations"]
         report["converged"] = conv["converged"]
 
@@ -265,6 +267,15 @@ class MakerLoop:
                           else ("fail" if ui_report.get("problems") else "ok"),
                           **{k: v for k, v in ui_report.items() if k != "results"})
             report["ui_verify"] = {k: v for k, v in ui_report.items() if k != "results"}
+            # UI 문제를 신호화 — 학습 기록 + report 플래그(다음 작업 참고)
+            if ui_report.get("problems"):
+                probs = "; ".join(
+                    "; ".join(r["vision"]["issues"])
+                    for r in ui_report.get("results", [])
+                    if r.get("vision") and not r["vision"].get("renders_ok"))
+                record(config.learnings_dir, repo, area, "pitfall",
+                       f"UI 검증: {probs[:200]}" if probs else "UI 렌더/픽셀 회귀 감지", query)
+                report["ui_problems"] = ui_report["problems"]
 
         # ⑦-4 배포 렌더 검증 (T1, 상사님 tmp 방식) — "코드 통과 + 배포 통과 → 자신 있게 MR"
         deploy_test = {"name": "deploy_render", "status": "skipped",
@@ -348,6 +359,8 @@ class MakerLoop:
                 journal.event("worktree", "removed", path=str(worktree_path))
             except GitOpsError:
                 pass
+        report["cost"] = cost.summary()
+        journal.event("cost", "ok", **cost.summary())
         journal.close("mr_prepared")
         report["outcome"] = "mr_prepared"
         return report

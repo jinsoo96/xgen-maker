@@ -97,7 +97,7 @@ def _feedback(checks: dict, sandbox: dict, judge_result: dict | None) -> str:
 
 def converge(config, repo_path: Path, repo: str, query: str, intent: str,
              landing: list, chain: list, legacy_notes: str,
-             base_branch: str, repo_git, journal) -> dict:
+             base_branch: str, repo_git, journal, cost=None) -> dict:
     """수렴 루프 실행. 반환 {converged, iterations, checks, sandbox, judge, changed, diff}."""
     max_iterations = max(1, getattr(config, "max_iterations", 3))
     feedback = ""
@@ -109,6 +109,8 @@ def converge(config, repo_path: Path, repo: str, query: str, intent: str,
             prompt += "\n\n" + feedback
         agent_result = run_agent(repo_path, prompt, journal.dir,
                                  config.agent_cmd, config.agent_timeout)
+        if cost is not None:
+            cost.add_agent(prompt, agent_result.get("output", ""))
         if not agent_result["ok"]:
             journal.event("iteration", "fail", n=iteration, phase="implement",
                           error=agent_result.get("error"))

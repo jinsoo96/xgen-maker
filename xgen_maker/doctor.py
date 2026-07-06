@@ -171,6 +171,19 @@ def run_doctor(config_path: str | None = None) -> bool:
     except Exception as e:
         check.fail("배포 인터록", str(e)[:80])
 
+    # 목적 6-3: 안전망 (최신코드·롤백·worktree·비용)
+    try:
+        from .loop.rollback import last_action  # noqa: F401
+        from .loop.cost import CostTracker  # noqa: F401
+        fl = getattr(config, "fetch_latest", False) if config else False
+        iw = getattr(config, "isolate_worktree", False) if config else False
+        act = last_action(config.worklogs_dir) if config else None
+        undoable = f"undo가능:{act['branch']}" if act else "undo대상없음"
+        check.ok("안전망", f"최신코드fetch={'on' if fl else 'off'} · worktree격리={'on' if iw else 'off'} "
+                 f"· 롤백({undoable}) · 비용추적")
+    except Exception as e:
+        check.warn("안전망", str(e)[:80])
+
     # 목적 7: 전 과정 로그 (journal) + 증분 sync
     try:
         from .loop.journal import Journal
