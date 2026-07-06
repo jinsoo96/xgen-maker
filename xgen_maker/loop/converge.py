@@ -16,14 +16,21 @@ from .implement import build_prompt, run_agent, RULES
 from .testing import run_checks
 from .judge import judge
 
-try:
-    import xgen_harness as _xh
-    HAS_HARNESS = True
-    HARNESS_VERSION = getattr(_xh, "__version__", "?")
-except Exception:  # noqa: BLE001 — 임포트 실패 전부 폴백
-    _xh = None
-    HAS_HARNESS = False
-    HARNESS_VERSION = None
+# 엔진 임포트 — xgen-sdk가 하네스 엔진을 흡수했으므로 xgen_sdk.harness 우선,
+# 없으면 standalone xgen_harness, 둘 다 없으면 로컬 폴백(코어 의존성 0 유지).
+_xh = None
+HAS_HARNESS = False
+HARNESS_VERSION = None
+HARNESS_SOURCE = None
+for _mod, _label in (("xgen_sdk.harness", "xgen-sdk"), ("xgen_harness", "xgen-harness")):
+    try:
+        _xh = __import__(_mod, fromlist=["run_sandboxed"])
+        HAS_HARNESS = True
+        HARNESS_VERSION = getattr(_xh, "__version__", "?")
+        HARNESS_SOURCE = _label
+        break
+    except Exception:  # noqa: BLE001 — 임포트 실패는 다음 후보/폴백
+        continue
 
 
 def sandbox_verify_python(repo_path: Path, changed: list[str],
@@ -57,7 +64,7 @@ def sandbox_verify_python(repo_path: Path, changed: list[str],
     ok = res.exit_code == 0
     return {"name": "sandbox_py",
             "status": "passed" if ok else "failed",
-            "isolated": True, "harness": HARNESS_VERSION,
+            "isolated": True, "harness": HARNESS_VERSION, "engine": HARNESS_SOURCE,
             "bad": res.return_value if not ok else []}
 
 

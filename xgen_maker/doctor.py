@@ -161,6 +161,22 @@ def run_doctor(config_path: str | None = None) -> bool:
     elif graph is not None:
         check.warn("증분 sync 기준점", "repo_heads 없음 — 구버전 그래프")
 
+    # 목적 7-2: 웹 프리뷰 (라이브 스택 도달 + 스냅샷 능력)
+    try:
+        from .loop.verify import _shim_command, http_reachable
+        npx = _shim_command("npx", ["--version"])
+        preview_base = getattr(config, "preview_base", "") if config else ""
+        if npx is None:
+            check.warn("웹 프리뷰", "npx 미발견 — Playwright 스냅샷 불가")
+        elif preview_base and http_reachable(preview_base, timeout=5):
+            check.ok("웹 프리뷰", f"{preview_base} 도달 + npx 있음 → 스냅샷 가능")
+        elif preview_base:
+            check.warn("웹 프리뷰", f"{preview_base} 미도달 — 스택 미기동(RAM 가드)")
+        else:
+            check.warn("웹 프리뷰", "preview_base 미설정")
+    except Exception as e:
+        check.warn("웹 프리뷰", str(e)[:80])
+
     # 목적 8: MCP 노출
     try:
         from .mcp_server import TOOLS
@@ -171,7 +187,8 @@ def run_doctor(config_path: str | None = None) -> bool:
 
     # 목적 9: 수렴 루프 + 하네스 샌드박스 (통과까지 자가수정)
     try:
-        from .loop.converge import decide, HAS_HARNESS, HARNESS_VERSION, sandbox_verify_python
+        from .loop.converge import (decide, HAS_HARNESS, HARNESS_VERSION,
+                                     HARNESS_SOURCE, sandbox_verify_python)
         # decide 계약: 실패는 retry, 전부 통과는 stop
         retry = decide({"blocked": True, "checks": [], "summary": {}},
                        {"status": "passed"}, None, 1, 3)
@@ -186,7 +203,7 @@ def run_doctor(config_path: str | None = None) -> bool:
                 (Path(tmp) / "s.py").write_text("x=1\n", encoding="utf-8")
                 sb = sandbox_verify_python(Path(tmp), ["s.py"])
             if sb["status"] == "passed" and sb.get("isolated"):
-                check.ok("하네스 샌드박스", f"xgen-harness {HARNESS_VERSION} 격리검증 동작")
+                check.ok("하네스 샌드박스", f"{HARNESS_SOURCE} {HARNESS_VERSION} 엔진 격리검증 동작")
             else:
                 check.warn("하네스 샌드박스", f"검증 상태 {sb['status']}")
         else:

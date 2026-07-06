@@ -59,16 +59,27 @@ def _chat_anthropic(model: str, messages: list[dict], max_tokens: int,
 
 
 def _chat_claude_cli(messages: list[dict], timeout: int) -> str | None:
-    """claude CLI 구독 로그인으로 단발 완성 — API 키 불필요."""
+    """claude CLI 구독 로그인으로 단발 완성 — API 키 불필요.
+
+    순수 LLM 완성으로 쓰려면 프로젝트 컨텍스트(CLAUDE.md·git·MCP)를 끊어야 한다:
+    - system 역할은 --system-prompt 로 전체 override(기본 에이전트 프롬프트 대체)
+    - 중립 임시 디렉토리에서 실행(repo cwd의 CLAUDE.md/git 오염 차단)
+    """
+    import tempfile
     from .auth import claude_command
-    prompt = "\n\n".join(f"[{m['role']}]\n{m['content']}" for m in messages)
-    command = claude_command(["-p", prompt])
+    system = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
+    user = "\n\n".join(m["content"] for m in messages if m["role"] != "system")
+    args = ["-p", user, "--output-format", "text"]
+    if system:
+        args += ["--system-prompt", system]
+    command = claude_command(args)
     if command is None:
         return None
     try:
-        result = subprocess.run(
-            command, capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=timeout)
+        with tempfile.TemporaryDirectory() as neutral:
+            result = subprocess.run(
+                command, cwd=neutral, capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=timeout)
     except (subprocess.TimeoutExpired, OSError):
         return None
     if result.returncode != 0:

@@ -35,18 +35,32 @@ def docker_guard(max_running: int = 0) -> dict:
     return {"ok": True, "running": running}
 
 
-def playwright_snapshot(url: str, out_png: Path, timeout: int = 120) -> dict:
-    if not shutil.which("npx"):
+def _shim_command(exe_name: str, args: list[str]) -> list[str] | None:
+    """Windows .cmd/.ps1 심은 cmd /c 경유(CreateProcess 직접실행 불가)."""
+    exe = shutil.which(exe_name)
+    if not exe:
+        return None
+    if exe.lower().endswith((".cmd", ".bat", ".ps1")):
+        base = exe[:-4] + ".cmd" if exe.lower().endswith(".ps1") else exe
+        return ["cmd", "/c", base, *args]
+    return [exe, *args]
+
+
+def playwright_snapshot(url: str, out_png: Path, timeout: int = 180,
+                        wait_ms: int = 3000) -> dict:
+    command = _shim_command("npx", ["-y", "playwright", "screenshot",
+                                    "--full-page", "--wait-for-timeout", str(wait_ms),
+                                    url, str(out_png)])
+    if command is None:
         return {"ok": False, "reason": "npx 미발견"}
     try:
-        result = subprocess.run(
-            ["npx", "-y", "playwright", "screenshot", "--full-page", url, str(out_png)],
-            capture_output=True, text=True, timeout=timeout)
+        result = subprocess.run(command, capture_output=True, text=True,
+                                encoding="utf-8", errors="replace", timeout=timeout)
     except (subprocess.TimeoutExpired, OSError) as error:
         return {"ok": False, "reason": str(error)}
-    if result.returncode != 0:
-        return {"ok": False, "reason": (result.stderr or "")[-500:]}
-    return {"ok": True, "snapshot": str(out_png)}
+    if result.returncode != 0 or not out_png.exists():
+        return {"ok": False, "reason": (result.stderr or result.stdout or "")[-500:]}
+    return {"ok": True, "snapshot": str(out_png), "bytes": out_png.stat().st_size}
 
 
 def http_reachable(url: str, timeout: int = 8) -> bool:
