@@ -247,6 +247,16 @@ def run_doctor(config_path: str | None = None) -> bool:
     except Exception as e:
         check.warn("릴리즈 사다리", str(e)[:80])
 
+    # 목적 6-1c: 배포 관측 (read-only) — MAKER는 MR까지만, 배포는 사용자 수동
+    try:
+        from .loop import jenkins, argocd
+        parts = ["MAKER=MR까지만(배포 트리거 없음)"]
+        parts.append(f"Jenkins {'연결' if jenkins.available() else '미설정'}")
+        parts.append(f"ArgoCD {'연결' if argocd.available() else '미설정'}")
+        check.ok("배포 관측(read-only)", " · ".join(parts))
+    except Exception as e:
+        check.warn("배포 관측(read-only)", str(e)[:80])
+
     # 목적 6-2: 배포 렌더 검증 (상사님 tmp 방식 — MR 전 배포통과 확인)
     try:
         from .loop.deploy import _find_helm, deploy_render_test

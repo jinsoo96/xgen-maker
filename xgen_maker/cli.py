@@ -359,6 +359,32 @@ def cmd_doctor(args) -> None:
         sys.exit(1)
 
 
+def cmd_status(args) -> None:
+    """read-only 관측 — Jenkins 빌드 + ArgoCD 배포 상태. MAKER는 트리거 안 함."""
+    from .loop import jenkins, argocd
+    from .loop.release import ladder
+    print("═══ 배포 상태 (read-only — MAKER는 배포 안 함, 사용자 수동) ═══\n")
+    print("릴리즈 사다리:")
+    for s in ladder():
+        print(f"  {s['branch']:8} → {s['env']:4} {s.get('url',''):32} Jenkins={s.get('jenkins','')}")
+    print("\nJenkins jobs:", end=" ")
+    if jenkins.available():
+        jobs = jenkins.list_jobs()
+        print(f"{len(jobs)}개")
+        for j in jobs:
+            print(f"  · {j['name']:24} env={j['env'] or '-':4} [{j['color']}]")
+    else:
+        print("미설정 (.env에 XGEN_MAKER_JENKINS_URL/USER/TOKEN)")
+    print("\nArgoCD apps:", end=" ")
+    if argocd.available():
+        apps = argocd.list_apps()
+        print(f"{len(apps)}개")
+        for a in apps[:20]:
+            print(f"  · {a['name']:28} sync={a['sync']:10} health={a['health']}")
+    else:
+        print("미설정 (.env에 XGEN_MAKER_ARGOCD_URL/USER/TOKEN)")
+
+
 def cmd_release(args) -> None:
     from .loop.release import release_view, render_ladder_md
     config = MakerConfig.from_file(args.config) if args.config else MakerConfig()
@@ -531,6 +557,9 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("doctor", help="자가검증 — MAKER 목적(R1~R20)이 실제로 되는지 점검")
     p.add_argument("--config", default=None)
     p.set_defaults(func=cmd_doctor)
+
+    p = sub.add_parser("status", help="배포 상태 관측(read-only) — Jenkins·ArgoCD. MAKER는 배포 안 함")
+    p.set_defaults(func=cmd_status)
 
     p = sub.add_parser("release", help="릴리즈 사다리 — 이 변경이 develop→stg→main 어디에 놓이나")
     p.add_argument("--repo", default="xgen-core")

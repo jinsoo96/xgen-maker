@@ -5,17 +5,33 @@ main 직접 머지 금지. MAKER는 develop에 MR을 준비하고, 승격 경로
 """
 from __future__ import annotations
 
-# 기본 사다리 (config.release_stages로 오버라이드 가능)
+import os
+
+# 기본 사다리 (config.release_stages로 오버라이드 가능). url/jenkins는 env로도 주입.
 DEFAULT_LADDER = [
     {"branch": "develop", "env": "dev", "role": "개발 통합"},
     {"branch": "stg", "env": "stg", "role": "스테이징 검증"},
     {"branch": "main", "env": "prd", "role": "운영 배포"},
 ]
 
+# env → (플랫폼 스테이지 URL 기본값, Jenkins job). URL은 XGEN_MAKER_URL_<ENV>로 오버라이드.
+_ENV_URL_DEFAULT = {"dev": "https://dev.example.com",
+                    "stg": "https://stg.example.com",
+                    "prd": "https://app.example.com"}
+_ENV_JENKINS = {"dev": "xgen Dev", "stg": "xgen-stage", "prd": "xgen Prd"}
+
+
+def stage_url(env: str) -> str:
+    return os.environ.get(f"XGEN_MAKER_URL_{env.upper()}", _ENV_URL_DEFAULT.get(env, ""))
+
 
 def ladder(config=None) -> list[dict]:
     stages = getattr(config, "release_stages", None) if config else None
-    return stages or DEFAULT_LADDER
+    base = stages or DEFAULT_LADDER
+    # url·jenkins job을 각 스테이지에 채운다(명시값 우선)
+    return [{**s, "url": s.get("url") or stage_url(s["env"]),
+             "jenkins": s.get("jenkins") or _ENV_JENKINS.get(s["env"], "")}
+            for s in base]
 
 
 def env_for_branch(branch: str, config=None) -> str | None:
@@ -60,14 +76,16 @@ def release_view(graph, repo: str, target_branch: str, config=None) -> dict:
 
 
 def render_ladder_md(view: dict) -> str:
-    lines = ["| 브랜치 | 환경 | 역할 | 배포 대상 | 현재 |",
-             "|---|---|---|---|---|"]
+    lines = ["| 브랜치 | 환경 | URL | Jenkins | 배포 대상 | 현재 |",
+             "|---|---|---|---|---|---|"]
     for s in view["ladder"]:
         targets = ", ".join(f"{t['project']}({t['domain']})" if t["domain"] else t["project"]
                             for t in s["targets"]) or "-"
         mark = "◀ 이 MR" if s["current"] else ""
-        lines.append(f"| {s['branch']} | {s['env']} | {s['role']} | {targets} | {mark} |")
+        lines.append(f"| {s['branch']} | {s['env']} | {s.get('url','')} | "
+                     f"{s.get('jenkins','')} | {targets} | {mark} |")
     path = " → ".join(view["promotion_remaining"])
     lines.append("")
     lines.append(f"**승격 경로(남음)**: {path}  ·  {view['note']}")
+    lines.append("> MAKER는 MR 준비까지. 머지·빌드·ArgoCD sync·배포는 사용자 수동(로그는 `maker status`).")
     return "\n".join(lines)

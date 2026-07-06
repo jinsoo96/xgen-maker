@@ -20,7 +20,6 @@ from .git_ops import GitRepo, GitOpsError
 from .implement import build_prompt, run_agent
 from .judge import judge
 from .journal import Journal
-from .deploy import plan_deploy, trigger_deploy
 from .mr import build_mr_draft, save_draft, create_gitlab_mr
 from .testing import run_checks
 from .verify import verify
@@ -275,15 +274,15 @@ class MakerLoop:
             journal.event("mr_create", "ok" if mr_result["ok"] else "fail", **mr_result)
             report["mr"] = mr_result
 
-            # 배포 단계 (R20) — 기본 off. dry_run은 보낼 요청을 기록만, live는 이중 인터록.
-            deploy_plan = plan_deploy(config, repo, branch, mr_result.get("url", ""))
-            deploy_result = trigger_deploy(config, deploy_plan)
-            journal.event("deploy", deploy_result["status"],
-                          **{k: v for k, v in deploy_result.items() if k != "status"})
-            report["deploy"] = deploy_result
-        else:
-            journal.event("mr_ready", "observe", draft=str(draft),
-                          note="observe 모드 — 푸시/MR 생성 안 함")
+        # ⑨-끝: MAKER의 자동화는 여기까지 — MR 준비. 이후(머지·빌드·ArgoCD sync·배포)는 사용자 수동.
+        journal.event("mr_ready",
+                      "observe" if config.mode != "act" else "act",
+                      draft=str(draft),
+                      next_manual=[f"MR 리뷰·머지 → {config.target_branch}",
+                                   f"Jenkins 빌드({rel_view['lands_on_env']})",
+                                   "ArgoCD 수동 sync → k3s"],
+                      note="MAKER는 MR 준비까지. 배포는 사용자 몫(로그/상태는 maker status로 관측)")
+        report["next_manual"] = "머지 → Jenkins 빌드 → ArgoCD sync (사용자 수동)"
 
         # ⑩ 사후: KG 증분 갱신 + journal
         try:
