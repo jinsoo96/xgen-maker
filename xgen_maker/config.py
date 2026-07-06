@@ -44,6 +44,8 @@ class MakerConfig:
     verbose: bool = True                                   # 진행 로그 실시간 출력
     deploy_mode: str = "off"                               # off | dry_run | live (live=이중 인터록)
     deploy_env: str = "dev"
+    enable_deploy_test: bool = False                       # MR 전 배포 렌더 검증(T1, 상사님 tmp 방식)
+    infra_path: str = "D:\\xgen2.0\\xgen-infra"           # Helm 차트 위치
     worklogs_dir: str = "worklogs"
 
     @property

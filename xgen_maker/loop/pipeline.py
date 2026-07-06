@@ -220,12 +220,28 @@ class MakerLoop:
                           **{k: v for k, v in ui_report.items() if k != "results"})
             report["ui_verify"] = {k: v for k, v in ui_report.items() if k != "results"}
 
+        # ⑦-4 배포 렌더 검증 (T1, 상사님 tmp 방식) — "코드 통과 + 배포 통과 → 자신 있게 MR"
+        deploy_test = {"name": "deploy_render", "status": "skipped",
+                       "reason": "enable_deploy_test=False"}
+        if config.enable_deploy_test:
+            from .deploy import deploy_render_test
+            deploy_test = deploy_render_test(config, repo)
+            journal.event("deploy_test", deploy_test["status"], **deploy_test)
+            report["deploy_test"] = deploy_test
+            if deploy_test["status"] == "failed":
+                journal.close("deploy_test_failed")
+                report.update({"outcome": Outcome.CHECKS_FAILED.value,
+                               "code": ErrorCode.CHECKS_TEST.value,
+                               "failed": [deploy_test],
+                               "note": f"배포 렌더 실패 — 브랜치 {branch} 보존(MR 안 냄)"})
+                return report
+
         # ⑨ MR 준비
         diff_stat = "\n".join(diff_text.splitlines()[:60])
         title, body = build_mr_draft(query, intent, branch, config.target_branch,
                                      changed, diff_stat, impact_nodes, judge_result,
                                      agent_summary=conv.get("agent_summary", ""),
-                                     checks=checks["checks"] + [sandbox])
+                                     checks=checks["checks"] + [sandbox, deploy_test])
         draft = save_draft(journal.dir, title, body)
         commit = repo_git.commit_all(title, body)
         journal.event("commit", "ok", sha=commit[:12], files=len(changed))

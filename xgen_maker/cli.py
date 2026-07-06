@@ -346,6 +346,21 @@ def cmd_doctor(args) -> None:
         sys.exit(1)
 
 
+def cmd_deploy(args) -> None:
+    from .loop.deploy import deploy_render_test, app_for_repo
+    config = MakerConfig.from_file(args.config) if args.config else MakerConfig()
+    if args.infra:
+        config.infra_path = args.infra
+    if args.deploy_action == "test":
+        result = deploy_render_test(config, args.repo)
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        if result["status"] == "failed":
+            sys.exit(1)
+    elif args.deploy_action == "apps":
+        from .loop.deploy import _REPO_TO_APP
+        print(json.dumps(_REPO_TO_APP, ensure_ascii=False, indent=2))
+
+
 def main(argv: list[str] | None = None) -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -485,6 +500,13 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("doctor", help="자가검증 — MAKER 목적(R1~R20)이 실제로 되는지 점검")
     p.add_argument("--config", default=None)
     p.set_defaults(func=cmd_doctor)
+
+    p = sub.add_parser("deploy", help="배포 렌더 검증(T1, tmp 격리 helm template) — MR 전 배포통과 확인")
+    p.add_argument("deploy_action", choices=["test", "apps"])
+    p.add_argument("--repo", default="xgen-core")
+    p.add_argument("--config", default=None)
+    p.add_argument("--infra", default=None, help="xgen-infra 경로 override")
+    p.set_defaults(func=cmd_deploy)
 
     args = parser.parse_args(argv)
     args.func(args)

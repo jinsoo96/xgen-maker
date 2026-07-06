@@ -48,7 +48,7 @@ def build_mr_draft(query: str, intent: str, branch: str, target_branch: str,
 {impact_lines}
 
 ## 자동 검증 (checks)
-{chr(10).join(f"- {c['name']}: **{c['status']}**" + (f" — {c.get('reason', '')}" if c.get('reason') else "") for c in (checks or [])) or "- (미실행)"}
+{chr(10).join(f"- {c.get('name', '?')}: **{c.get('status', '?')}**" + (f" — {c.get('reason', '')}" if c.get('reason') else "") for c in (checks or [])) or "- (미실행)"}
 
 ## 품질 게이트
 - judge: **{judge_result.get('score')}** (θ={judge_result.get('theta')}, {judge_result.get('source')})

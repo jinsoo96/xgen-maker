@@ -224,6 +224,25 @@ def run_doctor(config_path: str | None = None) -> bool:
     except Exception as e:
         check.warn("UI/UX 검증", str(e)[:80])
 
+    # 목적 6-2: 배포 렌더 검증 (상사님 tmp 방식 — MR 전 배포통과 확인)
+    try:
+        from .loop.deploy import _find_helm, deploy_render_test
+        helm = _find_helm()
+        if helm is None:
+            check.warn("배포 렌더검증", "helm 미설치 — T1 렌더검증 불가")
+        elif config is not None:
+            r = deploy_render_test(config, "xgen-core")
+            if r["status"] == "passed":
+                check.ok("배포 렌더검증", f"helm template 통과 (xgen-core: {r['manifests']}개 매니페스트)")
+            elif r["status"] == "skipped":
+                check.warn("배포 렌더검증", f"helm 있음 · {r['reason'][:50]}")
+            else:
+                check.warn("배포 렌더검증", f"렌더 실패: {str(r.get('error',''))[:50]}")
+        else:
+            check.ok("배포 렌더검증", f"helm 있음 ({helm.split(chr(92))[-1]})")
+    except Exception as e:
+        check.warn("배포 렌더검증", str(e)[:80])
+
     # 목적 8: MCP 노출
     try:
         from .mcp_server import TOOLS

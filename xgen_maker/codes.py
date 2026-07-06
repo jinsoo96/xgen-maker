@@ -34,6 +34,7 @@ class Event(str, Enum):
     VERIFY = "verify"
     UI_VERIFY = "ui_verify"
     JUDGE = "judge"
+    DEPLOY_TEST = "deploy_test"
     COMMIT = "commit"
     PUSH = "push"
     MR_CREATE = "mr_create"
