@@ -231,6 +231,14 @@ def cmd_chat(args) -> None:
     run_chat(args.config)
 
 
+def cmd_web(args) -> None:
+    from .web import serve
+    if args.open:
+        import webbrowser, threading
+        threading.Timer(1.2, lambda: webbrowser.open(f"http://{args.host}:{args.port}")).start()
+    serve(args.config, args.host, args.port)
+
+
 def cmd_ui(args) -> None:
     from .loop.ui_verify import ui_verify, affected_routes
     from pathlib import Path as _P
@@ -585,6 +593,13 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("chat", help="대화형 터미널 (openxgen 스타일) — KG 1회 로드, 연속 쿼리")
     p.add_argument("--config", default=None)
     p.set_defaults(func=cmd_chat)
+
+    p = sub.add_parser("web", help="웹 UI — 브라우저에서 쿼리 치면 MAKER 루프 실행(실시간 로그)")
+    p.add_argument("--config", default=None)
+    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--port", type=int, default=8760)
+    p.add_argument("--open", action="store_true", help="브라우저 자동 열기")
+    p.set_defaults(func=cmd_web)
 
     p = sub.add_parser("ui", help="UI/UX 검증 — 라우트 매핑 + 스냅샷 + 픽셀diff + 비전판정")
     p.add_argument("ui_action", choices=["routes", "baseline", "verify"])

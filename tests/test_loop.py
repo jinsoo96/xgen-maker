@@ -48,6 +48,16 @@ class TestBranchGuards(unittest.TestCase):
         with self.assertRaises(GitOpsError):
             self.repo.push("develop")
 
+    def test_meaningless_branch_rejected(self):
+        # 팀 규칙: js·251205 등 의미 불명 이름 금지
+        for name in ("fix/js", "feature/251205", "refactor/x", "fix/"):
+            with self.assertRaises(GitOpsError):
+                self.repo.create_branch(name)
+
+    def test_hotfix_prefix_allowed(self):
+        self.repo.create_branch("hotfix/login-crash")
+        self.assertEqual(self.repo.current_branch(), "hotfix/login-crash")
+
     def test_is_allowed_branch(self):
         self.assertTrue(is_allowed_branch("fix/a"))
         self.assertTrue(is_allowed_branch("feature/b"))

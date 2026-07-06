@@ -12,7 +12,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 PROTECTED_BRANCHES = {"main", "master", "develop", "stg", "staging", "release", "production"}
-ALLOWED_BRANCH_PREFIXES = ("fix/", "feature/", "refactor/", "chore/")
+# 팀 브랜치 네이밍 규칙: feature/{설명} · fix/{설명} · refactor/{설명} · hotfix/{설명}
+ALLOWED_BRANCH_PREFIXES = ("feature/", "fix/", "refactor/", "hotfix/", "chore/")
+# 규칙: 브랜치명은 작업 내용을 명확하게. js·251205 등 의미 불명 이름 금지.
+_MEANINGLESS_SLUG = re.compile(r"^(js|ts|py|tmp|test|temp|wip|\d+|[a-z]{1,2}\d*)$", re.I)
 INFRA_PATTERNS = re.compile(
     r"(^|/)(docker-compose[^/]*\.ya?ml|Dockerfile[^/]*|\.gitlab-ci\.ya?ml|helm/|infra/|k8s/|\.github/workflows/)",
     re.I)
@@ -99,6 +102,37 @@ def is_protected_branch(name: str) -> bool:
 
 def is_allowed_branch(name: str) -> bool:
     return name.startswith(ALLOWED_BRANCH_PREFIXES) and not is_protected_branch(name)
+
+
+def branch_name_issue(name: str) -> str | None:
+    """팀 네이밍 규칙 위반 사유 반환(없으면 None).
+
+    규칙: feature/fix/refactor/hotfix/{설명} · 설명은 작업 내용 명확히 · js·251205 등 의미불명 금지.
+    """
+    if not name.startswith(ALLOWED_BRANCH_PREFIXES):
+        return (f"prefix는 {'/·'.join(p.rstrip('/') for p in ALLOWED_BRANCH_PREFIXES)}/ 중 하나여야 함")
+    if is_protected_branch(name):
+        return "보호 브랜치명 사용 불가"
+    slug = name.split("/", 1)[1] if "/" in name else ""
+    if not slug:
+        return "설명이 비어 있음 — 작업 내용을 명확히"
+    if len(slug) < 4:
+        return f"설명 '{slug}'가 너무 짧음 — 작업 내용을 명확히"
+    if _MEANINGLESS_SLUG.match(slug):
+        return f"의미 불명 이름 '{slug}' 금지 — 작업 내용을 명확히 (예: feature/ontology-v4)"
+    return None
+
+
+def suggest_branch(prefix: str, keywords: list[str]) -> str:
+    """키워드로 의미있는 브랜치 슬러그 생성 (한글/특수문자 정리)."""
+    import re as _re
+    words = []
+    for kw in keywords:
+        w = _re.sub(r"[^a-zA-Z0-9]+", "-", str(kw).lower()).strip("-")
+        if w and not _MEANINGLESS_SLUG.match(w):
+            words.append(w)
+    slug = "-".join(words)[:50].strip("-") or "change"
+    return prefix + slug
 
 
 def infra_files(paths: list[str]) -> list[str]:

@@ -79,7 +79,7 @@ class TestPushAuthUrl(unittest.TestCase):
             subprocess.run(["git", "commit", "-m", "i"], cwd=root, capture_output=True)
             from xgen_maker.loop.git_ops import GitRepo
             repo = GitRepo(root)
-            repo.create_branch("fix/x")
+            repo.create_branch("fix/demo-push-url")
             calls = []
             orig = repo._run
             def spy(*args, **kw):
@@ -88,7 +88,7 @@ class TestPushAuthUrl(unittest.TestCase):
                     return ""  # 실제 push 안 함(네트워크 차단)
                 return orig(*args, **kw)
             repo._run = spy
-            repo.push("fix/x", token="SECRET")
+            repo.push("fix/demo-push-url", token="SECRET")
             push_calls = [c for c in calls if "push" in c]
             joined = " ".join(push_calls[0])
             self.assertIn("oauth2:SECRET@gitlab.example.com/xgen2.0/demo.git", joined)

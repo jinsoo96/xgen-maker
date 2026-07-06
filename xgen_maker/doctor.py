@@ -278,6 +278,14 @@ def run_doctor(config_path: str | None = None) -> bool:
     except Exception as e:
         check.warn("배포 렌더검증", str(e)[:80])
 
+    # 목적 0: 사용 표면 (CLI + 웹 UI)
+    try:
+        from . import web  # noqa: F401
+        from .chat import run_chat  # noqa: F401
+        check.ok("사용 표면", "CLI(maker run/chat) + 웹 UI(maker web) + MCP")
+    except Exception as e:
+        check.warn("사용 표면", str(e)[:80])
+
     # 목적 8: MCP 노출
     try:
         from .mcp_server import TOOLS

@@ -126,7 +126,15 @@ class MakerLoop:
         journal.event("legacy_check", "ok" if legacy_notes else "skipped",
                       bytes=len(legacy_notes))
 
-        branch = intent_info["branch_prefix"] + journal.slug
+        # 브랜치명: 착지점(예: ontology-graph-section) 기반으로 의미있게 (팀 규칙: js·251205 금지)
+        from ..config import suggest_branch, branch_name_issue
+        prefix = intent_info["branch_prefix"] or "fix/"
+        landing_kw = [top["name"], *(n["name"] for n in landing[1:3])]
+        branch = suggest_branch(prefix, landing_kw)
+        if branch_name_issue(branch):  # 착지명이 부실하면 쿼리 확장 키워드로 폴백
+            branch = suggest_branch(prefix, query.split())
+        if branch_name_issue(branch):
+            branch = prefix + journal.slug
         report["branch"] = branch
         report["repo"] = repo
 

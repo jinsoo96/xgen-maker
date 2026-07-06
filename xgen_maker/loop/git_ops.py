@@ -8,7 +8,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from ..config import is_allowed_branch, is_protected_branch
+from ..config import is_allowed_branch, is_protected_branch, branch_name_issue
 
 
 class GitOpsError(RuntimeError):
@@ -35,10 +35,9 @@ class GitRepo:
         return not self._run("status", "--porcelain").strip()
 
     def create_branch(self, name: str) -> str:
-        if not is_allowed_branch(name):
-            raise GitOpsError(
-                f"허용되지 않는 브랜치명 '{name}' — fix/·feature/·refactor/·chore/ prefix 필수, "
-                f"보호 브랜치 금지")
+        issue = branch_name_issue(name)
+        if issue:
+            raise GitOpsError(f"브랜치명 '{name}' 규칙 위반 — {issue}")
         self._run("checkout", "-b", name)
         return name
 
