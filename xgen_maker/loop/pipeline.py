@@ -160,20 +160,42 @@ class MakerLoop:
             report.update({"outcome": "planned", "mr_draft": str(draft)})
             return report
 
-        # ⑤ 브랜치
+        # ⑤ 브랜치 — 항상 최신 GitLab 코드에서 분기 + KG 최신화
         try:
             repo_git = GitRepo(repo_path)
             base_branch = repo_git.current_branch()
             if not repo_git.is_clean():
                 raise GitOpsError("워킹트리가 깨끗하지 않음 — 사람 확인 필요")
-            repo_git.create_branch(branch)
+            base_ref, changed_since = "", []
+            fetch_sha = ""
+            if getattr(config, "fetch_latest", False):
+                try:
+                    fetch_sha = repo_git.fetch(config.target_branch, token=config.gitlab_token)
+                    base_ref = "FETCH_HEAD"
+                    changed_since = repo_git.diff_names(base_branch, "FETCH_HEAD")[:200]
+                except GitOpsError as fe:
+                    journal.event("fetch_latest", "skipped", reason=str(fe)[:100])
+            worktree_path = None
+            main_git = repo_git
+            if getattr(config, "isolate_worktree", False):
+                import tempfile
+                worktree_path = Path(tempfile.mkdtemp(prefix="maker-wt-"))
+                repo_git = main_git.add_worktree(worktree_path, branch, base_ref or "HEAD")
+                repo_path = worktree_path  # 이후 구현·검증은 격리 사본에서
+                journal.event("worktree", "ok", path=str(worktree_path))
+            else:
+                repo_git.create_branch(branch, base_ref=base_ref)  # 최신 base에서 분기
+            if base_ref and changed_since:
+                refresh_files(self.graph, repo, repo_path, changed_since)
+                journal.event("fetch_latest", "ok", target=config.target_branch,
+                              sha=fetch_sha[:12], kg_refreshed=len(changed_since))
         except GitOpsError as error:
             journal.event("branch", "fail", error=str(error))
             journal.close("branch_failed")
             report.update({"outcome": Outcome.BRANCH_FAILED.value,
                            "code": ErrorCode.GIT_DIRTY.value, "error": str(error)})
             return report
-        journal.event("branch", "ok", branch=branch, base=base_branch)
+        journal.event("branch", "ok", branch=branch, base=base_branch, repo=repo)
 
         # ⑥~⑧ 수렴 루프 — 구현 → 샌드박스+checks → judge → 실패 시 되먹여 재시도(통과까지)
         conv = converge(config, repo_path, repo, query, intent, landing, chain_nodes,
@@ -319,6 +341,13 @@ class MakerLoop:
         # 성공 학습 — 이 영역에서 통과한 접근 기록(다음 작업 참고)
         record(config.learnings_dir, repo, area, "fix",
                f"'{query[:60]}' → {conv['iterations']}회 수렴 통과, 변경 {len(changed)}파일", query)
+        # 격리 worktree 정리(브랜치·커밋은 push로 보존됨)
+        if worktree_path is not None:
+            try:
+                main_git.remove_worktree(worktree_path)
+                journal.event("worktree", "removed", path=str(worktree_path))
+            except GitOpsError:
+                pass
         journal.close("mr_prepared")
         report["outcome"] = "mr_prepared"
         return report

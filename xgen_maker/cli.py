@@ -277,6 +277,27 @@ def cmd_ui(args) -> None:
     print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
 
 
+def cmd_undo(args) -> None:
+    from .loop.rollback import last_action, undo
+    config = MakerConfig.from_file(args.config) if args.config else MakerConfig()
+    action = last_action(config.worklogs_dir)
+    if action is None:
+        print("[undo] 되돌릴 MAKER 액션 없음(브랜치 만든 세션 없음)")
+        return
+    print(f"[undo] 대상: {action['repo']} 브랜치 {action['branch']} "
+          f"(base {action['base']}, pushed={action['pushed']}, MR={action['mr'] or '-'})")
+    if not args.yes:
+        print("  실제 되돌리려면 --yes (원격 브랜치까지 삭제하려면 --remote 추가)")
+        return
+    result = undo(config, action, delete_remote=args.remote)
+    for s in result["steps"]:
+        print(f"  ✓ {s}")
+    for e in result["errors"]:
+        print(f"  ✗ {e}")
+    if result.get("mr_note"):
+        print(f"  ! {result['mr_note']}")
+
+
 def cmd_login(args) -> None:
     from .auth import (Auth, save_auth, claude_cli_status, load_auth,
                        gitlab_login_password, gitlab_verify_token)
@@ -659,6 +680,12 @@ def main(argv: list[str] | None = None) -> None:
 
     p = sub.add_parser("whoami", help="현재 로그인/프로바이더 상태")
     p.set_defaults(func=cmd_whoami)
+
+    p = sub.add_parser("undo", help="롤백 — MAKER가 만든 마지막 브랜치·커밋·푸시 되돌림")
+    p.add_argument("--yes", action="store_true", help="실제 실행(없으면 미리보기)")
+    p.add_argument("--remote", action="store_true", help="원격 브랜치도 삭제")
+    p.add_argument("--config", default=None)
+    p.set_defaults(func=cmd_undo)
 
     p = sub.add_parser("doctor", help="자가검증 — MAKER 목적(R1~R20)이 실제로 되는지 점검")
     p.add_argument("--config", default=None)

@@ -39,6 +39,8 @@ class MakerConfig:
     gitlab_url: str = "https://gitlab.example.com"
     gitlab_projects: dict[str, str] = field(default_factory=dict)  # repo명 → "xgen2.0/xgen-workflow"
     target_branch: str = "develop"
+    fetch_latest: bool = True                              # 작업 전 origin/target 최신 fetch + KG 갱신
+    isolate_worktree: bool = False                         # tmp git worktree 격리(동시실행 충돌 방지)
     release_stages: list = field(default_factory=lambda: [  # develop→stg→main 릴리즈 사다리
         {"branch": "develop", "env": "dev", "role": "개발 통합"},
         {"branch": "stg", "env": "stg", "role": "스테이징 검증"},

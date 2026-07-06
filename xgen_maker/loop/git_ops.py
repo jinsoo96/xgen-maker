@@ -34,12 +34,43 @@ class GitRepo:
     def is_clean(self) -> bool:
         return not self._run("status", "--porcelain").strip()
 
-    def create_branch(self, name: str) -> str:
+    def create_branch(self, name: str, base_ref: str = "") -> str:
         issue = branch_name_issue(name)
         if issue:
             raise GitOpsError(f"브랜치명 '{name}' 규칙 위반 — {issue}")
-        self._run("checkout", "-b", name)
+        if base_ref:
+            self._run("checkout", "-b", name, base_ref)  # 최신 base에서 분기
+        else:
+            self._run("checkout", "-b", name)
         return name
+
+    def fetch(self, branch: str, remote: str = "origin", token: str = "",
+              user: str = "oauth2") -> str:
+        """origin/<branch> 최신 가져오기. 토큰 있으면 인증 URL 사용. 반환 origin/<branch> SHA."""
+        args = ["fetch", "--quiet", remote, branch]
+        if token:
+            remote_url = self._run("remote", "get-url", remote).strip()
+            if remote_url.startswith("https://"):
+                host_path = remote_url.split("://", 1)[1].split("@")[-1]
+                args = ["-c", "credential.helper=", "fetch", "--quiet",
+                        f"https://{user}:{token}@{host_path}", branch]
+        self._run(*args)
+        return self._run("rev-parse", "FETCH_HEAD").strip()
+
+    def diff_names(self, ref_a: str, ref_b: str = "") -> list[str]:
+        out = self._run("diff", "--name-only", ref_a, *( [ref_b] if ref_b else [] ))
+        return [f.strip() for f in out.splitlines() if f.strip()]
+
+    def add_worktree(self, path: str | Path, branch: str, base_ref: str) -> "GitRepo":
+        """격리 worktree 생성(동시실행 충돌 방지) — path에 base_ref로부터 branch 체크아웃."""
+        issue = branch_name_issue(branch)
+        if issue:
+            raise GitOpsError(f"브랜치명 '{branch}' 규칙 위반 — {issue}")
+        self._run("worktree", "add", "-b", branch, str(path), base_ref or "HEAD")
+        return GitRepo(path)
+
+    def remove_worktree(self, path: str | Path) -> None:
+        self._run("worktree", "remove", "--force", str(path))
 
     def checkout(self, name: str) -> None:
         self._run("checkout", name)
