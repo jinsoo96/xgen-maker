@@ -88,9 +88,11 @@ class TestPipelineE2E(unittest.TestCase):
         steps = [json.loads(line)["step"] for line in
                  (session / "journal.jsonl").read_text(encoding="utf-8").splitlines()]
         for expected in ("session_start", "intent", "kg_search", "branch",
-                         "implement", "judge", "commit", "mr_ready", "kg_refresh",
+                         "iteration", "commit", "mr_ready", "kg_refresh",
                          "session_end"):
             self.assertIn(expected, steps)
+        self.assertTrue(report.get("converged"))
+        self.assertGreaterEqual(report.get("iterations", 0), 1)
 
         log = subprocess.run(["git", "log", "--oneline"], cwd=self.repo_root,
                              capture_output=True, text=True,

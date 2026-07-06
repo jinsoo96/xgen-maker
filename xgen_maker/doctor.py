@@ -169,6 +169,31 @@ def run_doctor(config_path: str | None = None) -> bool:
     except Exception as e:
         check.fail("MCP 노출", str(e)[:80])
 
+    # 목적 9: 수렴 루프 + 하네스 샌드박스 (통과까지 자가수정)
+    try:
+        from .loop.converge import decide, HAS_HARNESS, HARNESS_VERSION, sandbox_verify_python
+        # decide 계약: 실패는 retry, 전부 통과는 stop
+        retry = decide({"blocked": True, "checks": [], "summary": {}},
+                       {"status": "passed"}, None, 1, 3)
+        stop = decide({"blocked": False, "checks": [], "summary": {}},
+                      {"status": "passed"}, {"passed": True}, 1, 3)
+        if retry == "retry" and stop == "stop":
+            check.ok("수렴 루프", "실패→retry / 통과→stop 계약 확인 (max_iterations 반복)")
+        else:
+            check.fail("수렴 루프", f"decide 계약 이상: retry={retry} stop={stop}")
+        if HAS_HARNESS:
+            with tempfile.TemporaryDirectory() as tmp:
+                (Path(tmp) / "s.py").write_text("x=1\n", encoding="utf-8")
+                sb = sandbox_verify_python(Path(tmp), ["s.py"])
+            if sb["status"] == "passed" and sb.get("isolated"):
+                check.ok("하네스 샌드박스", f"xgen-harness {HARNESS_VERSION} 격리검증 동작")
+            else:
+                check.warn("하네스 샌드박스", f"검증 상태 {sb['status']}")
+        else:
+            check.warn("하네스 샌드박스", "xgen-harness 미설치 — 로컬 checks로 대체")
+    except Exception as e:
+        check.fail("수렴 루프", str(e)[:80])
+
     # 출력
     width = max(len(n) for _, n, _ in check.rows)
     for status, name, detail in check.rows:

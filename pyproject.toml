@@ -7,6 +7,11 @@ name = "xgen-maker"
 version = "0.1.0"
 description = "XGEN MAKER - query-driven dev automation: code knowledge graph + harness loop (query -> branch -> implement -> checks -> judge -> MR)"
 requires-python = ">=3.10"
+# 코어는 의존성 0. 수렴 루프의 격리 샌드박스는 xgen-harness(선택) 임포트 — 없으면 로컬 검증으로 degrade.
+dependencies = []
+
+[project.optional-dependencies]
+harness = ["xgen-harness>=1.23"]
 
 [project.scripts]
 maker = "xgen_maker.cli:main"

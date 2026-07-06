@@ -39,6 +39,7 @@ class MakerConfig:
     enable_verify: bool = False                            # 로컬 스택+Playwright 검증 (리소스 가드로 기본 off)
     preview_base: str = ""
     check_timeout: int = 600                               # 자동 테스트(checks) 타임아웃
+    max_iterations: int = 3                                # 수렴 루프 최대 재시도(통과까지)
     verbose: bool = True                                   # 진행 로그 실시간 출력
     deploy_mode: str = "off"                               # off | dry_run | live (live=이중 인터록)
     deploy_env: str = "dev"

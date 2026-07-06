@@ -28,6 +28,7 @@ class Event(str, Enum):
     PLAN_ONLY = "plan_only"
     BRANCH = "branch"
     IMPLEMENT = "implement"
+    ITERATION = "iteration"
     CHECKS = "checks"
     CHECKS_DETAIL = "checks_detail"
     VERIFY = "verify"

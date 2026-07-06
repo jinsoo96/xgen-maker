@@ -15,6 +15,7 @@ from ..kg.graph import Graph
 from ..kg.search import search, impact, retrieve_chain
 from ..kg.build import refresh_files
 from .intent import classify
+from .converge import converge
 from .git_ops import GitRepo, GitOpsError
 from .implement import build_prompt, run_agent
 from .judge import judge
@@ -158,62 +159,64 @@ class MakerLoop:
             return report
         journal.event("branch", "ok", branch=branch, base=base_branch)
 
-        # ⑥ 구현 (코딩에이전트) — 착지점 + 워크플로우 체인 공급
-        prompt = build_prompt(query, intent, landing, legacy_notes, chain=chain_nodes)
-        agent_result = run_agent(repo_path, prompt, journal.dir,
-                                 config.agent_cmd, config.agent_timeout)
-        journal.event("implement", "ok" if agent_result["ok"] else "fail",
-                      error=agent_result.get("error"))
-        if not agent_result["ok"]:
+        # ⑥~⑧ 수렴 루프 — 구현 → 샌드박스+checks → judge → 실패 시 되먹여 재시도(통과까지)
+        conv = converge(config, repo_path, repo, query, intent, landing, chain_nodes,
+                        legacy_notes, base_branch, repo_git, journal)
+        report["iterations"] = conv["iterations"]
+        report["converged"] = conv["converged"]
+
+        if conv.get("stopped") == "implement_failed":
             journal.close("implement_failed")
             report.update({"outcome": Outcome.IMPLEMENT_FAILED.value,
                            "code": ErrorCode.AGENT_EXIT.value,
-                           "error": agent_result.get("error")})
+                           "error": conv.get("agent_error")})
             return report
 
-        repo_git.stage_all()
-        changed = repo_git.staged_files(base_branch)
-        diff_text = repo_git.staged_diff(base_branch)
-
-        # ⑦-1 자동 검증(checks) — 회귀를 기계가 먼저 잡는다. 실패 시 MR 진행 차단.
-        checks = run_checks(repo_path, changed, test_timeout=config.check_timeout)
-        journal.event("checks", "fail" if checks["blocked"] else "ok", **checks["summary"])
+        checks = conv["checks"]
+        sandbox = conv["sandbox"]
+        changed = conv["changed"]
+        diff_text = conv["diff"]
+        judge_result = conv.get("judge")
         report["checks"] = checks["summary"]
-        if checks["blocked"]:
-            failed_detail = [r for r in checks["checks"] if r["status"] == "failed"]
-            journal.event("checks_detail", "fail", detail=failed_detail)
-            journal.close("checks_failed")
-            syntax_failed = any(r["name"] == "py_syntax" for r in failed_detail)
-            report.update({"outcome": Outcome.CHECKS_FAILED.value,
-                           "code": (ErrorCode.CHECKS_SYNTAX if syntax_failed
-                                    else ErrorCode.CHECKS_TEST).value,
-                           "failed": failed_detail,
-                           "note": f"브랜치 {branch} 보존 — 검증 실패 원인 조사용"})
+        report["sandbox"] = sandbox["status"]
+
+        if not conv["converged"]:
+            # 수렴 실패 — 마지막 실패 원인으로 분기(브랜치는 조사용 보존)
+            if sandbox["status"] == "failed" or checks["blocked"]:
+                failed_detail = ([sandbox] if sandbox["status"] == "failed" else []) + \
+                    [r for r in checks["checks"] if r["status"] == "failed"]
+                journal.event("checks_detail", "fail", detail=failed_detail)
+                journal.close("checks_failed")
+                syntax_failed = sandbox["status"] == "failed" or \
+                    any(r["name"] == "py_syntax" for r in failed_detail)
+                report.update({"outcome": Outcome.CHECKS_FAILED.value,
+                               "code": (ErrorCode.CHECKS_SYNTAX if syntax_failed
+                                        else ErrorCode.CHECKS_TEST).value,
+                               "failed": failed_detail,
+                               "note": f"{conv['iterations']}회 시도 후에도 검증 미통과 — 브랜치 {branch} 보존"})
+                return report
+            journal.close("judge_failed")
+            report["judge"] = judge_result
+            report.update({"outcome": Outcome.JUDGE_FAILED.value,
+                           "code": (ErrorCode.JUDGE_INFRA_VETO.value
+                                    if (judge_result or {}).get("veto")
+                                    else ErrorCode.JUDGE_BELOW_THETA.value),
+                           "note": f"{conv['iterations']}회 시도 후에도 품질 미달 — 브랜치 {branch} 보존"})
             return report
+
+        report["judge"] = judge_result
 
         # ⑦-2 로컬 프리뷰 검증 (리소스 가드 내장)
         verify_report = verify(config.enable_verify, [repo], journal.dir, config.preview_base)
         journal.event("verify", "skipped" if verify_report.get("skipped") else "ok",
                       **verify_report)
 
-        # ⑧ judge 게이트
-        judge_result = judge(config, query, diff_text, changed, checks=checks["summary"])
-        journal.event("judge", "pass" if judge_result["passed"] else "fail", **judge_result)
-        report["judge"] = judge_result
-        if not judge_result["passed"]:
-            journal.close("judge_failed")
-            report.update({"outcome": Outcome.JUDGE_FAILED.value,
-                           "code": (ErrorCode.JUDGE_INFRA_VETO.value if judge_result.get("veto")
-                                    else ErrorCode.JUDGE_BELOW_THETA.value),
-                           "note": f"브랜치 {branch}는 조사용으로 보존"})
-            return report
-
         # ⑨ MR 준비
         diff_stat = "\n".join(diff_text.splitlines()[:60])
         title, body = build_mr_draft(query, intent, branch, config.target_branch,
                                      changed, diff_stat, impact_nodes, judge_result,
-                                     agent_summary=agent_result["output"][:500],
-                                     checks=checks["checks"])
+                                     agent_summary=conv.get("agent_summary", ""),
+                                     checks=checks["checks"] + [sandbox])
         draft = save_draft(journal.dir, title, body)
         commit = repo_git.commit_all(title, body)
         journal.event("commit", "ok", sha=commit[:12], files=len(changed))

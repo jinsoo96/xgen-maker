@@ -62,8 +62,12 @@ maker run "쿼리" --config D:\xgen-maker\maker.observe.config.json   # 원샷, 
 openxgen이 챗 표면·코딩, MAKER가 코드 지식그래프·개발 루프. openxgen MCP 탭에 MAKER MCP 서버를
 등록하면 에이전트가 `kg_search`/`kg_impact`/`maker_plan`을 쓴다. 상세: [docs/OPENXGEN-INTEGRATION.md](docs/OPENXGEN-INTEGRATION.md).
 
-루프 순서: 쿼리 → intent → KG착지 → 레거시확인 → 브랜치 → 에이전트 구현 →
-**checks(자동 검증: py_compile+pytest+node test — 실패 시 MR 차단)** → judge 게이트 → MR → KG갱신.
+루프 순서: 쿼리 → intent → KG착지 → 체인확장 → 레거시확인 → 브랜치 →
+**수렴 루프**〔구현 → 샌드박스 격리검증(xgen-harness `run_sandboxed`) + checks(pytest/node) → judge →
+실패 시 에러 되먹여 재구현, **통과할 때까지 max_iterations 반복**〕→ MR → 배포(dry-run) → KG갱신.
+
+수렴 루프는 xgen-harness(PyPI)의 decide 계약(continue/retry/stop)과 샌드박스를 임포트해 차용.
+설치: `pip install -e .[harness]` (없어도 코어는 로컬 검증으로 동작 — 의존성 0).
 
 ## 빠른 시작
 
