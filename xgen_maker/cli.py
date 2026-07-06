@@ -359,6 +359,19 @@ def cmd_doctor(args) -> None:
         sys.exit(1)
 
 
+def cmd_release(args) -> None:
+    from .loop.release import release_view, render_ladder_md
+    config = MakerConfig.from_file(args.config) if args.config else MakerConfig()
+    if args.kg:
+        config.kg_path = args.kg
+    graph = Graph.load(config.kg_path)
+    view = release_view(graph, args.repo, args.branch or config.target_branch, config)
+    print(f"[release] {args.repo}: 이 변경은 '{args.branch or config.target_branch}' "
+          f"→ 환경 '{view['lands_on_env']}'")
+    print(f"[release] 승격 경로: {' → '.join(view['promotion_remaining'])}")
+    print(render_ladder_md(view))
+
+
 def cmd_deploy(args) -> None:
     from .loop.deploy import deploy_render_test, app_for_repo
     config = MakerConfig.from_file(args.config) if args.config else MakerConfig()
@@ -518,6 +531,13 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("doctor", help="자가검증 — MAKER 목적(R1~R20)이 실제로 되는지 점검")
     p.add_argument("--config", default=None)
     p.set_defaults(func=cmd_doctor)
+
+    p = sub.add_parser("release", help="릴리즈 사다리 — 이 변경이 develop→stg→main 어디에 놓이나")
+    p.add_argument("--repo", default="xgen-core")
+    p.add_argument("--branch", default=None, help="타깃 브랜치(기본 develop)")
+    p.add_argument("--config", default=None)
+    p.add_argument("--kg", default=None)
+    p.set_defaults(func=cmd_release)
 
     p = sub.add_parser("deploy", help="배포 렌더 검증(T1, tmp 격리 helm template) — MR 전 배포통과 확인")
     p.add_argument("deploy_action", choices=["test", "apps"])

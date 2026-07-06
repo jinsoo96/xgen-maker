@@ -18,7 +18,8 @@ def build_mr_draft(query: str, intent: str, branch: str, target_branch: str,
                    changed_files: list[str], diff_stat: str,
                    impact_nodes: list[dict], judge_result: dict,
                    agent_summary: str = "",
-                   checks: list[dict] | None = None) -> tuple[str, str]:
+                   checks: list[dict] | None = None,
+                   release_md: str = "") -> tuple[str, str]:
     """반환 = (title, body_markdown)."""
     title_prefix = {"bug": "fix", "feature": "feat", "refactor": "refactor"}.get(intent, "chore")
     title = f"{title_prefix}: {query[:80]}"
@@ -53,6 +54,9 @@ def build_mr_draft(query: str, intent: str, branch: str, target_branch: str,
 ## 품질 게이트
 - judge: **{judge_result.get('score')}** (θ={judge_result.get('theta')}, {judge_result.get('source')})
 {chr(10).join(f"- {r}" for r in judge_result.get('reasons', []))}
+
+## 릴리즈 사다리 (develop → stg → main)
+{release_md or "- (인프라 KG 없음 — maker kg infra 후 재병합 시 표시)"}
 
 ---
 *XGEN MAKER 자동 생성 MR 초안 — 반영은 사람 승인.*

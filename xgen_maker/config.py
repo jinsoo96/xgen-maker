@@ -36,6 +36,11 @@ class MakerConfig:
     gitlab_url: str = "https://gitlab.example.com"
     gitlab_projects: dict[str, str] = field(default_factory=dict)  # repo명 → "xgen2.0/xgen-workflow"
     target_branch: str = "develop"
+    release_stages: list = field(default_factory=lambda: [  # develop→stg→main 릴리즈 사다리
+        {"branch": "develop", "env": "dev", "role": "개발 통합"},
+        {"branch": "stg", "env": "stg", "role": "스테이징 검증"},
+        {"branch": "main", "env": "prd", "role": "운영 배포"},
+    ])
     enable_verify: bool = False                            # 로컬 스택+Playwright 검증 (리소스 가드로 기본 off)
     enable_ui_verify: bool = False                         # UI/UX 검증(라우트 스냅샷+픽셀diff+비전판정)
     preview_base: str = ""

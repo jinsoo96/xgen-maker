@@ -54,7 +54,8 @@ class TestInfraExtract(unittest.TestCase):
         deploys = [e for e in self.g.edges if e["kind"] == "deploys"]
         self.assertTrue(deploys)
         serves = [e for e in self.g.edges if e["kind"] == "serves"]
-        self.assertTrue(any(e["meta"].get("domain") == "app.example.com" for e in serves))
+        self.assertTrue(any("app.example.com" in (e["meta"].get("domains", {}) or {}).values()
+                            for e in serves))
 
     def test_link_and_targets(self):
         # 코드 레포 노드 추가 후 연결

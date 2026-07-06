@@ -237,6 +237,16 @@ def run_doctor(config_path: str | None = None) -> bool:
         else:
             check.warn("인프라 KG", "인프라 미포함 — maker kg infra 후 재병합")
 
+    # 목적 6-1b: 릴리즈 사다리 (develop→stg→main — 배포의 뼈대)
+    try:
+        from .loop.release import ladder, env_for_branch
+        lad = ladder(config)
+        branches = " → ".join(s["branch"] for s in lad)
+        tb = getattr(config, "target_branch", "develop") if config else "develop"
+        check.ok("릴리즈 사다리", f"{branches} · 이 MR→{tb}({env_for_branch(tb, config)})")
+    except Exception as e:
+        check.warn("릴리즈 사다리", str(e)[:80])
+
     # 목적 6-2: 배포 렌더 검증 (상사님 tmp 방식 — MR 전 배포통과 확인)
     try:
         from .loop.deploy import _find_helm, deploy_render_test

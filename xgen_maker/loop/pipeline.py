@@ -242,12 +242,19 @@ class MakerLoop:
                                "note": f"배포 렌더 실패 — 브랜치 {branch} 보존(MR 안 냄)"})
                 return report
 
-        # ⑨ MR 준비
+        # ⑨ MR 준비 — 릴리즈 사다리(develop→stg→main) 뷰 포함
+        from .release import release_view, render_ladder_md
+        rel_view = release_view(self.graph, repo, config.target_branch, config)
+        report["release"] = {"lands_on_env": rel_view["lands_on_env"],
+                             "promotion_remaining": rel_view["promotion_remaining"]}
+        journal.event("release", "ok", env=rel_view["lands_on_env"],
+                      promotion=rel_view["promotion_remaining"])
         diff_stat = "\n".join(diff_text.splitlines()[:60])
         title, body = build_mr_draft(query, intent, branch, config.target_branch,
                                      changed, diff_stat, impact_nodes, judge_result,
                                      agent_summary=conv.get("agent_summary", ""),
-                                     checks=checks["checks"] + [sandbox, deploy_test])
+                                     checks=checks["checks"] + [sandbox, deploy_test],
+                                     release_md=render_ladder_md(rel_view))
         draft = save_draft(journal.dir, title, body)
         commit = repo_git.commit_all(title, body)
         journal.event("commit", "ok", sha=commit[:12], files=len(changed))
