@@ -96,6 +96,11 @@ python -m xgen_maker kg search "ontology graph" --kg kg\merged.json
 python -m xgen_maker kg impact "xgen-core:main.py" --kg kg\merged.json
 python -m xgen_maker kg chain "ontology graph data" --kg kg\merged.json   # 단일매치 아닌 워크플로우 체인(FE→BE)
 
+# 4-1) UI/UX 검증 (변경 → 영향 라우트 → 스냅샷 + 픽셀diff + 비전판정)
+maker ui routes --changed features/.../ontology-graph-section.tsx        # 영향 라우트 매핑
+maker ui baseline --changed features/.../ontology-graph-section.tsx      # 현재 화면을 baseline으로
+maker ui verify  --changed features/.../ontology-graph-section.tsx --preview http://localhost:3100
+
 # 5) MAKER 루프 (기본 = plan-only: 실레포 미접촉, MR 초안까지)
 python -m xgen_maker run "ontology graph 조회 API 버그 고쳐줘" --config maker.config.json
 

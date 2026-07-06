@@ -96,6 +96,57 @@ def chat(base: str, model: str, messages: list[dict], max_tokens: int = 800,
     return _chat_openai(base, model, messages, max_tokens, temperature, timeout)
 
 
+def vision_judge(image_path: str, question: str,
+                 model: str = "claude-sonnet-5", timeout: int = 60) -> dict | None:
+    """스크린샷을 비전 LLM으로 판정 (Visual Feedback Loop 패턴).
+
+    Anthropic Messages API 이미지 블록 사용 — ANTHROPIC_API_KEY 필요. 없으면 None.
+    반환 {"renders_ok": bool, "issues": [...], "summary": "..."} (JSON 강제).
+    """
+    import base64
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return None
+    try:
+        raw = open(image_path, "rb").read()
+    except OSError:
+        return None
+    media = "image/png" if image_path.lower().endswith(".png") else "image/jpeg"
+    payload = {
+        "model": model, "max_tokens": 500,
+        "messages": [{"role": "user", "content": [
+            {"type": "image", "source": {"type": "base64", "media_type": media,
+                                         "data": base64.b64encode(raw).decode()}},
+            {"type": "text", "content_hint": "screenshot",
+             "text": question + '\n\nReply JSON only: '
+                     '{"renders_ok": true/false, "issues": ["..."], "summary": "..."}'},
+        ]}],
+    }
+    # content의 text 항목 정규화(위 dict에 content_hint 오타 방지)
+    payload["messages"][0]["content"][1] = {
+        "type": "text",
+        "text": question + '\n\nReply JSON only: '
+                '{"renders_ok": true/false, "issues": ["..."], "summary": "..."}'}
+    request = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json", "x-api-key": api_key,
+                 "anthropic-version": "2023-06-01"}, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        text = "".join(b.get("text", "") for b in data.get("content", []))
+    except (urllib.error.URLError, OSError, KeyError, json.JSONDecodeError, TimeoutError):
+        return None
+    match = re.search(r"\{.*\}", text, re.S)
+    if not match:
+        return None
+    try:
+        return json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return None
+
+
 def json_chat(base: str, model: str, messages: list[dict], **kw) -> dict | None:
     """응답에서 첫 JSON 오브젝트를 관대하게 파싱."""
     text = chat(base, model, messages, **kw)

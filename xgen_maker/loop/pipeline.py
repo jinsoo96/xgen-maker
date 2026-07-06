@@ -211,6 +211,15 @@ class MakerLoop:
         journal.event("verify", "skipped" if verify_report.get("skipped") else "ok",
                       **verify_report)
 
+        # ⑦-3 UI/UX 검증 — 영향 라우트 스냅샷 + 픽셀diff + 비전판정 (Visual Feedback Loop)
+        if config.enable_ui_verify:
+            from .ui_verify import ui_verify
+            ui_report = ui_verify(config, self.graph, changed, repo, journal.dir)
+            journal.event("ui_verify", "skipped" if ui_report.get("skipped")
+                          else ("fail" if ui_report.get("problems") else "ok"),
+                          **{k: v for k, v in ui_report.items() if k != "results"})
+            report["ui_verify"] = {k: v for k, v in ui_report.items() if k != "results"}
+
         # ⑨ MR 준비
         diff_stat = "\n".join(diff_text.splitlines()[:60])
         title, body = build_mr_draft(query, intent, branch, config.target_branch,

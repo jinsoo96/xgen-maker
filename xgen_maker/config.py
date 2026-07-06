@@ -37,6 +37,7 @@ class MakerConfig:
     gitlab_projects: dict[str, str] = field(default_factory=dict)  # repo명 → "xgen2.0/xgen-workflow"
     target_branch: str = "develop"
     enable_verify: bool = False                            # 로컬 스택+Playwright 검증 (리소스 가드로 기본 off)
+    enable_ui_verify: bool = False                         # UI/UX 검증(라우트 스냅샷+픽셀diff+비전판정)
     preview_base: str = ""
     check_timeout: int = 600                               # 자동 테스트(checks) 타임아웃
     max_iterations: int = 3                                # 수렴 루프 최대 재시도(통과까지)

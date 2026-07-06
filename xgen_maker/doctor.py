@@ -177,6 +177,26 @@ def run_doctor(config_path: str | None = None) -> bool:
     except Exception as e:
         check.warn("웹 프리뷰", str(e)[:80])
 
+    # 목적 7-3: UI/UX 검증 (라우트 매핑 + 픽셀diff + 비전판정)
+    try:
+        import os as _os
+        from .loop.ui_verify import affected_routes, pixel_diff
+        pieces = []
+        if graph is not None:
+            fr = [r for r in graph.nodes_by_kind("feature")]
+            same_pkg = [e for e in graph.edges if e["kind"] == "same_package"]
+            pieces.append(f"라우트{len(graph.nodes_by_kind('route'))}·feature링크{len(same_pkg)}")
+        try:
+            import PIL  # noqa: F401
+            pieces.append("픽셀diff(Pillow)")
+        except ImportError:
+            pieces.append("픽셀diff없음")
+        pieces.append("비전판정" + ("(키있음)" if _os.environ.get("ANTHROPIC_API_KEY")
+                                   else "(키필요)"))
+        check.ok("UI/UX 검증", " · ".join(pieces))
+    except Exception as e:
+        check.warn("UI/UX 검증", str(e)[:80])
+
     # 목적 8: MCP 노출
     try:
         from .mcp_server import TOOLS

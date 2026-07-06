@@ -218,6 +218,44 @@ def cmd_chat(args) -> None:
     run_chat(args.config)
 
 
+def cmd_ui(args) -> None:
+    from .loop.ui_verify import ui_verify, affected_routes
+    from pathlib import Path as _P
+    config = MakerConfig.from_file(args.config) if args.config else MakerConfig()
+    if args.kg:
+        config.kg_path = args.kg
+    if args.preview:
+        config.preview_base = args.preview
+    graph = Graph.load(config.kg_path)
+    changed = args.changed or []
+    if args.ui_action == "routes":
+        routes = affected_routes(graph, changed, args.repo)
+        print(json.dumps([r["route"] for r in routes], ensure_ascii=False))
+        return
+    out_dir = _P(args.out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    if args.ui_action == "baseline":
+        # 현재 스택 화면을 baseline으로 저장
+        from .loop.verify import playwright_snapshot, http_reachable
+        baseline_dir = _P(config.kg_path).parent / "ui-baselines"
+        baseline_dir.mkdir(parents=True, exist_ok=True)
+        if not http_reachable(config.preview_base, timeout=6):
+            print(f"[ui baseline] {config.preview_base} 미도달"); return
+        targets = [r["route"] for r in affected_routes(graph, changed, args.repo)] \
+            if changed else [args.route or "/"]
+        for rp in targets:
+            if "[" in rp:
+                continue
+            slug = rp.strip("/").replace("/", "_") or "root"
+            url = config.preview_base.rstrip("/") + (rp if rp != "/" else "")
+            snap = playwright_snapshot(url, baseline_dir / f"{slug}.png")
+            print(f"[ui baseline] {rp} → {snap.get('ok')}")
+        return
+    # verify
+    report = ui_verify(config, graph, changed, args.repo, out_dir, vision=not args.no_vision)
+    print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+
+
 def cmd_login(args) -> None:
     from .auth import Auth, save_auth, claude_cli_status, load_auth
     provider = args.provider
@@ -375,6 +413,18 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("chat", help="대화형 터미널 (openxgen 스타일) — KG 1회 로드, 연속 쿼리")
     p.add_argument("--config", default=None)
     p.set_defaults(func=cmd_chat)
+
+    p = sub.add_parser("ui", help="UI/UX 검증 — 라우트 매핑 + 스냅샷 + 픽셀diff + 비전판정")
+    p.add_argument("ui_action", choices=["routes", "baseline", "verify"])
+    p.add_argument("--repo", default="xgen-frontend-features")
+    p.add_argument("--changed", nargs="*", help="변경 파일(레포 상대경로)")
+    p.add_argument("--route", default=None, help="baseline 대상 라우트(변경 미지정 시)")
+    p.add_argument("--config", default=None)
+    p.add_argument("--kg", default=None)
+    p.add_argument("--preview", default=None, help="preview_base override")
+    p.add_argument("--out", default="worklogs/ui-verify")
+    p.add_argument("--no-vision", action="store_true")
+    p.set_defaults(func=cmd_ui)
 
     p = sub.add_parser("login", help="로그인 — Claude 하나로 코딩+판단+요약 통합 (API 키 불필요)")
     p.add_argument("--provider", choices=["claude_cli", "anthropic", "vllm"], default=None)

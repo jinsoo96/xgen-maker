@@ -32,6 +32,7 @@ class Event(str, Enum):
     CHECKS = "checks"
     CHECKS_DETAIL = "checks_detail"
     VERIFY = "verify"
+    UI_VERIFY = "ui_verify"
     JUDGE = "judge"
     COMMIT = "commit"
     PUSH = "push"
