@@ -11,10 +11,40 @@
 """
 from __future__ import annotations
 
+import json
+import os
+import subprocess
 from pathlib import Path
 
 from .. import llm
 from .verify import playwright_snapshot, http_reachable
+
+_PW_LOGIN = Path(__file__).with_name("pw_login.js")
+_PW_MODULES = Path(__file__).resolve().parents[2] / ".tools" / "pw" / "node_modules"
+
+
+def authed_snapshot(base: str, email: str, password: str, routes: list[str],
+                    out_dir: Path, timeout: int = 180) -> dict:
+    """Playwright 인증 세션 — 로그인 → 보호 라우트 스냅샷. node + 로컬 playwright 필요."""
+    import shutil
+    if shutil.which("node") is None or not _PW_MODULES.is_dir():
+        return {"ok": False, "reason": "node/playwright 미설치 — 인증 스냅샷 불가"}
+    out_dir.mkdir(parents=True, exist_ok=True)
+    cfg = {"base": base, "email": email, "password": password,
+           "routes": routes, "outDir": str(out_dir), "waitMs": 4000}
+    cfg_path = out_dir / "_pwcfg.json"
+    cfg_path.write_text(json.dumps(cfg), encoding="utf-8")
+    env = dict(os.environ, NODE_PATH=str(_PW_MODULES))
+    try:
+        result = subprocess.run(["node", str(_PW_LOGIN), str(cfg_path)],
+                                capture_output=True, text=True, encoding="utf-8",
+                                errors="replace", timeout=timeout, env=env)
+    except (subprocess.TimeoutExpired, OSError) as error:
+        return {"ok": False, "reason": str(error)[:200]}
+    try:
+        return json.loads((result.stdout or "").strip() or "{}")
+    except json.JSONDecodeError:
+        return {"ok": False, "reason": (result.stderr or result.stdout or "")[-300:]}
 
 
 def affected_routes(graph, changed_files: list[str], repo: str,
@@ -89,7 +119,10 @@ def _url(base: str, route_path: str) -> str:
 
 def ui_verify(config, graph, changed_files: list[str], repo: str,
               session_dir: Path, vision: bool = True) -> dict:
-    """영향 라우트별로 스냅샷 + (baseline 있으면)픽셀diff + (키 있으면)비전판정."""
+    """영향 라우트별로 스냅샷 + (baseline 있으면)픽셀diff + (키 있으면)비전판정.
+
+    인증 자격(env XGEN_MAKER_UI_EMAIL/PASSWORD)이 있으면 로그인 후 실제 보호화면을 캡처.
+    """
     base = getattr(config, "preview_base", "")
     if not base:
         return {"skipped": True, "reason": "preview_base 미설정"}
@@ -99,6 +132,16 @@ def ui_verify(config, graph, changed_files: list[str], repo: str,
     if not routes:
         return {"skipped": True, "reason": "영향 라우트 없음(비UI 변경)"}
 
+    static_routes = [r["route"] for r in routes if "[" not in r["route"]]
+    # 인증 캡처 (자격 있으면 실제 보호화면)
+    email = os.environ.get("XGEN_MAKER_UI_EMAIL", "")
+    password = os.environ.get("XGEN_MAKER_UI_PASSWORD", "")
+    authed = {}
+    if email and password and static_routes:
+        res = authed_snapshot(base, email, password, static_routes, session_dir)
+        if res.get("ok"):
+            authed = {s["route"]: s["path"] for s in res.get("shots", [])}
+
     baseline_dir = Path(config.kg_path).parent / "ui-baselines"
     results = []
     for route in routes:
@@ -107,7 +150,11 @@ def ui_verify(config, graph, changed_files: list[str], repo: str,
             continue
         slug = rp.strip("/").replace("/", "_") or "root"
         current = session_dir / f"ui_{slug}.png"
-        snap = playwright_snapshot(_url(base, rp), current)
+        if rp in authed:  # 인증 캡처 우선(실제 보호화면)
+            snap = {"ok": True, "snapshot": authed[rp], "authed": True}
+            current = Path(authed[rp])
+        else:
+            snap = playwright_snapshot(_url(base, rp), current)
         entry = {"route": rp, "snapshot": snap}
         if snap.get("ok"):
             baseline = baseline_dir / f"{slug}.png"

@@ -89,3 +89,14 @@ class TestUiVerifyGuards(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAuthedSnapshot(unittest.TestCase):
+    def test_guard_when_node_missing(self):
+        from xgen_maker.loop.ui_verify import authed_snapshot
+        from unittest.mock import patch
+        with patch("shutil.which", return_value=None):
+            with tempfile.TemporaryDirectory() as tmp:
+                r = authed_snapshot("http://x", "e", "p", ["/"], Path(tmp))
+        self.assertFalse(r["ok"])
+        self.assertIn("미설치", r["reason"])

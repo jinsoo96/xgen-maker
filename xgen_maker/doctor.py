@@ -220,6 +220,8 @@ def run_doctor(config_path: str | None = None) -> bool:
             pieces.append("픽셀diff없음")
         pieces.append("비전판정" + ("(키있음)" if _os.environ.get("ANTHROPIC_API_KEY")
                                    else "(키필요)"))
+        pieces.append("인증세션" + ("(자격있음)" if _os.environ.get("XGEN_MAKER_UI_EMAIL")
+                                  else "(미인증)"))
         check.ok("UI/UX 검증", " · ".join(pieces))
     except Exception as e:
         check.warn("UI/UX 검증", str(e)[:80])
