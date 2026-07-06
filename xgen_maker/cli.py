@@ -385,6 +385,53 @@ def cmd_status(args) -> None:
         print("미설정 (.env에 XGEN_MAKER_ARGOCD_URL/USER/TOKEN)")
 
 
+def cmd_mrs(args) -> None:
+    from .loop.gitlab_observe import my_mrs, maker_mrs
+    config = MakerConfig.from_file(args.config) if args.config else MakerConfig()
+    which = maker_mrs(config) if args.maker else my_mrs(config, args.state)
+    label = "MAKER가 만든 MR" if args.maker else f"내 MR ({args.state})"
+    print(f"═══ {label} ═══")
+    if not which:
+        print("  (없음 — 토큰 미설정이면 .env의 XGEN_MAKER_GITLAB_TOKEN 확인)")
+    for m in which:
+        print(f"  !{m['iid']} [{m['state']:6}] {m['source']}→{m['target']} · {m['updated']}")
+        print(f"       {m['title'][:70]}")
+        if m.get("url"):
+            print(f"       {m['url']}")
+
+
+def cmd_branches(args) -> None:
+    from .loop.gitlab_observe import branches
+    config = MakerConfig.from_file(args.config) if args.config else MakerConfig()
+    b = branches(config, args.repo)
+    if "error" in b:
+        print(f"[branches] {b['error']}")
+        return
+    print(f"═══ {args.repo} 브랜치 ({b['total']}개) ═══")
+    print(f"  release: {b['release']}  ·  보호: {b['protected']}")
+    print(f"  작업 브랜치(최근 {len(b['work_recent'])}):")
+    for w in b["work_recent"]:
+        merged = "✓머지" if w["merged"] else "     "
+        print(f"    {merged} {w['name'][:50]:50} {w['when']} {w['author']}")
+
+
+def cmd_history(args) -> None:
+    from .loop.history import read_sessions
+    config = MakerConfig.from_file(args.config) if args.config else MakerConfig()
+    sessions = read_sessions(config.worklogs_dir, args.limit)
+    print(f"═══ MAKER 작업 이력 ({len(sessions)}세션) ═══")
+    if not sessions:
+        print("  (worklogs 없음)")
+    for s in sessions:
+        print(f"  [{s['outcome']:12}] {s['query'][:52]}")
+        detail = " · ".join(filter(None, [
+            f"브랜치 {s['branch']}" if s["branch"] else "",
+            f"env {s['env']}" if s["env"] else "",
+            f"MR {s['mr']}" if s["mr"] else ""]))
+        if detail:
+            print(f"       {detail}")
+
+
 def cmd_release(args) -> None:
     from .loop.release import release_view, render_ladder_md
     config = MakerConfig.from_file(args.config) if args.config else MakerConfig()
@@ -560,6 +607,22 @@ def main(argv: list[str] | None = None) -> None:
 
     p = sub.add_parser("status", help="배포 상태 관측(read-only) — Jenkins·ArgoCD. MAKER는 배포 안 함")
     p.set_defaults(func=cmd_status)
+
+    p = sub.add_parser("mrs", help="MR 이력 관측 — 본인 MR / MAKER가 만든 MR (read-only)")
+    p.add_argument("--maker", action="store_true", help="MAKER가 만든 MR만")
+    p.add_argument("--state", default="all", choices=["all", "opened", "merged", "closed"])
+    p.add_argument("--config", default=None)
+    p.set_defaults(func=cmd_mrs)
+
+    p = sub.add_parser("branches", help="레포 브랜치 관측 — release·보호·작업 브랜치 (read-only)")
+    p.add_argument("--repo", default="xgen-frontend-features")
+    p.add_argument("--config", default=None)
+    p.set_defaults(func=cmd_branches)
+
+    p = sub.add_parser("history", help="MAKER 본인 작업 이력 (worklogs journal)")
+    p.add_argument("--limit", type=int, default=20)
+    p.add_argument("--config", default=None)
+    p.set_defaults(func=cmd_history)
 
     p = sub.add_parser("release", help="릴리즈 사다리 — 이 변경이 develop→stg→main 어디에 놓이나")
     p.add_argument("--repo", default="xgen-core")
