@@ -349,6 +349,8 @@ def cmd_doctor(args) -> None:
 def main(argv: list[str] | None = None) -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    from .dotenv import ensure_loaded
+    ensure_loaded()  # .env의 GitLab 토큰·LLM 키 등을 환경변수로 자동 주입
     parser = argparse.ArgumentParser(prog="xgen-maker", description="XGEN MAKER")
     sub = parser.add_subparsers(dest="command", required=True)
 

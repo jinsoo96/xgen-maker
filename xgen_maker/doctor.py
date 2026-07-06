@@ -47,6 +47,18 @@ def run_doctor(config_path: str | None = None) -> bool:
     except Exception as e:
         check.fail("로그인 통합", str(e)[:80])
 
+    # 목적 1-1: .env 자동 로드 (자격을 파일에 박아두면 재입력 불필요)
+    try:
+        from .dotenv import find_env, load_env
+        env_path = find_env()
+        if env_path:
+            r = load_env(env_path)
+            check.ok(".env 자동로드", f"{env_path.name} — 주입 {len(r['keys'])}개 키")
+        else:
+            check.warn(".env 자동로드", ".env 없음 — .env.example 복사해 토큰 기입")
+    except Exception as e:
+        check.warn(".env 자동로드", str(e)[:80])
+
     # 목적 1-2: GitLab 로그인 지속 (push·MR 재입력 불필요)
     try:
         from .auth import load_auth, gitlab_verify_token

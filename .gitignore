@@ -21,3 +21,6 @@ xgen_maker.egg-info/
 # 로그인 자격(홈 디렉토리 저장이지만 방어적)
 .xgen-maker/
 auth.json
+
+# 자격 실값 — 절대 커밋 금지(.env.example만 커밋)
+.env
