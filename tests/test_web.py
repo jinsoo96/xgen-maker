@@ -78,6 +78,27 @@ class TestWebServer(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError):
             self._get("/nope")
 
+    def test_dashboard_history_api(self):
+        status, body = self._get("/api/history")
+        self.assertEqual(status, 200)
+        self.assertIn("sessions", json.loads(body))
+
+    def test_dashboard_status_api(self):
+        status, body = self._get("/api/status")
+        d = json.loads(body)
+        self.assertEqual([s["branch"] for s in d["ladder"]], ["develop", "stg", "main"])
+
+    def test_dashboard_mrs_api(self):
+        status, body = self._get("/api/mrs")
+        d = json.loads(body)
+        self.assertIn("mine", d)
+        self.assertIn("maker", d)
+
+
+if __name__ == "__main__":
+    import urllib.error
+    unittest.main()
+
 
 if __name__ == "__main__":
     import urllib.error
