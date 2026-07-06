@@ -367,6 +367,25 @@ def cmd_doctor(args) -> None:
         sys.exit(1)
 
 
+def cmd_sdk(args) -> None:
+    from .sdk_check import self_check, maker_catalog
+    r = self_check()
+    v = {"ok": "✓ 최신·호환", "drift": "! 동작하나 최신 아님(업그레이드 시 재검증)",
+         "broken": "✗ 계약 깨짐 — 엔진 API 변경"}[r["verdict"]]
+    print(f"═══ SDK 자가검증: {r['verdict']} — {v} ═══")
+    for pkg, d in r["drift"].items():
+        mark = "↑뒤짐" if d["behind"] else "최신"
+        print(f"  {pkg}: 설치 {d['installed']} / PyPI {d['latest']}  [{mark}]")
+    c = r["contract"]
+    print(f"  계약: engine={c['engine']} · present {len(c['present'])} · "
+          f"missing {c['missing'] or '없음'} · sandbox {'OK' if c.get('sandbox_ok') else 'X'}")
+    if args.catalog:
+        print("\n═══ MAKER 자기 카탈로그 ═══")
+        print(json.dumps(maker_catalog(), ensure_ascii=False, indent=1))
+    if r["verdict"] == "broken":
+        sys.exit(1)
+
+
 def cmd_engine(args) -> None:
     from .engine_stage import register, STAGE_ID
     r = register()
@@ -644,6 +663,10 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("doctor", help="자가검증 — MAKER 목적(R1~R20)이 실제로 되는지 점검")
     p.add_argument("--config", default=None)
     p.set_defaults(func=cmd_doctor)
+
+    p = sub.add_parser("sdk", help="SDK 자가검증 — 엔진 버전 드리프트 + 계약 호환 확인")
+    p.add_argument("--catalog", action="store_true", help="MAKER 자기 카탈로그도 출력")
+    p.set_defaults(func=cmd_sdk)
 
     p = sub.add_parser("engine", help="MAKER를 xgen-harness 엔진 정식 stage로 등록(R3)")
     p.add_argument("engine_action", nargs="?", default="register", choices=["register"])

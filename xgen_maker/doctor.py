@@ -304,6 +304,19 @@ def run_doctor(config_path: str | None = None) -> bool:
     except Exception as e:
         check.fail("MCP 노출", str(e)[:80])
 
+    # 목적 8-1: SDK 자가검증 (엔진 계약 호환 — 조용히 안 깨지게)
+    try:
+        from .sdk_check import contract_probe, installed_versions
+        probe = contract_probe()
+        ver = installed_versions()
+        if probe["ok"]:
+            check.ok("SDK 자가검증", f"엔진 계약 호환 (sdk {ver.get('xgen-sdk')}·"
+                     f"harness {ver.get('xgen-harness')}) — 드리프트는 maker sdk로")
+        else:
+            check.fail("SDK 자가검증", f"계약 깨짐 — missing {probe['missing']}")
+    except Exception as e:
+        check.warn("SDK 자가검증", str(e)[:80])
+
     # 목적 8-2: R3 엔진 stage 등록 (MAKER가 엔진 정식 스테이지)
     try:
         from .engine_stage import register
