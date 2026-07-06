@@ -1,4 +1,4 @@
-"""XGEN MAKER — 쿼리 하나로 xgen2.0 개발 자동화.
+"""XGEN MAKER — 쿼리 하나로 코드베이스 개발 자동화.
 
 A평면: kg/    — 이중 지식그래프 (코드 KG + UI/UX KG) 빌드·검색·대시보드
 B평면: loop/  — MAKER 루프 (intent→KG검색→브랜치→구현→검증→judge→MR준비)

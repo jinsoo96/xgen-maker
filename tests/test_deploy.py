@@ -12,7 +12,7 @@ from xgen_maker.loop.verify import http_reachable, verify
 class TestDeployInterlock(unittest.TestCase):
     def setUp(self):
         self.config = MakerConfig(
-            gitlab_projects={"demo": "xgen2.0/demo"},
+            gitlab_projects={"demo": "grp/demo"},
             target_branch="develop", deploy_env="dev")
 
     def test_plan_contains_request_but_sends_nothing(self):

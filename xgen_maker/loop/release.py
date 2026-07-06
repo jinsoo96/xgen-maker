@@ -14,15 +14,14 @@ DEFAULT_LADDER = [
     {"branch": "main", "env": "prd", "role": "운영 배포"},
 ]
 
-# env → (플랫폼 스테이지 URL 기본값, Jenkins job). URL은 XGEN_MAKER_URL_<ENV>로 오버라이드.
-_ENV_URL_DEFAULT = {"dev": "https://dev.example.com",
-                    "stg": "https://stg.example.com",
-                    "prd": "https://app.example.com"}
-_ENV_JENKINS = {"dev": "xgen Dev", "stg": "xgen-stage", "prd": "xgen Prd"}
-
-
+# 스테이지 URL·Jenkins job은 전부 .env(XGEN_MAKER_URL_<ENV> / XGEN_MAKER_JENKINS_<ENV>)로만 주입.
+# 하드코딩 없음 — 공개 시 dev/stg 도메인 등 내부 정보 노출 방지.
 def stage_url(env: str) -> str:
-    return os.environ.get(f"XGEN_MAKER_URL_{env.upper()}", _ENV_URL_DEFAULT.get(env, ""))
+    return os.environ.get(f"XGEN_MAKER_URL_{env.upper()}", "")
+
+
+def stage_jenkins(env: str) -> str:
+    return os.environ.get(f"XGEN_MAKER_JENKINS_{env.upper()}", "")
 
 
 def ladder(config=None) -> list[dict]:
@@ -30,7 +29,7 @@ def ladder(config=None) -> list[dict]:
     base = stages or DEFAULT_LADDER
     # url·jenkins job을 각 스테이지에 채운다(명시값 우선)
     return [{**s, "url": s.get("url") or stage_url(s["env"]),
-             "jenkins": s.get("jenkins") or _ENV_JENKINS.get(s["env"], "")}
+             "jenkins": s.get("jenkins") or stage_jenkins(s["env"])}
             for s in base]
 
 

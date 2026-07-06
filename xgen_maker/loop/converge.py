@@ -69,7 +69,7 @@ def sandbox_verify_python(repo_path: Path, changed: list[str],
 
 
 def decide(checks: dict, sandbox: dict, judge_result: dict | None,
-           iteration: int, max_iterations: int) -> str:
+           iteration: int, max_iterations: int, ui: dict | None = None) -> str:
     """엔진 loop_decision 계약: continue(더 시도)/retry(고치고 재시도)/stop(수렴/포기)."""
     if sandbox["status"] == "failed":
         return "retry" if iteration < max_iterations else "stop"
@@ -77,10 +77,13 @@ def decide(checks: dict, sandbox: dict, judge_result: dict | None,
         return "retry" if iteration < max_iterations else "stop"
     if judge_result is not None and not judge_result["passed"]:
         return "retry" if iteration < max_iterations else "stop"
+    if ui and ui.get("status") == "failed":  # UI 렌더 문제 → 되먹여 재시도
+        return "retry" if iteration < max_iterations else "stop"
     return "stop"  # 전부 통과 → 수렴
 
 
-def _feedback(checks: dict, sandbox: dict, judge_result: dict | None) -> str:
+def _feedback(checks: dict, sandbox: dict, judge_result: dict | None,
+              ui: dict | None = None) -> str:
     lines = ["[이전 시도가 실패했다 — 아래 문제를 고쳐서 다시 구현하라]"]
     if sandbox["status"] == "failed":
         lines.append("● 샌드박스 구문검증 실패: " +
@@ -92,12 +95,14 @@ def _feedback(checks: dict, sandbox: dict, judge_result: dict | None) -> str:
         reasons = "; ".join(judge_result.get("reasons", []))
         lines.append(f"● 품질 게이트 미달(judge {judge_result.get('score')} < "
                      f"{judge_result.get('theta')}): {reasons}")
+    if ui and ui.get("status") == "failed":
+        lines.append(f"● UI 렌더 문제(비전 판정): {ui.get('issues','')[:500]}")
     return "\n".join(lines)
 
 
 def converge(config, repo_path: Path, repo: str, query: str, intent: str,
              landing: list, chain: list, legacy_notes: str,
-             base_branch: str, repo_git, journal, cost=None) -> dict:
+             base_branch: str, repo_git, journal, cost=None, graph=None) -> dict:
     """수렴 루프 실행. 반환 {converged, iterations, checks, sandbox, judge, changed, diff}."""
     max_iterations = max(1, getattr(config, "max_iterations", 3))
     feedback = ""
@@ -128,7 +133,22 @@ def converge(config, repo_path: Path, repo: str, query: str, intent: str,
             judge_result = judge(config, query, diff_text, changed,
                                  checks=checks["summary"])
 
-        decision = decide(checks, sandbox, judge_result, iteration, max_iterations)
+        # ④ UI 수렴 신호 — 코드·품질 통과 후 UI 검증. 문제면 vision issues를 되먹여 retry.
+        ui = {"status": "skipped"}
+        if (getattr(config, "ui_converge", False) and graph is not None
+                and sandbox["status"] != "failed" and not checks["blocked"]
+                and (judge_result or {}).get("passed", True)):
+            from .ui_verify import ui_verify
+            ur = ui_verify(config, graph, changed, repo, journal.dir)
+            if not ur.get("skipped") and ur.get("problems"):
+                issues = "; ".join(
+                    "; ".join(r["vision"]["issues"]) for r in ur.get("results", [])
+                    if r.get("vision") and not r["vision"].get("renders_ok"))
+                ui = {"status": "failed", "issues": issues or "UI 렌더/픽셀 회귀"}
+            else:
+                ui = {"status": "passed" if not ur.get("skipped") else "skipped"}
+
+        decision = decide(checks, sandbox, judge_result, iteration, max_iterations, ui)
         journal.event("iteration",
                       "pass" if decision == "stop" and (judge_result or {}).get("passed", sandbox["status"] != "failed" and not checks["blocked"]) else decision,
                       n=iteration, sandbox=sandbox["status"],
@@ -144,6 +164,6 @@ def converge(config, repo_path: Path, repo: str, query: str, intent: str,
                          and (judge_result is None or judge_result["passed"]))
             return {**last, "converged": converged,
                     "stopped": "converged" if converged else "max_iterations"}
-        feedback = _feedback(checks, sandbox, judge_result)  # 다음 회차로 되먹임
+        feedback = _feedback(checks, sandbox, judge_result, ui)  # 다음 회차로 되먹임
 
     return {**last, "converged": False, "stopped": "max_iterations"}

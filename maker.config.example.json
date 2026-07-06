@@ -1,0 +1,31 @@
+{
+  "_comment": "이 파일을 maker.config.json으로 복사해 실제 값을 채운다. maker.config.json은 gitignore됨.",
+  "repos": {
+    "backend-core": "/path/to/backend-core",
+    "backend-workflow": "/path/to/backend-workflow",
+    "frontend": "/path/to/frontend"
+  },
+  "gitlab_projects": {
+    "backend-core": "your-group/backend-core",
+    "backend-workflow": "your-group/backend-workflow",
+    "frontend": "your-group/frontend"
+  },
+  "kg_path": "kg/merged.json",
+  "mode": "observe",
+  "allow_write": false,
+  "theta": 0.7,
+  "max_iterations": 3,
+  "target_branch": "develop",
+  "fetch_latest": true,
+  "isolate_worktree": false,
+  "llm_enabled": true,
+  "gitlab_url": "https://gitlab.your-company.com",
+  "enable_verify": false,
+  "enable_ui_verify": false,
+  "enable_deploy_test": false,
+  "deploy_mode": "off",
+  "preview_base": "",
+  "infra_path": "",
+  "worklogs_dir": "worklogs",
+  "learnings_dir": "learnings"
+}

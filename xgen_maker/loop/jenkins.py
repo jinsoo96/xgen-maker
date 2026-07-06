@@ -12,11 +12,20 @@ import os
 import urllib.request
 import urllib.error
 
-# Jenkins job → 릴리즈 스테이지 매핑 (env 기준)
-JOB_TO_ENV = {
-    "xgen Dev": "dev", "xgen-stage": "stg", "xgen Prd": "prd", "xgen-prd": "prd",
-    "example-client-dev": "dev", "example-client": "prd", "jeju": "prd",
-}
+# Jenkins job → env 매핑. 하드코딩 없음(공개 안전) — job명 토큰(dev/stage/prd)으로 추론 +
+# XGEN_MAKER_JENKINS_JOBMAP='{"job명":"env"}' env로 오버라이드.
+import json as _json
+import os as _os
+
+
+def _job_map() -> dict:
+    raw = _os.environ.get("XGEN_MAKER_JENKINS_JOBMAP", "")
+    if raw:
+        try:
+            return _json.loads(raw)
+        except _json.JSONDecodeError:
+            return {}
+    return {}
 
 
 def _creds() -> tuple[str, str, str] | None:
@@ -44,14 +53,16 @@ def _get(path: str, timeout: int = 25) -> dict | None:
 
 
 def _env_of(name: str) -> str:
-    """job명 → env. 정확일치 우선, 없으면 prefix/포함(예: 'xgen Dev (177)')."""
-    if name in JOB_TO_ENV:
-        return JOB_TO_ENV[name]
-    for key, env in JOB_TO_ENV.items():
-        if name.startswith(key) or key in name:
+    """job명 → env. env 오버라이드 맵 우선, 없으면 job명 토큰(stage/prd/dev)으로 추론."""
+    jobmap = _job_map()
+    if name in jobmap:
+        return jobmap[name]
+    for key, env in jobmap.items():
+        if key in name:
             return env
     low = name.lower()
-    for tok, env in (("stage", "stg"), ("prd", "prd"), ("dev", "dev")):
+    for tok, env in (("stage", "stg"), ("stg", "stg"), ("prd", "prd"),
+                     ("prod", "prd"), ("dev", "dev")):
         if tok in low:
             return env
     return ""
@@ -67,7 +78,7 @@ def list_jobs() -> list[dict]:
 
 
 def job_for_env(env: str) -> str | None:
-    for name, mapped in JOB_TO_ENV.items():
+    for name, mapped in _job_map().items():
         if mapped == env:
             return name
     return None

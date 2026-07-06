@@ -30,3 +30,14 @@ auth.json
 
 # 작업 학습 메모리(로컬 러닝, 머신별) — 코드 아님
 learnings/
+
+# ── PUBLIC 안전: 내부/조직 정보는 커밋 금지 (외부인이 못 보게) ──
+# (git .gitignore는 인라인 주석 미지원 — 패턴만 단독 줄에)
+worklogs/
+maker.config.json
+maker.observe.config.json
+REQUIREMENTS.md
+XGEN-MAKER-PLAN.md
+docs/
+.mcp.json
+_ua-eval/

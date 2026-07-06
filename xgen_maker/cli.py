@@ -58,9 +58,14 @@ def cmd_kg_build(args) -> None:
 
 
 def cmd_kg_infra(args) -> None:
+    import os
     from .kg.extract_infra import extract_infra
-    graph = extract_infra(args.path)
-    out = args.out or "kg/xgen-infra.repo.json"
+    path = args.path or os.environ.get("XGEN_MAKER_INFRA_PATH", "")
+    if not path:
+        print("[kg infra] 인프라 경로 미지정 — --path 또는 XGEN_MAKER_INFRA_PATH 설정")
+        return
+    graph = extract_infra(path)
+    out = args.out or "kg/infra.repo.json"
     graph.save(out)
     print(f"[kg infra] {json.dumps(graph.stats()['nodes_by_kind'], ensure_ascii=False)} → {out}")
     for p in graph.nodes_by_kind("deploy_project"):
@@ -408,7 +413,19 @@ def cmd_sdk(args) -> None:
 
 
 def cmd_engine(args) -> None:
-    from .engine_stage import register, STAGE_ID
+    from .engine_stage import register, run_via_engine, STAGE_ID
+    if args.engine_action == "run":
+        if not args.query:
+            print("✗ engine run엔 쿼리 필요: maker engine run \"...\"")
+            sys.exit(1)
+        r = run_via_engine(args.query, args.config, allow_write=False)  # 엔진 경유는 plan-only
+        if not r["ok"]:
+            print(f"✗ {r['reason']}"); sys.exit(1)
+        print(f"✓ 엔진이 MAKER 구동(R3 Level B) — outcome={r['outcome']}")
+        print(f"  loop_decision={r['engine_state']['loop_decision']} · "
+              f"session_saved={r['engine_state']['session_saved']}")
+        print(f"  {r['engine_state']['final_output']}")
+        return
     r = register()
     if r["ok"]:
         print(f"✓ MAKER 스테이지 '{r['stage_id']}' 등록됨 → {r['engine']} {r['version']}")
@@ -556,8 +573,8 @@ def main(argv: list[str] | None = None) -> None:
     p.set_defaults(func=cmd_kg_merge)
 
     p = kg_sub.add_parser("infra", help="인프라 KG 추출(ArgoCD·Helm·도메인) — LLM이 배포 토폴로지 인지")
-    p.add_argument("--path", default="D:\\xgen2.0\\xgen-infra")
-    p.add_argument("--out", default="kg/xgen-infra.repo.json")
+    p.add_argument("--path", default=None, help="인프라 레포 경로(미지정 시 XGEN_MAKER_INFRA_PATH)")
+    p.add_argument("--out", default="kg/infra.repo.json")
     p.set_defaults(func=cmd_kg_infra)
 
     p = kg_sub.add_parser("dashboard")
@@ -695,8 +712,10 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--catalog", action="store_true", help="MAKER 자기 카탈로그도 출력")
     p.set_defaults(func=cmd_sdk)
 
-    p = sub.add_parser("engine", help="MAKER를 xgen-harness 엔진 정식 stage로 등록(R3)")
-    p.add_argument("engine_action", nargs="?", default="register", choices=["register"])
+    p = sub.add_parser("engine", help="MAKER를 xgen-harness 엔진 stage로 등록(R3 Level A)/구동(Level B)")
+    p.add_argument("engine_action", nargs="?", default="register", choices=["register", "run"])
+    p.add_argument("query", nargs="?", default=None, help="engine run용 쿼리")
+    p.add_argument("--config", default=None)
     p.set_defaults(func=cmd_engine)
 
     p = sub.add_parser("status", help="배포 상태 관측(read-only) — Jenkins·ArgoCD. MAKER는 배포 안 함")

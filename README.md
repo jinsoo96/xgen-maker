@@ -1,169 +1,128 @@
 # XGEN MAKER
 
-> **"쿼리 하나로 XGEN을 만든다."** — xgen2.0 코드베이스를 지식그래프 자산으로 물화하고,
-> 하네스 루프가 그 지도를 소비해 브랜치→구현→검증→**MR 준비**까지 자동화한다.
-> 기획 정본: [XGEN-MAKER-PLAN.md](XGEN-MAKER-PLAN.md) · 독립 프로젝트(이 폴더에서 완결) · 의존성 **stdlib 0개**(Python ≥3.10)
+> **쿼리 하나로 코드베이스를 개발한다.** 자연어로 "이 버그 고쳐줘"라고 하면 —
+> 코드 지식그래프로 착지점을 찾고 · 항상 최신 브랜치에서 · 코딩 에이전트가 구현하고 ·
+> 샌드박스에서 테스트하며 **통과할 때까지 스스로 고치고**(수렴 루프) · **MR 준비**까지 자동으로 한다.
+> 배포는 사람이. 관측은 read-only.
 
-## 폴더 구조
+의존성 거의 0(Python 표준 라이브러리 중심). 로컬/온프레미스에서 도는 자가 호스팅 개발 자동화 도구.
+
+> ⚠️ **설정 없이는 아무것도 안 된다(의도된 것).** 실제 GitLab/LLM/도메인 정보는 전부 `.env`·`maker.config.json`에만 있고, 이 저장소엔 예시(placeholder)만 있다. 자기 자격/엔드포인트를 채우지 않으면 동작하지 않는다.
+
+---
+
+## 무엇을 하나
 
 ```
-xgen_maker/
-  kg/            A평면 — 지식그래프 (2층: 결정론 뼈대 + 의미층)
-    graph.py         노드/엣지 모델, 저장/병합
-    extract_python.py   Python AST: 함수/클래스/임포트/FastAPI 엔드포인트/호출/docstring
-    extract_typescript.py TS/JS: export/임포트/API 호출(api_call)/JSDoc
-    workspaces.py       pnpm 워크스페이스 + tsconfig paths alias 해석 (feature 단위)
-    routes_nextjs.py    Next.js App Router → 화면 라우트 (UI/UX KG 골격)
-    crossrepo.py        FE api_call ↔ BE endpoint 매칭(resolves_to) — 차별화 지점
-    build.py            레포 워커 + 병합 + 증분 갱신(refresh_files) + HEAD 기준점 기록
-    sync.py             git 기준 증분 동기화(커밋·워킹트리·삭제·rename) + 자동 훅 설치
-    search.py           착지점 검색 + 역방향 영향분석(impact)
-    enrich.py           의미층 — 결정론(docstring/구조) + LLM 평문요약 2단 주입
-    domains.py          도메인/플로우 뷰(라우트→feature→API호출→엔드포인트) HTML
-    tour.py             가이드 투어 — 의존성 순서 읽기 가이드(md)
-    dashboard.py        자기완결 단일 HTML 대시보드(오프라인)
-  loop/          B평면 — MAKER 루프 (①~⑩)
-    intent.py        ② 쿼리 → bug/feature/refactor/question
-    git_ops.py       ⑤ 브랜치/커밋/푸시 — 보호브랜치·prefix 가드 코드로 강제
-    implement.py     ⑥ 코딩에이전트 호출(기본 claude CLI, agent_cmd로 치환)
-    verify.py        ⑦ 스택 프로파일 제안 + Playwright + docker RAM 가드
-    judge.py         ⑧ 품질 게이트(LLM judge → 휴리스틱 폴백, 인프라 파일 veto)
-    mr.py            ⑨ MR 초안(무엇/왜/원인/접근/영향+KG영향분석) + GitLab API
-    journal.py       ⑩ 세션 journal(jsonl + SUMMARY.md) — 작업로그 확인가능
-    pipeline.py      오케스트레이터 (plan-only / observe / act 3단 안전모드)
-  mcp_server.py  KG를 MCP 툴로 노출(stdio) — kg_search/kg_node/kg_impact/kg_stats
-  cli.py, config.py, llm.py
-kg/              KG 산출물 (merged.json, dashboard.html)
-worklogs/        세션 journal
-tests/           unittest 35개
+쿼리 → intent 분류 → KG 착지(코드 어디를 고칠지) → 워크플로우 체인 확장
+    → 항상 최신 GitLab 코드로 브랜치 → 코딩 에이전트 구현
+    → [수렴 루프] 샌드박스+테스트+품질judge → 실패하면 되먹여 재시도 → 통과까지
+    → 배포 렌더 검증(helm) → MR 준비   ◀── 여기까지 자동
+사람: MR 리뷰·머지 → 빌드 → 배포 (MAKER는 관측만)
 ```
 
-## 설치 & 로그인 (Claude 하나로 전부)
+- **지식그래프 3평면**: 코드(AST·엔드포인트) + UI/UX(라우트·화면) + 인프라(배포 토폴로지). 항상 최신으로 증분 유지.
+- **수렴 루프**: 구현 → 검증 → 실패 시 자가수정 반복(엔진 샌드박스 격리).
+- **안전**: 보호 브랜치 불가침, 브랜치 네이밍 규칙, MR-only(배포 안 함), 롤백(`maker undo`), worktree 격리.
+- **관측**: 작업 이력·MR·Jenkins/ArgoCD 상태 read-only.
+- **표면 3종**: CLI · 웹 대시보드 · MCP(다른 에이전트가 호출). 셋 다 같은 엔진.
 
-```powershell
-cd D:\xgen-maker
-pip install -e .        # → 어디서든 `maker` 명령
-copy .env.example .env  # .env에 GitLab PAT·Anthropic 키 기입 → maker가 자동 로드(재입력 불필요)
-maker login             # claude CLI 구독 로그인 감지 → 코딩+판단+요약 전부 이 로그인으로 (API 키 불필요)
-maker login --gitlab-user <이메일> --gitlab-password <비번>   # GitLab 로그인(2FA면 --gitlab-token <PAT>)
-maker web --config maker.config.json --open   # 웹 UI — 브라우저에서 쿼리 치면 실시간 실행 (CLI 대안)
-maker whoami            # Claude/GitLab 로그인 지속 상태 확인 (한 번 저장하면 push·MR 재입력 불필요)
-maker doctor --config maker.config.json   # 자가검증 — 모든 능력이 실제로 되는지 점검
+---
+
+## 설치 & 로그인
+
+```bash
+pip install -e .                 # → 어디서든 `maker` 명령
+cp .env.example .env             # .env에 자기 GitLab/LLM/도메인 값 채움 (자동 로드)
+cp maker.config.example.json maker.config.json   # 레포 경로·gitlab_projects 매핑 채움
+
+maker login                      # Claude CLI 구독 로그인 감지 → 코딩+판단+요약 전부 이 로그인 (API 키 불필요)
+maker login --gitlab-user <이메일> --gitlab-password <비번>   # GitLab (2FA면 --gitlab-token <PAT>)
+maker whoami                     # Claude/GitLab 로그인 지속 상태
+maker doctor --config maker.config.json          # 자가검증 — 모든 능력이 실제로 되는지
 ```
 
-로그인 provider 3종: `claude_cli`(기본, 키 불필요) · `anthropic`(--api-key) · `vllm`(--base/--model).
+자격은 3소스 우선순위: **실제 환경변수 → `.env` → `~/.xgen-maker/auth.json`**. 어느 것이든 있으면 재입력 불필요.
 
-```powershell
-maker chat --config D:\xgen-maker\maker.config.json                # 대화형 (openxgen 스타일, KG 1회 로드)
-maker run "쿼리" --config D:\xgen-maker\maker.observe.config.json   # 원샷, 실시간 진행 로그 스트리밍
+---
+
+## 사용법
+
+### 1) 지식그래프 만들기 (프로젝트당 1회 + 이후 자동 증분)
+```bash
+maker kg build --repo "core=/path/to/core" --repo "frontend=/path/to/frontend::apps/web/src" --out kg
+maker kg merge kg/*.repo.json --out kg/merged.json
+maker kg enrich --kg kg/merged.json              # 의미층 요약
+maker kg infra --path /path/to/infra-repo        # 인프라(배포 토폴로지) KG (선택)
+maker kg dashboard --kg kg/merged.json           # 브라우저로 그래프 탐색
 ```
 
-`maker chat` 안에서: 자연어 쿼리 = 루프 실행 · `/search` `/impact` `/stats` `/mode plan|observe|act` `/help` `/quit`.
+### 2) 쿼리 실행 — 3가지 표면 중 하나
+```bash
+# 웹 대시보드 (브라우저에서 쿼리 + 실시간 로그 + 작업이력·MR·배포상태 탭)
+maker web --config maker.config.json --open
 
-### openxgen 연동
-[jinsoo96/openxgen](https://github.com/jinsoo96/openxgen)(터미널 XGEN 코딩 에이전트)과 상보 —
-openxgen이 챗 표면·코딩, MAKER가 코드 지식그래프·개발 루프. openxgen MCP 탭에 MAKER MCP 서버를
-등록하면 에이전트가 `kg_search`/`kg_impact`/`maker_plan`을 쓴다. 상세: [docs/OPENXGEN-INTEGRATION.md](docs/OPENXGEN-INTEGRATION.md).
+# 대화형 터미널
+maker chat --config maker.config.json
 
-루프 순서: 쿼리 → intent → KG착지 → 체인확장 → 레거시확인 → 브랜치 →
-**수렴 루프**〔구현 → 샌드박스 격리검증(xgen-harness `run_sandboxed`) + checks(pytest/node) → judge →
-실패 시 에러 되먹여 재구현, **통과할 때까지 max_iterations 반복**〕→ MR → 배포(dry-run) → KG갱신.
-
-수렴 루프는 xgen-harness(PyPI)의 decide 계약(continue/retry/stop)과 샌드박스를 임포트해 차용.
-설치: `pip install -e .[harness]` (없어도 코어는 로컬 검증으로 동작 — 의존성 0).
-
-## 빠른 시작
-
-```powershell
-cd D:\xgen-maker
-$env:PYTHONIOENCODING='utf-8'
-
-# 1) KG 빌드 (레포별 → 병합+크로스레포 링크)
-python -m xgen_maker kg build --repo "xgen-core=D:\xgen2.0\xgen-core" `
-  --repo "xgen-workflow=D:\xgen2.0\xgen-workflow" `
-  --repo "xgen-frontend-app=D:\xgen2.0\xgen-frontend::apps/web/src" `
-  --repo "xgen-frontend-lib=D:\xgen2.0\xgen-frontend::packages/api-client" --out kg
-python -m xgen_maker kg merge kg\*.repo.json --out kg\merged.json
-
-# 2) 의미층 주입 + UI/UX 뷰 (결정론은 항상, LLM은 도달 시)
-python -m xgen_maker kg enrich --kg kg\merged.json --config maker.config.json --limit 200
-python -m xgen_maker kg domains --kg kg\merged.json --out kg\domain-map.html
-python -m xgen_maker kg tour --repo xgen-core --kg kg\merged.json --out kg\TOUR-xgen-core.md
-
-# 3) 확인가능 — 대시보드/도메인맵 (실행하면 브라우저 자동 오픈, 노드 클릭 시 의미층 요약 표시)
-python -m xgen_maker kg dashboard --kg kg\merged.json     # --no-open 으로 자동열기 끄기
-python -m xgen_maker kg domains --kg kg\merged.json
-
-# 4) 검색·영향분석·체인검색
-python -m xgen_maker kg search "ontology graph" --kg kg\merged.json
-python -m xgen_maker kg impact "xgen-core:main.py" --kg kg\merged.json
-python -m xgen_maker kg chain "ontology graph data" --kg kg\merged.json   # 단일매치 아닌 워크플로우 체인(FE→BE)
-
-# 4-1) UI/UX 검증 (변경 → 영향 라우트 → 스냅샷 + 픽셀diff + 비전판정)
-maker ui routes --changed features/.../ontology-graph-section.tsx        # 영향 라우트 매핑
-maker ui baseline --changed features/.../ontology-graph-section.tsx      # 현재 화면을 baseline으로
-maker ui verify  --changed features/.../ontology-graph-section.tsx --preview http://localhost:3100
-
-# 5) MAKER 루프 (기본 = plan-only: 실레포 미접촉, MR 초안까지)
-python -m xgen_maker run "ontology graph 조회 API 버그 고쳐줘" --config maker.config.json
-
-# 6) KG를 MCP 툴로 (Claude Code/하네스 ToolSource 연결)
-python -m xgen_maker mcp --kg kg\merged.json
-
-# 7) 그래프 사람 편집 (R8 수정가능) — 오버레이로 영속, 재빌드에도 유실 없음
-python -m xgen_maker kg annotate "xgen-core:some/legacy.py" --deprecate --redirect "xgen-core:some/modern.py" --note "신규 작업은 modern으로"
-python -m xgen_maker kg annotate --list
-#   → deprecated 노드는 검색 점수 페널티로 루프 착지에서 제외됨
-
-# 8) 증분 동기화 — 코드가 바뀌면 KG가 따라온다
-python -m xgen_maker kg sync --kg kg\merged.json          # 수동/스크립트: 변경 파일만 재추출
-python -m xgen_maker kg hook install --repo-path D:\xgen2.0\xgen-core --kg D:\xgen-maker\kg\merged.json
-#   → post-commit/post-merge/post-checkout 훅이 커밋·풀·브랜치전환마다 sync 자동 실행 (UA --auto-update 대응)
+# 원샷 CLI (실시간 진행 로그)
+maker run "온톨로지 그래프 안 바뀌는 버그 고쳐줘" --config maker.config.json
 ```
 
-## KG 신선도 3중 트리거
+실행 모드: `plan`(분석·MR초안만, 레포 미접촉) · `observe`(브랜치+커밋+MR초안, 푸시 안 함) · `act`(push + 실제 MR).
 
-| 트리거 | 시점 | 메커니즘 |
-|---|---|---|
-| MAKER 루프 | 루프가 MR 준비 직후 (⑩) | `refresh_files` — 루프가 만든 변경 파일 정밀 반영 |
-| `kg sync` | 수동/CI/스케줄 | 빌드 시 기록된 레포별 HEAD ↔ 현재 HEAD diff + 워킹트리 변경만 재추출 |
-| git 훅 | 커밋·머지·체크아웃 | `kg hook install` — 자동 sync (opt-in, 기존 훅 있으면 건드리지 않음) |
-
-기준 HEAD가 소실되면(rebase 등) 조용히 틀리지 않고 `full_rebuild_needed`를 보고한다.
-
-## 안전 3단 모드
-
-| 모드 | 하는 것 | 설정 |
-|---|---|---|
-| **plan-only** (기본) | 착지분석+영향분석+MR초안. 실레포 미접촉 | `allow_write: false` |
-| **observe** | 로컬 브랜치+구현+judge+커밋+MR초안. 푸시 없음 | `allow_write: true, mode: observe` |
-| **act** | + 기능브랜치 푸시 + GitLab MR 생성. **머지는 사람** | `mode: act` + `XGEN_MAKER_GITLAB_TOKEN` |
-
-코드로 강제되는 불변: 보호 브랜치(develop/main/stg…) checkout·push 불가 ·
-브랜치 prefix(fix/·feature/·refactor/·chore/) 강제 · 인프라 파일 변경 judge veto ·
-docker 스택 추가 기동 시 RAM 가드.
-
-## Claude Code MCP 등록 예
-
-```json
-{"mcpServers": {"xgen-maker-kg": {
-  "command": "python",
-  "args": ["-m", "xgen_maker", "mcp", "--kg", "D:\\xgen-maker\\kg\\merged.json"],
-  "cwd": "D:\\xgen-maker"}}}
+### 3) 관측 (read-only)
+```bash
+maker history          # MAKER 자기 작업 이력
+maker mrs              # 내 MR / MAKER가 만든 MR
+maker branches --repo frontend    # 브랜치 개요
+maker status           # 릴리즈 사다리 + Jenkins + ArgoCD 상태
+maker learn --repo core           # 작업 학습 메모리(실수 방지)
 ```
 
-## 테스트
-
-```powershell
-python -m unittest discover -s tests -v   # 35 tests
+### 4) 안전·검증
+```bash
+maker undo --config maker.config.json            # 마지막 브랜치·커밋 되돌림(--yes 실행, --remote 원격까지)
+maker sdk                                        # 의존 엔진 버전 드리프트 + 계약 자가검증
+maker deploy test --repo core                    # 배포 렌더 검증(helm, tmp 격리)
+maker engine register                            # 엔진 stage로 등록(R3)
 ```
 
-## 현재 상태 (2026-07-02 실검증)
+---
 
-- 실레포 5스코프 KG(features 172개 워크스페이스 포함): **13,943 노드 / 22,367 엣지** —
-  엔드포인트 848 · 화면 라우트 41 · feature 227 · FE API호출 156 · imports 4,763(alias 해석 후)
-- 크로스레포 `resolves_to` 링크 **63개** (리터럴 앵커링 매칭 — 오탐 방어 규칙 적용)
-- **의미층**: 결정론 요약 13,943 노드 전체 주입(docstring 우선) · LLM 요약은 vLLM 도달 시 `kg enrich`로 증분 주입(재개 가능)
-- **UI/UX 뷰**: 도메인 20개 · domain-map.html(라우트→feature→API호출→엔드포인트 플로우) · TOUR-*.md(의존성 읽기 순서)
-- MCP 왕복·plan-only 루프 E2E 검증 완료. 테스트 48개 통과.
-- Understand-Anything 실측 비교: `_ua-eval/UA-COMPARISON.md` (동일 슬라이스 정량/정성 비교)
+## 핵심 개념
+
+| 개념 | 설명 |
+|---|---|
+| **항상 최신** | 작업 전 `origin/develop` fetch → 최신에서 분기 → 변경분을 KG에 반영. `fetch_latest`(기본 on) |
+| **수렴 루프** | 구현 → 샌드박스+테스트+judge → 실패 시 에러 되먹여 재구현, `max_iterations`까지. xgen-sdk 엔진 샌드박스 임포트 |
+| **릴리즈 사다리** | `develop → stg → main` (= dev/stg/prd). MR은 develop에, 승격은 순차, main 직접머지 금지 |
+| **경계** | 자동은 **MR 준비까지** · 배포·빌드·ArgoCD sync는 **사람 수동** · CI 상태는 **read-only 관측** |
+| **학습 메모리** | 실패/성공 교훈을 `learnings/`에 쌓아 다음 작업 프롬프트에 주입(실수 방지) |
+| **자가검증** | `maker doctor`(능력 실동작) + `maker sdk`(의존 엔진 계약·드리프트) |
+
+---
+
+## 보안 (공개 저장소 안전)
+
+이 저장소는 **자격·엔드포인트·조직 정보를 코드에 담지 않는다.** 전부 gitignore된 로컬 파일에만:
+
+- `.env` — 토큰·URL·계정 (커밋 금지, `.env.example`은 placeholder만)
+- `maker.config.json` — 레포 경로·프로젝트 매핑 (커밋 금지, `.example`만)
+- `~/.xgen-maker/auth.json` — 로그인 저장 (홈 디렉토리)
+- `worklogs/` · `learnings/` · `kg/` — 작업 기록·그래프 (로컬만)
+
+→ 저장소를 public으로 바꿔도 dev/stg 도메인·계정·MR·인프라 정보가 노출되지 않는다.
+외부 사용자는 자기 GitLab/LLM 자격과 config를 직접 채워야 동작한다.
+
+---
+
+## 개발
+
+```bash
+python -m unittest discover -s tests    # 테스트
+maker doctor --config maker.config.json # 전체 자가검증
+```
+
+의존 엔진(선택): `pip install -e .[harness]`(수렴 샌드박스·엔진 stage) · `.[infra]`(인프라 KG) · `.[ui]`(픽셀 diff).
+없어도 코어는 로컬 폴백으로 동작.

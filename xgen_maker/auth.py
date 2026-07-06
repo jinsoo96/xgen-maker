@@ -22,8 +22,9 @@ AUTH_DIR = Path.home() / ".xgen-maker"
 AUTH_FILE = AUTH_DIR / "auth.json"
 
 DEFAULT_ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
-DEFAULT_VLLM_BASE = "http://127.0.0.1:10051/v1"
-DEFAULT_VLLM_MODEL = "Qwen3.6-27B"
+# 실 엔드포인트는 .env(XGEN_MAKER_LLM_BASE/MODEL)로만 — 공개 시 노출 방지
+DEFAULT_VLLM_BASE = os.environ.get("XGEN_MAKER_LLM_BASE", "http://localhost:8000/v1")
+DEFAULT_VLLM_MODEL = os.environ.get("XGEN_MAKER_LLM_MODEL", "local-model")
 
 
 def claude_command(args: list[str]) -> list[str] | None:
@@ -43,7 +44,7 @@ class Auth:
     model: str = ""                        # 비면 provider 기본값
     api_key: str = ""                      # anthropic/vllm 용 (claude_cli는 불필요)
     base: str = ""                         # vllm 용
-    gitlab_url: str = "https://gitlab.example.com"
+    gitlab_url: str = os.environ.get("XGEN_MAKER_GITLAB_URL", "https://gitlab.example.com")
     gitlab_user: str = ""                  # 표시용(이메일/username)
     gitlab_token: str = ""                 # push·MR 지속 인증 (한 번 저장하면 재입력 불필요)
 

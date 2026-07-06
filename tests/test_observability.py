@@ -19,17 +19,17 @@ class TestJenkinsReadonly(unittest.TestCase):
         self.assertEqual(jenkins.list_jobs(), [])
 
     def test_env_of_handles_suffix(self):
-        self.assertEqual(jenkins._env_of("xgen Dev (177)"), "dev")
-        self.assertEqual(jenkins._env_of("xgen-stage(244)"), "stg")
-        self.assertEqual(jenkins._env_of("xgen Prd (244)"), "prd")
-        self.assertEqual(jenkins._env_of("example-client-dev"), "dev")
+        self.assertEqual(jenkins._env_of("build dev (177)"), "dev")
+        self.assertEqual(jenkins._env_of("svc-stage(244)"), "stg")
+        self.assertEqual(jenkins._env_of("release prd (244)"), "prd")
+        self.assertEqual(jenkins._env_of("project-a-dev"), "dev")
 
     def test_list_jobs_with_mock(self):
         os.environ["XGEN_MAKER_JENKINS_URL"] = "https://j"
         os.environ["XGEN_MAKER_JENKINS_USER"] = "u"
         os.environ["XGEN_MAKER_JENKINS_TOKEN"] = "t"
-        payload = {"jobs": [{"name": "xgen Dev (177)", "color": "blue"},
-                            {"name": "xgen-stage(244)", "color": "blue"}]}
+        payload = {"jobs": [{"name": "build dev (177)", "color": "blue"},
+                            {"name": "svc-stage(244)", "color": "blue"}]}
         with patch.object(jenkins, "_get", return_value=payload):
             jobs = jenkins.list_jobs()
         self.assertEqual(jobs[0]["env"], "dev")
@@ -55,10 +55,10 @@ class TestArgoReadonly(unittest.TestCase):
 
 
 class TestStageUrl(unittest.TestCase):
-    def test_default_urls(self):
+    def test_no_hardcoded_default(self):
+        # 공개 안전: 하드코딩 도메인 없음 — env 미설정이면 빈 문자열
         os.environ.pop("XGEN_MAKER_URL_STG", None)
-        self.assertEqual(stage_url("stg"), "https://stg.example.com")
-        self.assertEqual(stage_url("prd"), "https://app.example.com")
+        self.assertEqual(stage_url("stg"), "")
 
     def test_env_override(self):
         os.environ["XGEN_MAKER_URL_STG"] = "https://custom-stg"
@@ -67,12 +67,16 @@ class TestStageUrl(unittest.TestCase):
         finally:
             os.environ.pop("XGEN_MAKER_URL_STG", None)
 
-    def test_ladder_carries_url_and_jenkins(self):
-        os.environ.pop("XGEN_MAKER_URL_DEV", None)
-        stages = ladder()
-        dev = [s for s in stages if s["env"] == "dev"][0]
-        self.assertEqual(dev["url"], "https://dev.example.com")
-        self.assertEqual(dev["jenkins"], "xgen Dev")
+    def test_ladder_carries_url_and_jenkins_from_env(self):
+        os.environ["XGEN_MAKER_URL_DEV"] = "https://dev.example.com"
+        os.environ["XGEN_MAKER_JENKINS_DEV"] = "build-dev"
+        try:
+            dev = [s for s in ladder() if s["env"] == "dev"][0]
+            self.assertEqual(dev["url"], "https://dev.example.com")
+            self.assertEqual(dev["jenkins"], "build-dev")
+        finally:
+            os.environ.pop("XGEN_MAKER_URL_DEV", None)
+            os.environ.pop("XGEN_MAKER_JENKINS_DEV", None)
 
 
 if __name__ == "__main__":

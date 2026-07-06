@@ -72,7 +72,7 @@ class TestPushAuthUrl(unittest.TestCase):
             root = Path(tmp)
             for a in (["init", "-b", "trunk"], ["config", "user.email", "t@t"],
                       ["config", "user.name", "t"],
-                      ["remote", "add", "origin", "https://gitlab.example.com/xgen2.0/demo.git"]):
+                      ["remote", "add", "origin", "https://gitlab.example.com/grp/demo.git"]):
                 subprocess.run(["git", *a], cwd=root, capture_output=True)
             (root / "a.txt").write_text("x", encoding="utf-8")
             subprocess.run(["git", "add", "-A"], cwd=root, capture_output=True)
@@ -91,7 +91,7 @@ class TestPushAuthUrl(unittest.TestCase):
             repo.push("fix/demo-push-url", token="SECRET")
             push_calls = [c for c in calls if "push" in c]
             joined = " ".join(push_calls[0])
-            self.assertIn("oauth2:SECRET@gitlab.example.com/xgen2.0/demo.git", joined)
+            self.assertIn("oauth2:SECRET@gitlab.example.com/grp/demo.git", joined)
 
 
 if __name__ == "__main__":

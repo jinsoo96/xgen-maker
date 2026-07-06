@@ -52,3 +52,25 @@ class TestEngineStage(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestEngineRunLevelB(unittest.TestCase):
+    @unittest.skipUnless(ENGINE is not None, "엔진 미설치")
+    def test_run_via_engine(self):
+        import tempfile, json
+        from pathlib import Path
+        from xgen_maker.kg.graph import Graph
+        from xgen_maker.engine_stage import run_via_engine
+        with tempfile.TemporaryDirectory() as tmp:
+            g = Graph(); g.add_node("r:a.py", "file", "a.py", "r", "a.py")
+            kg = Path(tmp) / "kg.json"; g.save(kg)
+            cfg = Path(tmp) / "c.json"
+            cfg.write_text(json.dumps({"kg_path": kg.as_posix(),
+                                       "worklogs_dir": f"{Path(tmp).as_posix()}/wl",
+                                       "llm_enabled": False, "verbose": False,
+                                       "fetch_latest": False}), encoding="utf-8")
+            r = run_via_engine("a.py 어디 있어?", str(cfg))
+        self.assertTrue(r["ok"])
+        self.assertEqual(r["outcome"], "answered")
+        self.assertEqual(r["engine_state"]["loop_decision"], "stop")
+        self.assertIn("[MAKER]", r["engine_state"]["final_output"])

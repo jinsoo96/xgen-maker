@@ -25,9 +25,9 @@ def make_infra(root: Path) -> None:
         "environments:\n  dev:\n    services:\n"
         "      - name: xgen-frontend\n        hasDomain: true\n"
         "      - name: xgen-core\n", encoding="utf-8")
-    (proj / "example-client.yaml").write_text(
-        "project:\n  name: example-client\n  namespace: example-client\n"
-        "destinations:\n  dev:\n    domain: \"agent-dev.example.com\"\n"
+    (proj / "project-b.yaml").write_text(
+        "project:\n  name: project-b\n  namespace: project-b\n"
+        "destinations:\n  dev:\n    domain: \"app-a-dev.example.com\"\n"
         "environments:\n  dev:\n    services:\n      - name: xgen-core\n",
         encoding="utf-8")
 
@@ -66,7 +66,7 @@ class TestInfraExtract(unittest.TestCase):
         self.assertGreaterEqual(n, 2)
         targets = deploy_targets(self.g, "xgen-core")
         names = {t["project"] for t in targets}
-        self.assertEqual(names, {"xgen", "example-client"})
+        self.assertEqual(names, {"xgen", "project-b"})
         # frontend alias → xgen-frontend app
         ft = deploy_targets(self.g, "xgen-frontend-features")
         self.assertTrue(any(t["domain"] == "app.example.com" for t in ft))

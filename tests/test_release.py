@@ -12,10 +12,10 @@ def infra_graph() -> Graph:
     g.add_node("xgen-core", "repo", "xgen-core", "xgen-core", "/p")
     g.add_node("xi:app:xgen-core", "helm_app", "xgen-core", "xgen-infra", "")
     g.add_node("xi:project:xgen", "deploy_project", "xgen", "xgen-infra", "",
-               namespace="xgen", domains={"dev": "app.example.com", "prd": "app2.example.com"})
+               namespace="xgen", domains={"dev": "app.example.com", "prd": "prd.example.com"})
     g.add_edge("xi:project:xgen", "xi:app:xgen-core", "deploys",
                envs=["dev", "prd"],
-               domains={"dev": "app.example.com", "prd": "app2.example.com"})
+               domains={"dev": "app.example.com", "prd": "prd.example.com"})
     return g
 
 

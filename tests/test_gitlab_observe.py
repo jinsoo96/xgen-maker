@@ -11,7 +11,7 @@ from xgen_maker.loop.history import read_sessions
 
 class TestGitlabObserve(unittest.TestCase):
     def setUp(self):
-        self.cfg = MakerConfig(gitlab_projects={"xgen-frontend": "xgen2.0/xgen-frontend"})
+        self.cfg = MakerConfig(gitlab_projects={"xgen-frontend": "grp/frontend"})
 
     def test_branches_needs_mapping(self):
         r = GO.branches(self.cfg, "unmapped-repo")
@@ -33,15 +33,15 @@ class TestGitlabObserve(unittest.TestCase):
         self.assertEqual(r["work_recent"][0]["name"], "fix/task-1")  # 최신순
 
     def test_my_mrs_parse(self):
-        fake = [{"iid": 1469, "state": "opened", "title": "fix: x",
-                 "source_branch": "fix/ontology-graph-rebuild-x",
-                 "target_branch": "develop", "web_url": "http://gl/mr/1469",
-                 "updated_at": "2026-07-06T00:00:00", "references": {"full": "xgen2.0/xgen-frontend!1469"}}]
+        fake = [{"iid": 42, "state": "opened", "title": "fix: x",
+                 "source_branch": "fix/some-feature-x",
+                 "target_branch": "develop", "web_url": "http://gl/mr/42",
+                 "updated_at": "2026-07-06T00:00:00", "references": {"full": "grp/frontend!42"}}]
         with patch.object(GO, "_api", return_value=fake):
             mrs = GO.my_mrs(self.cfg)
             maker = GO.maker_mrs(self.cfg)
-        self.assertEqual(mrs[0]["iid"], 1469)
-        self.assertEqual(maker[0]["source"], "fix/ontology-graph-rebuild-x")
+        self.assertEqual(mrs[0]["iid"], 42)
+        self.assertEqual(maker[0]["source"], "fix/some-feature-x")
 
     def test_no_token_returns_empty(self):
         cfg = MakerConfig(gitlab_projects={})

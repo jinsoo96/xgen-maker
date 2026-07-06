@@ -201,7 +201,8 @@ class MakerLoop:
 
         # ⑥~⑧ 수렴 루프 — 구현 → 샌드박스+checks → judge → 실패 시 되먹여 재시도(통과까지)
         conv = converge(config, repo_path, repo, query, intent, landing, chain_nodes,
-                        legacy_notes, base_branch, repo_git, journal, cost=cost)
+                        legacy_notes, base_branch, repo_git, journal, cost=cost,
+                        graph=self.graph)
         report["iterations"] = conv["iterations"]
         report["converged"] = conv["converged"]
 

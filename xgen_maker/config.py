@@ -20,8 +20,9 @@ INFRA_PATTERNS = re.compile(
     r"(^|/)(docker-compose[^/]*\.ya?ml|Dockerfile[^/]*|\.gitlab-ci\.ya?ml|helm/|infra/|k8s/|\.github/workflows/)",
     re.I)
 
-DEFAULT_LLM_BASE = "http://127.0.0.1:10051/v1"
-DEFAULT_LLM_MODEL = "Qwen3.6-27B"
+# 기본값은 로컬/제네릭 — 실제 엔드포인트는 .env(XGEN_MAKER_LLM_BASE)로만 주입(공개 시 노출 방지)
+DEFAULT_LLM_BASE = os.environ.get("XGEN_MAKER_LLM_BASE", "http://localhost:8000/v1")
+DEFAULT_LLM_MODEL = os.environ.get("XGEN_MAKER_LLM_MODEL", "gpt-4o-mini")
 
 
 @dataclass
@@ -36,8 +37,9 @@ class MakerConfig:
     llm_enabled: bool = True
     llm_base: str = field(default_factory=lambda: os.environ.get("XGEN_MAKER_LLM_BASE", DEFAULT_LLM_BASE))
     llm_model: str = field(default_factory=lambda: os.environ.get("XGEN_MAKER_LLM_MODEL", DEFAULT_LLM_MODEL))
-    gitlab_url: str = "https://gitlab.example.com"
-    gitlab_projects: dict[str, str] = field(default_factory=dict)  # repo명 → "xgen2.0/xgen-workflow"
+    gitlab_url: str = field(default_factory=lambda: os.environ.get(
+        "XGEN_MAKER_GITLAB_URL", "https://gitlab.example.com"))  # 실 호스트는 .env로
+    gitlab_projects: dict[str, str] = field(default_factory=dict)  # repo명 → "group/repo" (config로 주입)
     target_branch: str = "develop"
     fetch_latest: bool = True                              # 작업 전 origin/target 최신 fetch + KG 갱신
     isolate_worktree: bool = False                         # tmp git worktree 격리(동시실행 충돌 방지)
@@ -48,6 +50,7 @@ class MakerConfig:
     ])
     enable_verify: bool = False                            # 로컬 스택+Playwright 검증 (리소스 가드로 기본 off)
     enable_ui_verify: bool = False                         # UI/UX 검증(라우트 스냅샷+픽셀diff+비전판정)
+    ui_converge: bool = False                              # UI 문제를 수렴 retry 신호로(브랜치 렌더 프리뷰 필요)
     preview_base: str = ""
     check_timeout: int = 600                               # 자동 테스트(checks) 타임아웃
     max_iterations: int = 3                                # 수렴 루프 최대 재시도(통과까지)
@@ -55,7 +58,8 @@ class MakerConfig:
     deploy_mode: str = "off"                               # off | dry_run | live (live=이중 인터록)
     deploy_env: str = "dev"
     enable_deploy_test: bool = False                       # MR 전 배포 렌더 검증(T1, 상사님 tmp 방식)
-    infra_path: str = "D:\\xgen2.0\\xgen-infra"           # Helm 차트 위치
+    infra_path: str = field(default_factory=lambda: os.environ.get(
+        "XGEN_MAKER_INFRA_PATH", ""))                     # Helm 차트 위치(config/.env로 주입)
     worklogs_dir: str = "worklogs"
     learnings_dir: str = "learnings"                       # 작업 학습 메모리(실수 방지 참고)
 

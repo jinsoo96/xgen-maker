@@ -99,3 +99,50 @@ def register(engine=None) -> dict:
                 "version": getattr(engine, "__version__", "?")}
     except Exception as error:  # noqa: BLE001
         return {"ok": False, "reason": str(error)[:200]}
+
+
+def run_via_engine(query: str, config_path: str | None = None,
+                   allow_write: bool = False, engine=None) -> dict:
+    """R3 Level B — 엔진이 MAKER를 구동한다.
+
+    엔진의 PipelineState·EventEmitter(있으면)·SessionStore(있으면)를 세워 MAKER 스테이지를
+    엔진 컨텍스트에서 실행. 엔진 상태/세션에 결과가 관리되며, 스테이지가 loop_decision을 세팅.
+    반환 {ok, outcome, report, engine_state:{loop_decision, final_output, saved_session?}}.
+    """
+    engine = engine or _load_engine()
+    if engine is None:
+        return {"ok": False, "reason": "엔진 미설치"}
+    stage = build_maker_stage(engine)()
+    # 엔진 상태(state) 구성
+    state = engine.PipelineState(user_input=query)
+    if config_path:
+        state.metadata["maker_config"] = config_path
+    state.metadata["maker_allow_write"] = allow_write
+    # 엔진 이벤트 에미터 연결(있으면) — 엔진이 스테이지 이벤트를 관리
+    events = []
+    if hasattr(engine, "EventEmitter"):
+        try:
+            emitter = engine.EventEmitter()
+            if hasattr(emitter, "on"):
+                emitter.on("*", lambda e: events.append(getattr(e, "type", str(e))))
+            state.event_emitter = emitter
+        except Exception:  # noqa: BLE001
+            pass
+    # 스테이지를 엔진 컨텍스트에서 실행 (엔진 계약 execute(state)->dict)
+    try:
+        result = stage.execute(state)
+    except Exception as error:  # noqa: BLE001
+        return {"ok": False, "reason": f"엔진 구동 실패: {error}"}
+    # 엔진 세션 스토어에 상태 영속(있으면)
+    saved = False
+    if hasattr(engine, "save_session") and hasattr(engine, "InMemorySessionStore"):
+        try:
+            engine.save_session(engine.InMemorySessionStore(), state)
+            saved = True
+        except Exception:  # noqa: BLE001
+            saved = False
+    report = result.get("maker_report", {})
+    return {"ok": True, "outcome": report.get("outcome"), "report": report,
+            "engine_state": {"loop_decision": getattr(state, "loop_decision", "?"),
+                             "final_output": getattr(state, "final_output", ""),
+                             "session_saved": saved}}

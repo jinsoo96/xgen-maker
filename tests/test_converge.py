@@ -104,3 +104,28 @@ class TestConvergenceLoop(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestUiConvergeSignal(unittest.TestCase):
+    def _ck(self, blocked): return {"blocked": blocked, "checks": [], "summary": {}}
+    def _sb(self, s): return {"status": s}
+
+    def test_ui_failed_triggers_retry(self):
+        from xgen_maker.loop.converge import decide, _feedback
+        # 코드·품질 통과했지만 UI 실패 → retry
+        d = decide(self._ck(False), self._sb("passed"), {"passed": True}, 1, 3,
+                   ui={"status": "failed", "issues": "그래프 로딩 멈춤"})
+        self.assertEqual(d, "retry")
+        # 마지막 회차면 stop
+        d2 = decide(self._ck(False), self._sb("passed"), {"passed": True}, 3, 3,
+                    ui={"status": "failed", "issues": "x"})
+        self.assertEqual(d2, "stop")
+        fb = _feedback(self._ck(False), self._sb("passed"), {"passed": True},
+                       ui={"status": "failed", "issues": "그래프 로딩 멈춤"})
+        self.assertIn("UI 렌더 문제", fb)
+
+    def test_ui_passed_stops(self):
+        from xgen_maker.loop.converge import decide
+        d = decide(self._ck(False), self._sb("passed"), {"passed": True}, 1, 3,
+                   ui={"status": "passed"})
+        self.assertEqual(d, "stop")
