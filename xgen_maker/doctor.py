@@ -47,6 +47,21 @@ def run_doctor(config_path: str | None = None) -> bool:
     except Exception as e:
         check.fail("로그인 통합", str(e)[:80])
 
+    # 목적 1-2: GitLab 로그인 지속 (push·MR 재입력 불필요)
+    try:
+        from .auth import load_auth, gitlab_verify_token
+        auth = load_auth()
+        if auth.gitlab_token:
+            v = gitlab_verify_token(auth.gitlab_url, auth.gitlab_token)
+            if v["ok"]:
+                check.ok("GitLab 로그인", f"{v['user']} 유지됨 — push·MR 재입력 불필요")
+            else:
+                check.warn("GitLab 로그인", f"토큰 무효: {v['reason']}")
+        else:
+            check.warn("GitLab 로그인", "미로그인 — maker login --gitlab-user/-password")
+    except Exception as e:
+        check.warn("GitLab 로그인", str(e)[:80])
+
     # 목적 2: 코드베이스 이해 — KG 로드 + 검색 + 영향분석
     from .config import MakerConfig
     from .kg.graph import Graph

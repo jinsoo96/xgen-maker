@@ -48,7 +48,14 @@ class MakerConfig:
 
     @property
     def gitlab_token(self) -> str:
-        return os.environ.get("XGEN_MAKER_GITLAB_TOKEN", "")
+        env = os.environ.get("XGEN_MAKER_GITLAB_TOKEN", "")
+        if env:
+            return env
+        try:
+            from .auth import load_auth
+            return load_auth().gitlab_token
+        except ImportError:
+            return ""
 
     @classmethod
     def from_file(cls, path: str | Path) -> "MakerConfig":

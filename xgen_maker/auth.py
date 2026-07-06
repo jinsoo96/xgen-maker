@@ -43,6 +43,9 @@ class Auth:
     model: str = ""                        # 비면 provider 기본값
     api_key: str = ""                      # anthropic/vllm 용 (claude_cli는 불필요)
     base: str = ""                         # vllm 용
+    gitlab_url: str = "https://gitlab.example.com"
+    gitlab_user: str = ""                  # 표시용(이메일/username)
+    gitlab_token: str = ""                 # push·MR 지속 인증 (한 번 저장하면 재입력 불필요)
 
     def resolved_model(self) -> str:
         if self.model:
@@ -106,3 +109,55 @@ def apply_to_env(auth: Auth) -> None:
         os.environ["ANTHROPIC_API_KEY"] = auth.api_key
     elif auth.provider == "vllm" and auth.api_key:
         os.environ["XGEN_MAKER_LLM_KEY"] = auth.api_key
+    if auth.gitlab_token and not os.environ.get("XGEN_MAKER_GITLAB_TOKEN"):
+        os.environ["XGEN_MAKER_GITLAB_TOKEN"] = auth.gitlab_token
+
+
+# ---- GitLab 로그인 ----
+
+def gitlab_verify_token(url: str, token: str, timeout: int = 20) -> dict:
+    """토큰 유효성 — GET /user. 반환 {ok, user, id} 또는 {ok: False, reason}."""
+    import json
+    import urllib.request
+    import urllib.error
+    request = urllib.request.Request(url.rstrip("/") + "/api/v4/user",
+                                     headers={"PRIVATE-TOKEN": token})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        return {"ok": True, "user": data.get("username"), "id": data.get("id")}
+    except urllib.error.HTTPError as error:
+        return {"ok": False, "reason": f"HTTP {error.code}"}
+    except (urllib.error.URLError, OSError, json.JSONDecodeError) as error:
+        return {"ok": False, "reason": str(error)[:80]}
+
+
+def gitlab_login_password(url: str, user: str, password: str, timeout: int = 25) -> dict:
+    """이메일/비번 → OAuth ROPC 토큰. 2FA/정책이면 실패(→토큰 안내). 반환 {ok, token|reason}."""
+    import json
+    import urllib.request
+    import urllib.error
+    body = json.dumps({"grant_type": "password", "username": user,
+                       "password": password}).encode("utf-8")
+    request = urllib.request.Request(url.rstrip("/") + "/oauth/token", data=body,
+                                     headers={"Content-Type": "application/json"},
+                                     method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        return {"ok": True, "token": data.get("access_token", "")}
+    except urllib.error.HTTPError as error:
+        detail = ""
+        try:
+            detail = json.loads(error.read().decode("utf-8")).get("error", "")
+        except Exception:  # noqa: BLE001
+            pass
+        return {"ok": False, "reason": f"HTTP {error.code} {detail} "
+                "(2FA·비번그랜트 비활성이면 PAT 사용)"}
+    except (urllib.error.URLError, OSError, json.JSONDecodeError) as error:
+        return {"ok": False, "reason": str(error)[:80]}
+
+
+def resolve_gitlab_token() -> str:
+    """env 우선, 없으면 저장된 로그인."""
+    return os.environ.get("XGEN_MAKER_GITLAB_TOKEN", "") or load_auth().gitlab_token

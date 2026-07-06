@@ -44,7 +44,8 @@ tests/           unittest 35개
 cd D:\xgen-maker
 pip install -e .        # → 어디서든 `maker` 명령
 maker login             # claude CLI 구독 로그인 감지 → 코딩+판단+요약 전부 이 로그인으로 (API 키 불필요)
-maker whoami            # 현재 provider 확인
+maker login --gitlab-user <이메일> --gitlab-password <비번>   # GitLab 로그인(2FA면 --gitlab-token <PAT>)
+maker whoami            # Claude/GitLab 로그인 지속 상태 확인 (한 번 저장하면 push·MR 재입력 불필요)
 maker doctor --config maker.config.json   # 자가검증 — 모든 능력이 실제로 되는지 점검
 ```
 

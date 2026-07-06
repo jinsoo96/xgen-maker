@@ -69,7 +69,8 @@ class GitRepo:
         self._run("commit", "-m", message)
         return self._run("rev-parse", "HEAD").strip()
 
-    def push(self, branch: str, remote: str = "origin") -> None:
+    def push(self, branch: str, remote: str = "origin",
+             token: str = "", user: str = "oauth2") -> None:
         if is_protected_branch(branch):
             raise GitOpsError(f"보호 브랜치 '{branch}' 푸시는 설계상 불가")
         if not is_allowed_branch(branch):
@@ -77,4 +78,13 @@ class GitRepo:
         current = self.current_branch()
         if current != branch:
             raise GitOpsError(f"현재 브랜치({current})와 푸시 대상({branch}) 불일치")
+        if token:
+            # 저장된 로그인으로 인증 URL 구성 — remote 자격 미설정이어도 push 성공
+            remote_url = self._run("remote", "get-url", remote).strip()
+            if remote_url.startswith("https://"):
+                host_path = remote_url.split("://", 1)[1].split("@")[-1]
+                auth_url = f"https://{user}:{token}@{host_path}"
+                self._run("-c", "credential.helper=", "push", "-u", auth_url,
+                          f"{branch}:{branch}")
+                return
         self._run("push", "-u", remote, branch)

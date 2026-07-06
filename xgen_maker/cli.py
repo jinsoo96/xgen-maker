@@ -257,7 +257,37 @@ def cmd_ui(args) -> None:
 
 
 def cmd_login(args) -> None:
-    from .auth import Auth, save_auth, claude_cli_status, load_auth
+    from .auth import (Auth, save_auth, claude_cli_status, load_auth,
+                       gitlab_login_password, gitlab_verify_token)
+    # GitLab 로그인 서브흐름 — 이메일/비번 or 토큰. 한 번 저장하면 push·MR 재입력 불필요.
+    if args.gitlab_token or args.gitlab_user or args.gitlab_password:
+        auth = load_auth()
+        url = args.gitlab_url or auth.gitlab_url
+        token = args.gitlab_token
+        if not token and args.gitlab_user and args.gitlab_password:
+            print("GitLab 이메일/비번 → 토큰 교환 시도(OAuth)…")
+            res = gitlab_login_password(url, args.gitlab_user, args.gitlab_password)
+            if res["ok"]:
+                token = res["token"]
+            else:
+                print(f"✗ 비번 로그인 실패: {res['reason']}")
+                print("  → 대신 개인 액세스 토큰: maker login --gitlab-token <PAT>")
+                return
+        if not token:
+            print("✗ --gitlab-token 또는 --gitlab-user+--gitlab-password 필요")
+            return
+        verify = gitlab_verify_token(url, token)
+        if not verify["ok"]:
+            print(f"✗ GitLab 토큰 검증 실패: {verify['reason']}")
+            return
+        auth.gitlab_url = url
+        auth.gitlab_user = args.gitlab_user or verify.get("user", "")
+        auth.gitlab_token = token
+        path = save_auth(auth)
+        print(f"✓ GitLab 로그인 저장: user={verify['user']} (id {verify['id']}) → {path}")
+        print("  이제 push·MR이 이 로그인으로 재입력 없이 됩니다.")
+        return
+
     provider = args.provider
     if provider is None:
         # 자동: claude CLI 로그인돼 있으면 그걸로, 아니면 안내
@@ -281,13 +311,17 @@ def cmd_login(args) -> None:
     elif provider == "anthropic" and not auth.api_key:
         print("✗ --api-key 필요 (anthropic)")
         return
+    auth.gitlab_url = load_auth().gitlab_url
+    auth.gitlab_user = load_auth().gitlab_user
+    auth.gitlab_token = load_auth().gitlab_token  # 기존 GitLab 로그인 보존
     path = save_auth(auth)
     print(f"✓ 로그인 저장: provider={provider} model={auth.resolved_model()} → {path}")
-    print("  이제 `maker chat` / `maker run` 이 이 로그인으로 코딩+판단+요약을 전부 처리합니다.")
+    print("  Claude는 claude CLI 세션이 지속됩니다(클로드 코드처럼 당분간 로그인 유지).")
+    print("  GitLab push·MR도 쓰려면: maker login --gitlab-user <이메일> --gitlab-password <비번>")
 
 
 def cmd_whoami(args) -> None:
-    from .auth import load_auth, claude_cli_status, AUTH_FILE
+    from .auth import load_auth, claude_cli_status, gitlab_verify_token, AUTH_FILE
     auth = load_auth()
     print(f"provider : {auth.provider}")
     print(f"model    : {auth.resolved_model()}")
@@ -296,7 +330,13 @@ def cmd_whoami(args) -> None:
     print(f"저장위치 : {AUTH_FILE} ({'있음' if AUTH_FILE.exists() else '없음(기본 claude_cli)'})")
     if auth.provider == "claude_cli":
         status = claude_cli_status()
-        print(f"claude CLI: {'✓ 인증됨' if status['authenticated'] else '✗ ' + status['reason']}")
+        print(f"Claude   : {'✓ claude CLI 로그인 유지됨' if status['authenticated'] else '✗ ' + status['reason']}")
+    if auth.gitlab_token:
+        v = gitlab_verify_token(auth.gitlab_url, auth.gitlab_token)
+        print(f"GitLab   : {'✓ ' + str(v.get('user')) + ' 로그인 유지됨' if v['ok'] else '✗ ' + v['reason']} "
+              f"({auth.gitlab_url})")
+    else:
+        print("GitLab   : 미로그인 — maker login --gitlab-user <이메일> --gitlab-password <비번>")
 
 
 def cmd_doctor(args) -> None:
@@ -426,11 +466,15 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--no-vision", action="store_true")
     p.set_defaults(func=cmd_ui)
 
-    p = sub.add_parser("login", help="로그인 — Claude 하나로 코딩+판단+요약 통합 (API 키 불필요)")
+    p = sub.add_parser("login", help="로그인 — Claude/GitLab 한 번 저장하면 지속(재입력 불필요)")
     p.add_argument("--provider", choices=["claude_cli", "anthropic", "vllm"], default=None)
     p.add_argument("--api-key", default=None)
     p.add_argument("--model", default=None)
     p.add_argument("--base", default=None)
+    p.add_argument("--gitlab-user", default=None, help="GitLab 이메일/username")
+    p.add_argument("--gitlab-password", default=None, help="GitLab 비번(OAuth 교환)")
+    p.add_argument("--gitlab-token", default=None, help="GitLab PAT(비번 그랜트 막힌 경우)")
+    p.add_argument("--gitlab-url", default=None)
     p.set_defaults(func=cmd_login)
 
     p = sub.add_parser("whoami", help="현재 로그인/프로바이더 상태")

@@ -233,7 +233,7 @@ class MakerLoop:
 
         if config.mode == "act":
             try:
-                repo_git.push(branch)
+                repo_git.push(branch, token=config.gitlab_token)
                 journal.event("push", "ok", branch=branch)
             except GitOpsError as error:
                 journal.event("push", "fail", error=str(error))
