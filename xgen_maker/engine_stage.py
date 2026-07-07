@@ -214,17 +214,31 @@ _active_provider_label = "claude_cli(subscription)"
 
 
 def _select_provider(engine) -> tuple[str, str, str]:
-    """LLM provider 선택 — 로컬 .env에 API 키 있으면 그걸(직접 API), 없으면 claude 구독(CLI).
+    """LLM provider 선택 — **claude 구독(CLI) 우선**. 실 키는 로컬 .env에만.
 
-    반환 (provider_name, model, label). 실 키는 로컬 .env에만(공개 레포엔 placeholder만).
+    우선순위: (1) env XGEN_MAKER_ENGINE_PROVIDER=anthropic|openai 로 강제 시 그 API 키 ·
+    (2) claude CLI 있으면 구독(키 불필요) · (3) CLI 없으면 로컬 API 키 폴백.
+    반환 (provider_name, model, label).
     """
     import os
+    override = os.environ.get("XGEN_MAKER_ENGINE_PROVIDER", "").strip().lower()
+    if override == "anthropic" and os.environ.get("ANTHROPIC_API_KEY"):
+        return ("anthropic", "claude-sonnet-4-20250514", "anthropic(api-key·local·forced)")
+    if override == "openai" and os.environ.get("OPENAI_API_KEY"):
+        return ("openai", "gpt-4o-mini", "openai(api-key·local·forced)")
+    # 구독 우선 — claude CLI 바이너리 있으면 구독으로(키 불필요)
+    try:
+        from .auth import claude_command
+        if claude_command(["-p", "x"]) is not None:
+            return ("claude_cli", _register_cli_provider(engine), "claude_cli(subscription)")
+    except Exception:  # noqa: BLE001
+        pass
+    # 구독 불가 시에만 로컬 API 키 폴백
     if os.environ.get("ANTHROPIC_API_KEY"):
         return ("anthropic", "claude-sonnet-4-20250514", "anthropic(api-key·local)")
     if os.environ.get("OPENAI_API_KEY"):
         return ("openai", "gpt-4o-mini", "openai(api-key·local)")
-    model = _register_cli_provider(engine)  # 키 없으면 구독(CLI)
-    return ("claude_cli", model, "claude_cli(subscription)")
+    return ("claude_cli", _register_cli_provider(engine), "claude_cli(subscription)")
 
 
 async def _run_full_pipeline_async(query: str, config_path: str | None,

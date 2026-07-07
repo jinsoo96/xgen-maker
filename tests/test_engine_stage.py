@@ -57,20 +57,30 @@ class TestFullPipelineWiring(unittest.TestCase):
     """엔진 풀 파이프라인 구동 배선 — provider 선택·스테이지 phase(LLM 호출 없이)."""
 
     @unittest.skipUnless(ENGINE is not None, "엔진 미설치")
-    def test_provider_autoselect(self):
+    def test_provider_autoselect_subscription_first(self):
         import os
+        from unittest.mock import patch
         from xgen_maker.engine_stage import _select_provider
-        saved = {k: os.environ.pop(k, None) for k in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY")}
+        saved = {k: os.environ.pop(k, None) for k in
+                 ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "XGEN_MAKER_ENGINE_PROVIDER")}
         try:
-            # 키 없으면 claude 구독(CLI)
-            name, model, label = _select_provider(ENGINE)
+            # 구독 우선 — CLI 있으면 키가 있어도 구독
+            os.environ["ANTHROPIC_API_KEY"] = "sk-ant-local-xxxx"
+            with patch("xgen_maker.auth.claude_command", return_value=["claude", "-p", "x"]):
+                name, _, label = _select_provider(ENGINE)
             self.assertEqual(name, "claude_cli")
             self.assertIn("subscription", label)
-            # 로컬 API 키 있으면 그걸(직접 API)
-            os.environ["ANTHROPIC_API_KEY"] = "sk-ant-local-xxxx"
-            name2, _, label2 = _select_provider(ENGINE)
+            # override로 API 키 강제
+            os.environ["XGEN_MAKER_ENGINE_PROVIDER"] = "anthropic"
+            with patch("xgen_maker.auth.claude_command", return_value=["claude", "-p", "x"]):
+                name2, _, label2 = _select_provider(ENGINE)
             self.assertEqual(name2, "anthropic")
-            self.assertIn("local", label2)
+            self.assertIn("forced", label2)
+            # CLI 없으면 로컬 키 폴백
+            os.environ.pop("XGEN_MAKER_ENGINE_PROVIDER", None)
+            with patch("xgen_maker.auth.claude_command", return_value=None):
+                name3, _, _ = _select_provider(ENGINE)
+            self.assertEqual(name3, "anthropic")
         finally:
             for k, v in saved.items():
                 os.environ.pop(k, None)
