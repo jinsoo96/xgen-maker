@@ -157,7 +157,8 @@ class _SSEJournal:
         self._real.event(step, status, **data)
         detail = json.dumps({k: v for k, v in data.items()
                              if k in ("hits", "branch", "score", "env", "keywords",
-                                      "affected", "nodes", "sha", "draft", "url", "reason")},
+                                      "affected", "nodes", "sha", "draft", "url", "reason",
+                                      "error", "promotion", "target", "count", "next_manual")},
                             ensure_ascii=False, default=str)[:180]
         self._q.put({"type": "event", "step": step, "status": status, "detail": detail})
 
@@ -207,9 +208,16 @@ class MakerWebHandler(BaseHTTPRequestHandler):
             try:
                 results = sync_all(self.graph)
                 total = sum(r.get("changed", 0) for r in results)
-                if total:
+                if total or any(r.get("action") for r in results):
                     enrich_deterministic(self.graph)
                     self.graph.save(self.config.kg_path)
+                    # CLI kg sync와 동일 — 사람 편집(overlay)을 재적용해 유실 방지
+                    from .kg.overlay import load_overlay, apply_overlay
+                    from pathlib import Path as _Path
+                    overlay = load_overlay(_Path(self.config.kg_path).parent / "overlay.json")
+                    if overlay["node_overrides"] or overlay["custom_edges"]:
+                        apply_overlay(self.graph, overlay)
+                        self.graph.save(self.config.kg_path)
                 self._json({"ok": True, "changed": total,
                             "nodes": len(self.graph.nodes),
                             "per_repo": [{"repo": r.get("repo"), "changed": r.get("changed", 0),

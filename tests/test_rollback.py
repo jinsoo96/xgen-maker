@@ -57,6 +57,16 @@ class TestRollback(unittest.TestCase):
         with tempfile.TemporaryDirectory() as t:
             self.assertIsNone(last_action(t))
 
+    def test_undo_refuses_protected_branch(self):
+        # 저널이 오염돼 branch=develop여도 롤백은 보호 브랜치를 삭제하지 않는다
+        poisoned = {"repo": "r", "branch": "develop", "base": "develop",
+                    "pushed": False}
+        res = undo(self.cfg, poisoned)
+        self.assertFalse(res["ok"])
+        self.assertTrue(any("보호" in e for e in res["errors"]))
+        # develop 브랜치가 여전히 존재
+        self.assertIn("develop", GitRepo(self.repo)._run("branch"))
+
 
 class TestWorktree(unittest.TestCase):
     def test_worktree_add_remove(self):

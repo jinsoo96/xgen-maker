@@ -114,6 +114,16 @@ class TestPipelineE2E(unittest.TestCase):
         self.assertIn("farewell", report["answer"])
         self.assertEqual(self._current_branch(), "trunk")
 
+    def test_question_cites_real_code_not_just_graph(self):
+        # 질문 답변은 그래프(지도) + 실제 코드(권위)를 함께 인용해야 함
+        loop = MakerLoop(self.config)
+        report = loop.run("greet 함수 어디 있어?")
+        self.assertEqual(report["outcome"], "answered")
+        self.assertTrue(report.get("code_cited"), "실코드 발췌가 답변에 포함돼야 함")
+        self.assertIn("실제 코드(권위)", report["answer"])
+        self.assertIn("app.py", report["answer"])
+        self.assertEqual(self._current_branch(), "trunk")  # 여전히 레포 미접촉
+
     def test_broken_syntax_blocked_by_checks(self):
         stub_bad = self.base / "stub_bad.py"
         stub_bad.write_text(

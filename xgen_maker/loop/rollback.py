@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from ..config import is_protected_branch, is_allowed_branch
 from .git_ops import GitRepo, GitOpsError
 
 
@@ -50,6 +51,11 @@ def undo(config, action: dict, delete_remote: bool = False) -> dict:
     steps, errors = [], []
     if not repo_path or not branch:
         return {"ok": False, "steps": [], "errors": ["repo 경로/브랜치 미상 — 수동 확인 필요"]}
+    # 안전 불변식 재확인 — 저널이 오염/수기편집돼도 보호 브랜치는 절대 삭제 안 함
+    if is_protected_branch(branch) or not is_allowed_branch(branch):
+        return {"ok": False, "steps": [],
+                "errors": [f"'{branch}'는 보호 브랜치이거나 허용 prefix 밖 — "
+                           "롤백 삭제 거부(수동 확인 필요)"]}
     try:
         git = GitRepo(repo_path)
     except GitOpsError as e:

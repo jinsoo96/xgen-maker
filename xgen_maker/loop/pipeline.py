@@ -17,11 +17,8 @@ from ..kg.build import refresh_files
 from .intent import classify
 from .converge import converge
 from .git_ops import GitRepo, GitOpsError
-from .implement import build_prompt, run_agent
-from .judge import judge
 from .journal import Journal
 from .mr import build_mr_draft, save_draft, create_gitlab_mr
-from .testing import run_checks
 from .verify import verify
 
 
@@ -42,9 +39,16 @@ class MakerLoop:
                  (f":{n['line']}" if n.get("line") else "")
                  for n in landing[:10]]
         answer = "지식그래프 검색 결과:\n" + ("\n".join(lines) if lines else "(일치 없음)")
-        journal.event("answer", "ok", hits=len(landing))
+        # KG는 지도, 코드가 권위 — 착지 파일 실코드 발췌를 함께 첨부(그래프+실데이터 참조)
+        repo = landing[0]["repo"] if landing else ""
+        repo_path = Path(self.config.repos[repo]) if repo in self.config.repos else None
+        legacy = self._legacy_notes(landing, repo_path)
+        if legacy:
+            answer += "\n\n실제 코드(권위):\n" + legacy
+        journal.event("answer", "ok", hits=len(landing), code_cited=bool(legacy))
         journal.close("answered")
-        return {"outcome": "answered", "answer": answer, "landing": landing[:10]}
+        return {"outcome": "answered", "answer": answer,
+                "landing": landing[:10], "code_cited": bool(legacy)}
 
     def _legacy_notes(self, landing: list[dict], repo_path: Path | None) -> str:
         """④ 레거시 확인 — KG는 지도, 코드가 권위. 착지 파일 실코드 발췌."""

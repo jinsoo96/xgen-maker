@@ -17,7 +17,9 @@ ALLOWED_BRANCH_PREFIXES = ("feature/", "fix/", "refactor/", "hotfix/", "chore/")
 # 규칙: 브랜치명은 작업 내용을 명확하게. js·251205 등 의미 불명 이름 금지.
 _MEANINGLESS_SLUG = re.compile(r"^(js|ts|py|tmp|test|temp|wip|\d+|[a-z]{1,2}\d*)$", re.I)
 INFRA_PATTERNS = re.compile(
-    r"(^|/)(docker-compose[^/]*\.ya?ml|Dockerfile[^/]*|\.gitlab-ci\.ya?ml|helm/|infra/|k8s/|\.github/workflows/)",
+    r"(^|/)(docker-compose[^/]*\.ya?ml|Dockerfile[^/]*|\.gitlab-ci\.ya?ml|"
+    r"Jenkinsfile[^/]*|\.drone\.ya?ml|azure-pipelines[^/]*\.ya?ml|bitbucket-pipelines\.ya?ml|"
+    r"helm/|infra/|k8s/|\.github/workflows/|\.circleci/)",
     re.I)
 
 # 기본값은 로컬/제네릭 — 실제 엔드포인트는 .env(XGEN_MAKER_LLM_BASE)로만 주입(공개 시 노출 방지)

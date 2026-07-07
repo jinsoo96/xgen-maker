@@ -113,6 +113,16 @@ class TestJudge(unittest.TestCase):
         self.assertIn(".gitlab-ci.yml", touched)
         self.assertNotIn("src/a.py", touched)
 
+    def test_infra_patterns_ci_descriptors(self):
+        # CI-as-code(Jenkins·drone·azure 등)도 인프라 veto 대상
+        touched = infra_files(["Jenkinsfile", "ci/Jenkinsfile.release",
+                               ".drone.yml", "azure-pipelines.yml",
+                               ".circleci/config.yml", "src/ok.py"])
+        for f in ("Jenkinsfile", "ci/Jenkinsfile.release", ".drone.yml",
+                  "azure-pipelines.yml", ".circleci/config.yml"):
+            self.assertIn(f, touched)
+        self.assertNotIn("src/ok.py", touched)
+
 
 class TestJournalAndVerify(unittest.TestCase):
     def test_journal_events_and_summary(self):

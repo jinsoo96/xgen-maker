@@ -68,8 +68,7 @@ def retrieve(learnings_dir: str | Path, repo: str, keywords: list[str],
         score = sum(1 for k in kw if k in hay)
         if score or not kw:
             scored.append((score, e))
-    scored.sort(key=lambda p: (-p[0], p[1].get("ts", "")), reverse=False)
-    scored.sort(key=lambda p: (p[0], p[1].get("ts", "")), reverse=True)
+    scored.sort(key=lambda p: (p[0], p[1].get("ts", "")), reverse=True)  # 점수↓, 최신↓
     return [e for _, e in scored[:limit]]
 
 

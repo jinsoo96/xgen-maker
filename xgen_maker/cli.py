@@ -217,7 +217,12 @@ def cmd_run(args) -> None:
     if args.kg:
         config.kg_path = args.kg
     if args.mode:
-        config.mode = args.mode
+        # 웹/chat과 동일 매핑: plan=쓰기없음(분석·MR초안만), observe/act=쓰기(로컬/푸시)
+        if args.mode == "plan":
+            config.allow_write = False
+        else:
+            config.allow_write = True
+            config.mode = args.mode
     loop = MakerLoop(config)
     report = loop.run(args.query)
     print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
@@ -653,7 +658,9 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("query")
     p.add_argument("--config", default=None)
     p.add_argument("--kg", default=None)
-    p.add_argument("--mode", choices=["observe", "act"], default=None)
+    p.add_argument("--mode", choices=["plan", "observe", "act"], default=None,
+                   help="plan=분석·MR초안만(레포 미접촉) · observe=로컬 브랜치+커밋(푸시X) · "
+                        "act=푸시+MR(인가 게이트 통과 필요). 미지정 시 config 기본(안전=plan-only)")
     p.set_defaults(func=cmd_run)
 
     p = sub.add_parser("mcp", help="KG MCP 서버 (stdio) — kg_* 4툴 + maker_plan")
