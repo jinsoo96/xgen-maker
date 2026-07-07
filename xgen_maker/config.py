@@ -55,6 +55,7 @@ class MakerConfig:
     ui_converge: bool = False                              # UI 문제를 수렴 retry 신호로(브랜치 렌더 프리뷰 필요)
     preview_base: str = ""
     check_timeout: int = 600                               # 자동 테스트(checks) 타임아웃
+    strict_regression: bool = False                        # 있는데 못 돌린 회귀 테스트(env)를 차단으로 승격
     max_iterations: int = 3                                # 수렴 루프 최대 재시도(통과까지)
     verbose: bool = True                                   # 진행 로그 실시간 출력
     deploy_mode: str = "off"                               # off | dry_run | live (live=이중 인터록)

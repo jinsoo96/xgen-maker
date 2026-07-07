@@ -398,6 +398,15 @@ def run_doctor(config_path: str | None = None) -> bool:
                 check.warn("하네스 샌드박스", f"검증 상태 {sb['status']}")
         else:
             check.warn("하네스 샌드박스", "xgen-harness 미설치 — 로컬 checks로 대체")
+        # 레거시 회귀 게이트 — pytest 전체 스위트 + strict 모드
+        from .loop.testing import regression_verdict
+        v = regression_verdict([{"name": "pytest", "status": "passed"}])
+        strict = getattr(config, "strict_regression", False) if config else False
+        if v == "verified":
+            check.ok("레거시 회귀 게이트",
+                     f"pytest 전체 스위트로 회귀 탐지 · strict={'ON(미검증 차단)' if strict else 'OFF(미검증 경고)'}")
+        else:
+            check.warn("레거시 회귀 게이트", "verdict 계약 이상")
     except Exception as e:
         check.fail("수렴 루프", str(e)[:80])
 

@@ -14,15 +14,29 @@ from pathlib import Path
 from ..config import MakerConfig
 
 
+_REGRESSION_NOTE = {
+    "verified": "✅ **검증됨** — 레포 테스트 스위트가 실제로 통과(레거시 안 깨짐 확인).",
+    "unverified": "⚠️ **미검증** — 돌릴 테스트는 있으나 환경(의존성)에서 못 돌림. "
+                  "레거시가 안 깨졌다고 **단정할 수 없음** — 테스트 환경에서 재검증 필요.",
+    "failed": "❌ **실패** — 레거시 회귀 감지(이 MR은 차단되어야 함).",
+    "none": "➖ 해당 없음 — 돌릴 회귀 테스트가 레포에 없음.",
+}
+
+
 def build_mr_draft(query: str, intent: str, branch: str, target_branch: str,
                    changed_files: list[str], diff_stat: str,
                    impact_nodes: list[dict], judge_result: dict,
                    agent_summary: str = "",
                    checks: list[dict] | None = None,
-                   release_md: str = "") -> tuple[str, str]:
+                   release_md: str = "", regression: str = "",
+                   sandbox_isolated: bool | None = None) -> tuple[str, str]:
     """반환 = (title, body_markdown)."""
     title_prefix = {"bug": "fix", "feature": "feat", "refactor": "refactor"}.get(intent, "chore")
     title = f"{title_prefix}: {query[:80]}"
+    sandbox_note = ("" if sandbox_isolated is None else
+                    ("🔒 엔진 샌드박스 격리 검증" if sandbox_isolated
+                     else "🔓 로컬 검증(엔진 샌드박스 미설치 — `pip install .[harness]`로 격리 활성)"))
+    regression_note = _REGRESSION_NOTE.get(regression, "")
     impact_lines = "\n".join(
         f"- (거리 {n['distance']}) [{n['kind']}] {n['name']} — `{n['repo']}:{n['path']}`"
         for n in impact_nodes[:15]) or "- (KG상 파급 없음)"
@@ -50,6 +64,10 @@ def build_mr_draft(query: str, intent: str, branch: str, target_branch: str,
 
 ## 자동 검증 (checks)
 {chr(10).join(f"- {c.get('name', '?')}: **{c.get('status', '?')}**" + (f" — {c.get('reason', '')}" if c.get('reason') else "") for c in (checks or [])) or "- (미실행)"}
+
+## 레거시 회귀 (기존 동작 안 깨졌나)
+{regression_note or "- (미판정)"}
+{("- 샌드박스: " + sandbox_note) if sandbox_note else ""}
 
 ## 품질 게이트
 - judge: **{judge_result.get('score')}** (θ={judge_result.get('theta')}, {judge_result.get('source')})

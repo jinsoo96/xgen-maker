@@ -133,9 +133,12 @@ def converge(config, repo_path: Path, repo: str, query: str, intent: str,
         journal.event("implement", "ok", n=iteration, files=len(changed))
 
         sandbox = sandbox_verify_python(repo_path, changed)
-        checks = run_checks(repo_path, changed, test_timeout=config.check_timeout)
+        checks = run_checks(repo_path, changed, test_timeout=config.check_timeout,
+                            strict_regression=getattr(config, "strict_regression", False),
+                            graph=graph, repo=repo)
         journal.event("checks", "blocked" if checks["blocked"] else "ok",
-                      n=iteration, sandbox=sandbox["status"], summary=checks["summary"])
+                      n=iteration, sandbox=sandbox["status"],
+                      regression=checks.get("regression"), summary=checks["summary"])
         judge_result = None
         if sandbox["status"] != "failed" and not checks["blocked"]:
             judge_result = judge(config, query, diff_text, changed,

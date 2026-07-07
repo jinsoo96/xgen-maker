@@ -96,6 +96,8 @@ maker engine register                            # 엔진 stage로 등록(R3)
 |---|---|
 | **항상 최신** | 작업 전 `origin/develop` fetch → 최신에서 분기 → 변경분을 KG에 반영. `fetch_latest`(기본 on) |
 | **수렴 루프** | 구현 → 샌드박스+테스트+judge → 실패 시 에러 되먹여 재구현, `max_iterations`까지. xgen-sdk 엔진 샌드박스 임포트 |
+| **레거시 회귀 게이트** | `pytest -x -q` 전체 스위트 + node 역의존성(크로스패키지)로 기존 동작이 깨졌나 검증. 실패=차단·되먹임. 테스트 환경이 없어 못 돌리면 **`verified`가 아닌 `unverified`로 정직 표기**(MR에 명시). `strict_regression`=true면 미검증을 차단으로 승격 |
+| **검증 정직성** | 샌드박스 격리는 `[harness]` 있을 때만(없으면 로컬검증으로 degrade), 회귀는 테스트 환경 있을 때만 — MR 초안·진단 탭에 실제 검증 여부를 그대로 노출(“통과”≠“검증됨” 오해 방지) |
 | **릴리즈 사다리** | `develop → stg → main` (= dev/stg/prd). MR은 develop에, 승격은 순차, main 직접머지 금지 |
 | **경계** | 자동은 **MR 준비까지** · 배포·빌드·ArgoCD sync는 **사람 수동** · CI 상태는 **read-only 관측** |
 | **학습 메모리** | 실패/성공 교훈을 `learnings/`에 쌓아 다음 작업 프롬프트에 주입(실수 방지) |

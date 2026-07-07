@@ -152,6 +152,11 @@ function render(t){
      `<tr><td>엔진 구동 기계장치(R3-B)</td><td>${yn(d.engine_levelb)}</td></tr>`+
      `<tr><td>작업 커밋 저자 강제</td><td>${yn(d.git_author.email_set)} ${esc(d.git_author.name||'')}</td></tr>`+
      '</table>';
+  const v=d.verification||{};
+  h+='<h4>검증 게이트</h4><table>'+
+     `<tr><td>샌드박스 격리(엔진)</td><td>${yn(v.sandbox_isolated)} ${v.sandbox_isolated?'':'— [harness] 미설치, 로컬검증으로 degrade'}</td></tr>`+
+     `<tr><td>레거시 회귀 strict 모드</td><td>${v.strict_regression?'<span class="badge ok">ON</span> 못 돌린 회귀 테스트 차단':'<span class="badge muted">OFF</span> 미검증은 경고만(기본)'}</td></tr>`+
+     '</table>';
   const cap=(d.catalog||{}).capabilities||{};
   h+='<h4>능력 카탈로그</h4><table>'+Object.keys(cap).map(k=>`<tr><td class=muted>${esc(k)}</td><td>${esc((cap[k]||[]).join(' · '))}</td></tr>`).join('')+'</table>';
   h+='<div class=muted style="margin-top:10px">경계: '+esc((d.catalog||{}).boundary||'')+'</div>';
@@ -200,7 +205,7 @@ class _SSEJournal:
                              if k in ("hits", "branch", "score", "env", "keywords",
                                       "affected", "nodes", "sha", "draft", "url", "reason",
                                       "error", "promotion", "target", "count", "next_manual",
-                                      "n", "phase", "files", "sandbox", "decision")},
+                                      "n", "phase", "files", "sandbox", "decision", "regression")},
                             ensure_ascii=False, default=str)[:180]
         self._q.put({"type": "event", "step": step, "status": status, "detail": detail})
 
@@ -309,6 +314,7 @@ class MakerWebHandler(BaseHTTPRequestHandler):
             # 읽기전용 자가진단 — SDK 계약/드리프트 + 엔진 stage 등록 상태(로컬만, 네트워크 X)
             from .sdk_check import installed_versions, contract_probe, maker_catalog
             from .engine_stage import register, _load_engine
+            from .loop.converge import HAS_HARNESS
             eng = _load_engine()
             self._json({
                 "sdk": {"installed": installed_versions(), "contract": contract_probe()},
@@ -317,6 +323,9 @@ class MakerWebHandler(BaseHTTPRequestHandler):
                     hasattr(eng, n) for n in
                     ("EventEmitter", "InMemorySessionStore", "PipelineState", "save_session")),
                 "catalog": maker_catalog(),
+                "verification": {
+                    "sandbox_isolated": bool(HAS_HARNESS),  # [harness] 있어야 진짜 격리
+                    "strict_regression": bool(getattr(self.config, "strict_regression", False))},
                 "git_author": {"name": self.config.git_author_name,
                                "email_set": bool(self.config.git_author_email)}})
         else:

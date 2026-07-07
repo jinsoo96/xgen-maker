@@ -237,6 +237,8 @@ class MakerLoop:
         judge_result = conv.get("judge")
         report["checks"] = checks["summary"]
         report["sandbox"] = sandbox["status"]
+        report["sandbox_isolated"] = bool(sandbox.get("isolated"))
+        report["regression"] = checks.get("regression")  # verified|unverified|failed|none
 
         if not conv["converged"]:
             # 수렴 실패 — 마지막 실패 원인으로 분기(브랜치는 조사용 보존)
@@ -329,7 +331,14 @@ class MakerLoop:
                                      changed, diff_stat, impact_nodes, judge_result,
                                      agent_summary=conv.get("agent_summary", ""),
                                      checks=checks["checks"] + [sandbox, deploy_test],
-                                     release_md=render_ladder_md(rel_view))
+                                     release_md=render_ladder_md(rel_view),
+                                     regression=checks.get("regression", ""),
+                                     sandbox_isolated=bool(sandbox.get("isolated")))
+        # 정직성 신호 — 레거시가 미검증인 채 MR이 준비되면 명시(오해 방지)
+        if checks.get("regression") == "unverified":
+            journal.event("mr_ready", "warn", regression="unverified",
+                          note="레거시 회귀 미검증(테스트 환경 없음)")
+            report["regression_warning"] = "레거시 회귀 미검증 — 테스트 환경에서 재검증 필요"
         draft = save_draft(journal.dir, title, body)
         commit = repo_git.commit_all(title, body,
                                      author_name=config.git_author_name,
