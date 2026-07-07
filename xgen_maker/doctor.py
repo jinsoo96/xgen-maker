@@ -355,12 +355,23 @@ def run_doctor(config_path: str | None = None) -> bool:
 
     # 목적 8-2: R3 엔진 stage 등록 (MAKER가 엔진 정식 스테이지)
     try:
-        from .engine_stage import register
+        from .engine_stage import register, _load_engine
         r = register()
         if r["ok"]:
-            check.ok("엔진 stage 등록(R3)", f"{r['stage_id']} → {r['engine']} {r['version']}")
+            check.ok("엔진 stage 등록(R3-A)", f"{r['stage_id']} → {r['engine']} {r['version']}")
         else:
-            check.warn("엔진 stage 등록(R3)", r["reason"][:60])
+            check.warn("엔진 stage 등록(R3-A)", r["reason"][:60])
+        # Level B — 엔진이 MAKER를 구동할 기계장치(EventEmitter·SessionStore·PipelineState)
+        eng = _load_engine()
+        if eng is not None:
+            needed = ("EventEmitter", "InMemorySessionStore", "PipelineState",
+                      "StageEnterEvent", "save_session")
+            missing = [n for n in needed if not hasattr(eng, n)]
+            if missing:
+                check.warn("엔진 구동(R3-B)", f"기계장치 누락: {missing}")
+            else:
+                check.ok("엔진 구동(R3-B)",
+                         "이벤트스트림+세션영속으로 MAKER 스테이지 구동 (run_via_engine)")
     except Exception as e:
         check.warn("엔진 stage 등록(R3)", str(e)[:80])
 

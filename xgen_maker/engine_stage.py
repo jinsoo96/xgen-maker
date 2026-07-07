@@ -1,15 +1,21 @@
-"""R3 — MAKER를 xgen-harness 엔진의 정식 stage로 등록.
+"""R3 — MAKER를 xgen-harness 엔진의 정식 stage로 등록하고, 엔진 기계장치로 구동.
 
-엔진(xgen_sdk.harness 또는 xgen_harness)의 Stage 계약(execute(state)->dict)을 구현해,
-MAKER 루프를 엔진 Pipeline의 한 스테이지로 꽂는다. register 후엔 엔진이 MAKER를 인지·구동한다.
+엔진(xgen_sdk.harness 또는 xgen_harness)의 Stage 계약(async execute(state)->dict)을 구현해
+MAKER 루프를 엔진 스테이지로 꽂는다.
 
-안전: 엔진 경유 실행은 기본 plan-only(allow_write=False) — 파이프라인 안에서 실레포를 함부로
+- Level A `register()` : 엔진 레지스트리에 MakerStage 정식 등록.
+- Level B `run_via_engine()` : 엔진의 실제 기계장치로 MAKER를 구동한다 —
+  엔진 EventEmitter(subscribe 이벤트 스트림) + PipelineState + SessionStore(세션 영속,
+  save/load 라운드트립 검증)로 스테이지 라이프사이클(StageEnter→Substep→StageExit)을
+  관리한다. MAKER는 LLM provider가 필요 없는 자기완결형 스테이지이므로, provider를
+  요구하는 엔진 풀 LLM 파이프라인(s01~s09)에 끼우지 않고 스테이지를 엔진 계약대로 구동한다.
+
+안전: 엔진 경유 실행은 기본 plan-only(allow_write=False) — 파이프라인 안에서 실레포를
 안 건드린다. state.metadata['maker_config']로 config 주입, state.user_input이 쿼리.
-
-전체 네이티브 이식(엔진 Phase B 루프가 MAKER 수렴을 구동)은 s06/s08 배선이 남은 다음 단계.
-이 모듈은 '정식 stage 등록 + 엔진이 MAKER를 스테이지로 실행'까지를 담당한다.
 """
 from __future__ import annotations
+
+import asyncio
 
 STAGE_ID = "s99_maker"
 
@@ -62,7 +68,18 @@ def build_maker_stage(engine):
                 description="쿼리 → KG착지 → 수렴 구현 → 검증 → MR 준비 (코드 자동개발)",
                 input_requires=["user_input"], output_produces=["maker_report"])
 
-        def execute(self, state) -> dict:
+        async def _emit(self, state, substep: str, **meta):
+            emitter = getattr(state, "event_emitter", None)
+            if emitter is None:
+                return
+            try:
+                await emitter.emit(engine.StageSubstepEvent(
+                    stage_id=STAGE_ID, substep=substep, meta=meta))
+            except Exception:  # noqa: BLE001 — 이벤트 실패가 스테이지를 깨지 않게
+                pass
+
+        async def execute(self, state) -> dict:
+            """엔진 계약(async). 동기 MAKER 루프는 to_thread로 이벤트 루프 블로킹 방지."""
             from .config import MakerConfig
             from .loop.pipeline import MakerLoop
             query = getattr(state, "user_input", "") or ""
@@ -71,16 +88,20 @@ def build_maker_stage(engine):
             config = MakerConfig.from_file(cfg_path) if cfg_path else MakerConfig()
             config.allow_write = bool(meta.get("maker_allow_write", False))  # 기본 plan-only
             config.verbose = False
+            await self._emit(state, "maker_start", query=query[:80],
+                             allow_write=config.allow_write)
             try:
-                report = MakerLoop(config).run(query)
+                report = await asyncio.to_thread(MakerLoop(config).run, query)
             except Exception as error:  # noqa: BLE001 — 스테이지가 파이프라인을 깨지 않게
                 report = {"outcome": "error", "error": str(error)[:300]}
             state.workflow_data["maker_report"] = report
             state.final_output = (f"[MAKER] outcome={report.get('outcome')} "
-                                  f"branch={report.get('branch','-')} "
-                                  f"mr={report.get('mr_draft', report.get('mr','-'))}")
+                                  f"branch={report.get('branch', '-')} "
+                                  f"mr={report.get('mr_draft', report.get('mr', '-'))}")
             if hasattr(state, "loop_decision"):
                 state.loop_decision = "stop"
+            await self._emit(state, "maker_done", outcome=report.get("outcome"),
+                             branch=report.get("branch", "-"))
             return {"maker_report": report}
 
     return MakerStage
@@ -101,48 +122,84 @@ def register(engine=None) -> dict:
         return {"ok": False, "reason": str(error)[:200]}
 
 
+async def _run_via_engine_async(query: str, config_path: str | None,
+                                allow_write: bool, engine) -> dict:
+    """엔진 기계장치로 MAKER 스테이지를 구동 — 이벤트 스트림 + 세션 영속."""
+    events: list[dict] = []
+    emitter = engine.EventEmitter()
+
+    async def _capture(event):  # subscribe 콜백은 async 계약
+        events.append({"type": type(event).__name__,
+                       "stage": getattr(event, "stage_id", ""),
+                       "substep": getattr(event, "substep", "")})
+
+    token = emitter.subscribe(_capture)
+
+    state = engine.PipelineState(user_input=query)
+    state.metadata["maker_config"] = config_path
+    state.metadata["maker_allow_write"] = allow_write
+    state.event_emitter = emitter
+    session_id = getattr(state, "execution_id", "") or "maker-session"
+
+    stage = build_maker_stage(engine)()
+    # 엔진 스테이지 라이프사이클을 엔진 이벤트로 관리
+    await emitter.emit(engine.StageEnterEvent(
+        stage_id=STAGE_ID, stage_name="XGEN MAKER", phase="act",
+        step=1, total=1, description=query[:80]))
+    result = await stage.execute(state)
+    report = result.get("maker_report", {})
+    try:
+        await emitter.emit(engine.StageExitEvent(
+            stage_id=STAGE_ID, stage_name="XGEN MAKER",
+            output={"outcome": report.get("outcome")}, step=1, total=1))
+    except Exception:  # noqa: BLE001
+        pass
+
+    # 엔진 세션 스토어에 영속 — 저장 후 로드 라운드트립으로 실제 영속 검증
+    session_saved = False
+    try:
+        store = engine.InMemorySessionStore()
+        store.save(session_id, {
+            "query": query, "maker_report": report,
+            "final_output": getattr(state, "final_output", ""),
+            "loop_decision": getattr(state, "loop_decision", "?")})
+        session_saved = store.load(session_id) is not None
+        # 엔진 세션 객체 계약도 등록(SessionManager 호환)
+        try:
+            engine.save_session(store, engine.HarnessSession(
+                config=None, session_id=session_id))
+        except Exception:  # noqa: BLE001
+            pass
+    except Exception:  # noqa: BLE001
+        session_saved = False
+
+    await asyncio.sleep(0)  # 큐된 이벤트 flush
+    try:
+        emitter.unsubscribe(token)
+        await emitter.close()
+    except Exception:  # noqa: BLE001
+        pass
+
+    return {"ok": True, "outcome": report.get("outcome"), "report": report,
+            "engine_state": {
+                "loop_decision": getattr(state, "loop_decision", "?"),
+                "final_output": getattr(state, "final_output", ""),
+                "session_id": session_id, "session_saved": session_saved,
+                "events": events}}
+
+
 def run_via_engine(query: str, config_path: str | None = None,
                    allow_write: bool = False, engine=None) -> dict:
-    """R3 Level B — 엔진이 MAKER를 구동한다.
+    """R3 Level B — 엔진이 MAKER를 구동한다(동기 진입점, 내부 asyncio).
 
-    엔진의 PipelineState·EventEmitter(있으면)·SessionStore(있으면)를 세워 MAKER 스테이지를
-    엔진 컨텍스트에서 실행. 엔진 상태/세션에 결과가 관리되며, 스테이지가 loop_decision을 세팅.
-    반환 {ok, outcome, report, engine_state:{loop_decision, final_output, saved_session?}}.
+    엔진 EventEmitter(이벤트 스트림)·PipelineState·SessionStore(세션 영속)를 세워 MAKER
+    스테이지를 엔진 계약대로 실행. 반환 {ok, outcome, report,
+    engine_state:{loop_decision, final_output, session_id, session_saved, events}}.
     """
     engine = engine or _load_engine()
     if engine is None:
         return {"ok": False, "reason": "엔진 미설치"}
-    stage = build_maker_stage(engine)()
-    # 엔진 상태(state) 구성
-    state = engine.PipelineState(user_input=query)
-    if config_path:
-        state.metadata["maker_config"] = config_path
-    state.metadata["maker_allow_write"] = allow_write
-    # 엔진 이벤트 에미터 연결(있으면) — 엔진이 스테이지 이벤트를 관리
-    events = []
-    if hasattr(engine, "EventEmitter"):
-        try:
-            emitter = engine.EventEmitter()
-            if hasattr(emitter, "on"):
-                emitter.on("*", lambda e: events.append(getattr(e, "type", str(e))))
-            state.event_emitter = emitter
-        except Exception:  # noqa: BLE001
-            pass
-    # 스테이지를 엔진 컨텍스트에서 실행 (엔진 계약 execute(state)->dict)
     try:
-        result = stage.execute(state)
+        return asyncio.run(_run_via_engine_async(query, config_path, allow_write, engine))
     except Exception as error:  # noqa: BLE001
-        return {"ok": False, "reason": f"엔진 구동 실패: {error}"}
-    # 엔진 세션 스토어에 상태 영속(있으면)
-    saved = False
-    if hasattr(engine, "save_session") and hasattr(engine, "InMemorySessionStore"):
-        try:
-            engine.save_session(engine.InMemorySessionStore(), state)
-            saved = True
-        except Exception:  # noqa: BLE001
-            saved = False
-    report = result.get("maker_report", {})
-    return {"ok": True, "outcome": report.get("outcome"), "report": report,
-            "engine_state": {"loop_decision": getattr(state, "loop_decision", "?"),
-                             "final_output": getattr(state, "final_output", ""),
-                             "session_saved": saved}}
+        return {"ok": False, "reason": f"엔진 구동 실패: {error}"[:200]}

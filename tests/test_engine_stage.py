@@ -44,7 +44,8 @@ class TestEngineStage(unittest.TestCase):
                            f'"llm_enabled": false, "verbose": false}}', encoding="utf-8")
             state = ENGINE.PipelineState(user_input="a.py 파일 어디 있어?")
             state.metadata["maker_config"] = str(cfg)
-            out = st.execute(state)
+            import asyncio
+            out = asyncio.run(st.execute(state))  # 엔진 계약 = async
         self.assertIn("maker_report", out)
         self.assertIn("[MAKER]", state.final_output)
         self.assertEqual(state.loop_decision, "stop")
@@ -72,5 +73,15 @@ class TestEngineRunLevelB(unittest.TestCase):
             r = run_via_engine("a.py 어디 있어?", str(cfg))
         self.assertTrue(r["ok"])
         self.assertEqual(r["outcome"], "answered")
-        self.assertEqual(r["engine_state"]["loop_decision"], "stop")
-        self.assertIn("[MAKER]", r["engine_state"]["final_output"])
+        es = r["engine_state"]
+        self.assertEqual(es["loop_decision"], "stop")
+        self.assertIn("[MAKER]", es["final_output"])
+        # 완전동작: 엔진 세션 영속 라운드트립 + 엔진 이벤트 스트림
+        self.assertTrue(es["session_saved"], "세션이 실제로 save→load 라운드트립돼야 함")
+        self.assertTrue(es["session_id"])
+        etypes = [e["type"] for e in es["events"]]
+        self.assertIn("StageEnterEvent", etypes)
+        self.assertIn("StageExitEvent", etypes)
+        substeps = [e["substep"] for e in es["events"] if e["substep"]]
+        self.assertIn("maker_start", substeps)
+        self.assertIn("maker_done", substeps)

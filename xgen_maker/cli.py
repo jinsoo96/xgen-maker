@@ -426,10 +426,15 @@ def cmd_engine(args) -> None:
         r = run_via_engine(args.query, args.config, allow_write=False)  # 엔진 경유는 plan-only
         if not r["ok"]:
             print(f"✗ {r['reason']}"); sys.exit(1)
+        es = r["engine_state"]
+        ev = es.get("events", [])
+        substeps = [e["substep"] for e in ev if e.get("substep")]
         print(f"✓ 엔진이 MAKER 구동(R3 Level B) — outcome={r['outcome']}")
-        print(f"  loop_decision={r['engine_state']['loop_decision']} · "
-              f"session_saved={r['engine_state']['session_saved']}")
-        print(f"  {r['engine_state']['final_output']}")
+        print(f"  loop_decision={es['loop_decision']} · "
+              f"session_saved={es['session_saved']} · session={es.get('session_id','')[:12]}")
+        print(f"  엔진 이벤트 {len(ev)}개 ({'→'.join([e['type'].replace('Event','') for e in ev])})"
+              + (f" · substep: {', '.join(substeps)}" if substeps else ""))
+        print(f"  {es['final_output']}")
         return
     r = register()
     if r["ok"]:
