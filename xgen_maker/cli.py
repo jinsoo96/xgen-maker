@@ -423,10 +423,17 @@ def cmd_engine(args) -> None:
         if not args.query:
             print("✗ engine run엔 쿼리 필요: maker engine run \"...\"")
             sys.exit(1)
-        r = run_via_engine(args.query, args.config, allow_write=False)  # 엔진 경유는 plan-only
+        r = run_via_engine(args.query, args.config, allow_write=False,  # 엔진 경유는 plan-only
+                           full_pipeline=getattr(args, "full", False))
         if not r["ok"]:
             print(f"✗ {r['reason']}"); sys.exit(1)
         es = r["engine_state"]
+        if es.get("mode") == "full_pipeline":
+            print(f"✓ 엔진 풀 파이프라인이 MAKER 구동(R3 Level B·full) — outcome={r['outcome']}")
+            print(f"  provider={es['provider']} · MAKER 구동={es['maker_ran']}")
+            print(f"  엔진 스테이지: {' → '.join(es.get('stages_run', []))}")
+            print(f"  {es['final_output']}")
+            return
         ev = es.get("events", [])
         substeps = [e["substep"] for e in ev if e.get("substep")]
         print(f"✓ 엔진이 MAKER 구동(R3 Level B) — outcome={r['outcome']}")
@@ -729,6 +736,9 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("engine_action", nargs="?", default="register", choices=["register", "run"])
     p.add_argument("query", nargs="?", default=None, help="engine run용 쿼리")
     p.add_argument("--config", default=None)
+    p.add_argument("--full", action="store_true",
+                   help="엔진 풀 파이프라인 executor로 구동(s01→MAKER→s08→s09). "
+                        "로컬 API 키 있으면 그걸, 없으면 claude 구독(CLI)으로 LLM 스테이지 실행")
     p.set_defaults(func=cmd_engine)
 
     p = sub.add_parser("status", help="배포 상태 관측(read-only) — Jenkins·ArgoCD. MAKER는 배포 안 함")

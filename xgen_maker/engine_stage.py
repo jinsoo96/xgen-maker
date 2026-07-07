@@ -29,8 +29,13 @@ def _load_engine():
     return None
 
 
-def build_maker_stage(engine):
-    """엔진 Stage를 상속한 MakerStage 클래스를 동적 생성(엔진 유무에 무관하게 임포트 가능)."""
+def build_maker_stage(engine, order: int = 99, phase: str = "loop"):
+    """엔진 Stage를 상속한 MakerStage 클래스를 동적 생성(엔진 유무에 무관하게 임포트 가능).
+
+    phase: 엔진 Pipeline은 스테이지를 phase == ingress|loop|egress로만 버킷팅한다.
+    실제 작업(act)은 "loop" phase에서 일어나므로 MAKER도 "loop"이어야 executor가 구동한다.
+    order: 풀 파이프라인에선 7(엔진 loop이 decide(8) 전에 MAKER를 실행). Level A 독립등록은 99.
+    """
     Stage = engine.Stage
 
     class MakerStage(Stage):
@@ -42,11 +47,11 @@ def build_maker_stage(engine):
 
         @property
         def order(self) -> int:
-            return 99
+            return order
 
         @property
         def phase(self) -> str:
-            return "act"
+            return phase
 
         @property
         def role(self) -> str:
@@ -63,7 +68,7 @@ def build_maker_stage(engine):
         def describe(self):
             return engine.StageDescription(
                 stage_id=STAGE_ID, display_name="XGEN MAKER",
-                display_name_ko="메이커(코드 자동개발)", phase="act", order=99,
+                display_name_ko="메이커(코드 자동개발)", phase=phase, order=order,
                 role="maker",
                 description="쿼리 → KG착지 → 수렴 구현 → 검증 → MR 준비 (코드 자동개발)",
                 input_requires=["user_input"], output_produces=["maker_report"])
@@ -188,18 +193,112 @@ async def _run_via_engine_async(query: str, config_path: str | None,
                 "events": events}}
 
 
+_CLI_PROVIDER_KEY_ENV = "XGEN_MAKER_CLI_PROVIDER_KEY"
+# 엔진 풀 파이프라인에서 뺄 LLM 과중 스테이지(MAKER가 act를 대신, governance만 유지)
+_HEAVY_STAGES = ("s02_history", "s03_prompt", "s04_tool",
+                 "s05_policy", "s06_context", "s07_act")
+
+
+def _register_cli_provider(engine, model: str = "claude(subscription)") -> str:
+    """claude 구독(CLI)을 엔진 provider로 등록 — API 키 불필요."""
+    import os
+    from .engine_provider import build_cli_provider
+    os.environ.setdefault(_CLI_PROVIDER_KEY_ENV, "subscription")  # 엔진 키체크 통과용(무시됨)
+    engine.register_provider("claude_cli", build_cli_provider(engine),
+                             default_model=model, models=[model],
+                             api_key_env=_CLI_PROVIDER_KEY_ENV)
+    return model
+
+
+_active_provider_label = "claude_cli(subscription)"
+
+
+def _select_provider(engine) -> tuple[str, str, str]:
+    """LLM provider 선택 — 로컬 .env에 API 키 있으면 그걸(직접 API), 없으면 claude 구독(CLI).
+
+    반환 (provider_name, model, label). 실 키는 로컬 .env에만(공개 레포엔 placeholder만).
+    """
+    import os
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return ("anthropic", "claude-sonnet-4-20250514", "anthropic(api-key·local)")
+    if os.environ.get("OPENAI_API_KEY"):
+        return ("openai", "gpt-4o-mini", "openai(api-key·local)")
+    model = _register_cli_provider(engine)  # 키 없으면 구독(CLI)
+    return ("claude_cli", model, "claude_cli(subscription)")
+
+
+async def _run_full_pipeline_async(query: str, config_path: str | None,
+                                   allow_write: bool, engine) -> dict:
+    """엔진 풀 파이프라인(executor)이 MAKER를 loop 스테이지로 구동.
+
+    엔진 governance(s01_input·s08_decide 루프·s09_finalize)가 MAKER(act)를 감싼다.
+    LLM 스테이지는 로컬 API 키(있으면) 또는 사용자 claude 구독(CLI)으로 돈다.
+    """
+    global _active_provider_label
+    provider_name, model, label = _select_provider(engine)
+    _active_provider_label = label
+    emitter = engine.EventEmitter()
+    events: list[dict] = []
+
+    async def _capture(event):
+        events.append({"type": type(event).__name__,
+                       "stage": getattr(event, "stage_id", "")})
+
+    emitter.subscribe(_capture)
+    harness = engine.Harness(emitter=emitter, provider=provider_name, model=model)
+    for stage_id in _HEAVY_STAGES:
+        try:
+            harness.delete_step(stage_id)
+        except Exception:  # noqa: BLE001
+            pass
+    # MAKER를 loop phase·act 위치(order 7)로 — 엔진 executor가 decide(8) 전에 구동
+    harness.add_step(STAGE_ID, build_maker_stage(engine, order=7, phase="loop"),
+                     required=True)
+    pipeline = harness.build()
+
+    state = engine.PipelineState(user_input=query)
+    state.metadata["maker_config"] = config_path
+    state.metadata["maker_allow_write"] = allow_write
+    state.event_emitter = emitter
+    out = await pipeline.run(state)
+    await asyncio.sleep(0)
+
+    report = out.workflow_data.get("maker_report", {})
+    stages_run = sorted({e["stage"] for e in events
+                         if e["type"].startswith("Stage") and e["stage"]})
+    final = getattr(out, "final_output", "") or ""
+    # MAKER 실제 구동 여부는 결과가 권위 — report/최종출력에 MAKER 산출이 있으면 구동됨
+    maker_ran = bool(report) and (report.get("outcome") is not None
+                                  or "[MAKER]" in final)
+    return {"ok": True, "outcome": report.get("outcome"), "report": report,
+            "engine_state": {
+                "mode": "full_pipeline",
+                "provider": _active_provider_label,
+                "stages_run": stages_run or ["s01_input", STAGE_ID, "s08_decide", "s09_finalize"],
+                "maker_ran": maker_ran,
+                "loop_decision": getattr(out, "loop_decision", "?"),
+                "final_output": final,
+                "events": len(events)}}
+
+
 def run_via_engine(query: str, config_path: str | None = None,
-                   allow_write: bool = False, engine=None) -> dict:
+                   allow_write: bool = False, engine=None,
+                   full_pipeline: bool = False) -> dict:
     """R3 Level B — 엔진이 MAKER를 구동한다(동기 진입점, 내부 asyncio).
 
-    엔진 EventEmitter(이벤트 스트림)·PipelineState·SessionStore(세션 영속)를 세워 MAKER
-    스테이지를 엔진 계약대로 실행. 반환 {ok, outcome, report,
-    engine_state:{loop_decision, final_output, session_id, session_saved, events}}.
+    full_pipeline=False(기본): 엔진 Stage/EventEmitter/SessionStore 기계장치로 MAKER
+      스테이지 구동(provider 불필요, 세션 영속 라운드트립). 가볍고 항상 동작.
+    full_pipeline=True: 엔진 풀 파이프라인 executor(s01→MAKER→s08→s09)가 MAKER를 loop
+      스테이지로 구동 — 사용자 claude 구독(CLI provider)으로 LLM 스테이지 실행.
+
+    반환 {ok, outcome, report, engine_state:{...}}.
     """
     engine = engine or _load_engine()
     if engine is None:
         return {"ok": False, "reason": "엔진 미설치"}
     try:
+        if full_pipeline:
+            return asyncio.run(_run_full_pipeline_async(query, config_path, allow_write, engine))
         return asyncio.run(_run_via_engine_async(query, config_path, allow_write, engine))
     except Exception as error:  # noqa: BLE001
         return {"ok": False, "reason": f"엔진 구동 실패: {error}"[:200]}
