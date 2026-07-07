@@ -73,6 +73,26 @@ class TestWebServer(unittest.TestCase):
         self.assertIn('id="sync"', body)      # 헤더 버튼
         self.assertIn("/api/sync", body)       # 클릭 핸들러
 
+    def test_api_info_has_repo_names(self):
+        _, body = self._get("/api/info")
+        self.assertIn("repo_names", json.loads(body))
+
+    def test_api_diagnostics(self):
+        # 진단 탭 백엔드 — SDK 계약·엔진·카탈로그(로컬만)
+        status, body = self._get("/api/diagnostics")
+        self.assertEqual(status, 200)
+        d = json.loads(body)
+        self.assertIn("sdk", d)
+        self.assertIn("engine", d)
+        self.assertIn("catalog", d)
+        self.assertIn("capabilities", d["catalog"])
+
+    def test_new_tabs_in_page(self):
+        _, body = self._get("/")
+        for marker in ('data-t="branches"', 'data-t="diag"',
+                       "/api/branches", "/api/release", "/api/diagnostics"):
+            self.assertIn(marker, body)
+
     def test_sse_run_streams_events_and_result(self):
         import urllib.parse
         q = urllib.parse.quote("charge 함수 어디 있어")
@@ -109,9 +129,31 @@ class TestWebServer(unittest.TestCase):
         self.assertIn("maker", d)
 
 
-if __name__ == "__main__":
-    import urllib.error
-    unittest.main()
+class TestWebLoopbackGuard(unittest.TestCase):
+    """무인증 노출 가드 — 비-loopback 바인드는 명시 동의 없으면 거부."""
+
+    def test_non_loopback_refused_without_optin(self):
+        import os
+        os.environ.pop("XGEN_MAKER_WEB_ALLOW_REMOTE", None)
+        with self.assertRaises(SystemExit):
+            web.serve(None, host="0.0.0.0", port=0)
+
+    def test_non_loopback_allowed_with_optin(self):
+        # 명시 동의가 있으면 가드 통과 → 없는 config에서 막힘(serve_forever 도달 X, SystemExit 아님)
+        import os
+        os.environ["XGEN_MAKER_WEB_ALLOW_REMOTE"] = "1"
+        try:
+            with self.assertRaises(Exception) as ctx:
+                web.serve("/nonexistent/config.json", host="0.0.0.0", port=0)
+            self.assertNotIsInstance(ctx.exception, SystemExit)
+        finally:
+            os.environ.pop("XGEN_MAKER_WEB_ALLOW_REMOTE", None)
+
+    def test_loopback_passes_guard(self):
+        # 127.0.0.1은 가드를 그냥 통과(없는 config에서 SystemExit 아닌 다른 예외)
+        with self.assertRaises(Exception) as ctx:
+            web.serve("/nonexistent/config.json", host="127.0.0.1", port=0)
+        self.assertNotIsInstance(ctx.exception, SystemExit)
 
 
 if __name__ == "__main__":

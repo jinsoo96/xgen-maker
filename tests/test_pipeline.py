@@ -88,9 +88,14 @@ class TestPipelineE2E(unittest.TestCase):
         steps = [json.loads(line)["step"] for line in
                  (session / "journal.jsonl").read_text(encoding="utf-8").splitlines()]
         for expected in ("session_start", "intent", "kg_search", "branch",
-                         "iteration", "commit", "mr_ready", "kg_refresh",
-                         "session_end"):
-            self.assertIn(expected, steps)
+                         "implement", "checks", "iteration", "commit",
+                         "mr_ready", "kg_refresh", "session_end"):
+            self.assertIn(expected, steps)  # 수렴 단계가 실시간 스트리밍용 discrete 이벤트로 발행
+        # implement는 start→ok 순서로 최소 2회(실시간 진행 표시)
+        implement_evts = [json.loads(line) for line in
+                          (session / "journal.jsonl").read_text(encoding="utf-8").splitlines()
+                          if json.loads(line)["step"] == "implement"]
+        self.assertTrue(any(e["status"] == "start" for e in implement_evts))
         self.assertTrue(report.get("converged"))
         self.assertGreaterEqual(report.get("iterations", 0), 1)
 

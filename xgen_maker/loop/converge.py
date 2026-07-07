@@ -109,6 +109,9 @@ def converge(config, repo_path: Path, repo: str, query: str, intent: str,
     last = {"converged": False, "iterations": 0}
 
     for iteration in range(1, max_iterations + 1):
+        # 실시간 스트리밍 — 가장 긴 구현 단계 진입을 즉시 알림
+        journal.event("implement", "start", n=iteration,
+                      phase="retry" if feedback else "first")
         prompt = build_prompt(query, intent, landing, legacy_notes, chain=chain)
         if feedback:
             prompt += "\n\n" + feedback
@@ -117,6 +120,8 @@ def converge(config, repo_path: Path, repo: str, query: str, intent: str,
         if cost is not None:
             cost.add_agent(prompt, agent_result.get("output", ""))
         if not agent_result["ok"]:
+            journal.event("implement", "fail", n=iteration,
+                          error=agent_result.get("error"))
             journal.event("iteration", "fail", n=iteration, phase="implement",
                           error=agent_result.get("error"))
             last.update({"iterations": iteration, "agent_error": agent_result.get("error")})
@@ -125,13 +130,18 @@ def converge(config, repo_path: Path, repo: str, query: str, intent: str,
         repo_git.stage_all()
         changed = repo_git.staged_files(base_branch)
         diff_text = repo_git.staged_diff(base_branch)
+        journal.event("implement", "ok", n=iteration, files=len(changed))
 
         sandbox = sandbox_verify_python(repo_path, changed)
         checks = run_checks(repo_path, changed, test_timeout=config.check_timeout)
+        journal.event("checks", "blocked" if checks["blocked"] else "ok",
+                      n=iteration, sandbox=sandbox["status"], summary=checks["summary"])
         judge_result = None
         if sandbox["status"] != "failed" and not checks["blocked"]:
             judge_result = judge(config, query, diff_text, changed,
                                  checks=checks["summary"])
+            journal.event("judge", "pass" if judge_result.get("passed") else "fail",
+                          n=iteration, score=judge_result.get("score"))
 
         # ④ UI 수렴 신호 — 코드·품질 통과 후 UI 검증. 문제면 vision issues를 되먹여 retry.
         ui = {"status": "skipped"}

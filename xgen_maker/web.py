@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import os
 import queue
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -63,7 +64,9 @@ _PAGE = """<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
  <button data-t="history">작업 이력</button>
  <button data-t="learn">학습</button>
  <button data-t="mrs">MR</button>
+ <button data-t="branches">브랜치</button>
  <button data-t="deploy">배포 상태</button>
+ <button data-t="diag">진단</button>
 </nav>
 <div class="tab on" id="tab-run">
  <div id="log"><div class="ev info">쿼리를 입력하면 MAKER 루프가 돕니다. 진행 로그가 실시간으로 흐르고, 결과가 아래에 뜹니다.</div></div>
@@ -71,7 +74,9 @@ _PAGE = """<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
 <div class="tab" id="tab-history"><div class="muted">불러오는 중…</div></div>
 <div class="tab" id="tab-learn"><div class="muted">불러오는 중…</div></div>
 <div class="tab" id="tab-mrs"><div class="muted">불러오는 중…</div></div>
+<div class="tab" id="tab-branches"><div class="muted">불러오는 중…</div></div>
 <div class="tab" id="tab-deploy"><div class="muted">불러오는 중…</div></div>
+<div class="tab" id="tab-diag"><div class="muted">불러오는 중…</div></div>
 <form id="f"><input type="text" id="q" placeholder="예: 온톨로지 그래프 재빌드 후 안 바뀌는 버그 고쳐줘" autofocus>
  <select id="m"><option value="plan">plan (분석만)</option><option value="observe">observe (브랜치+MR초안)</option><option value="act">act (push+MR)</option></select>
  <button class="act" id="go">실행</button></form>
@@ -79,7 +84,7 @@ _PAGE = """<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
 const log=document.getElementById('log'), q=document.getElementById('q'), go=document.getElementById('go');
 const esc=s=>String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 function line(cls,txt){const d=document.createElement('div');d.className='ev '+cls;d.textContent=txt;log.appendChild(d);log.scrollTop=log.scrollHeight;}
-function refreshInfo(){fetch('/api/info').then(r=>r.json()).then(d=>{document.getElementById('mode').textContent=d.nodes.toLocaleString()+' 노드 · '+d.repos+' 레포';});}
+function refreshInfo(){fetch('/api/info').then(r=>r.json()).then(d=>{window.__repos=d.repo_names||[];document.getElementById('mode').textContent=d.nodes.toLocaleString()+' 노드 · '+d.repos+' 레포';});}
 refreshInfo();
 // Sync 버튼 — 그래프 최신화(변경분만)
 const syncBtn=document.getElementById('sync');
@@ -115,6 +120,42 @@ function render(t){
   const row=m=>`<tr><td>!${m.iid}</td><td><span class="badge ${m.state}">${m.state}</span></td><td>${esc(m.source)}→${esc(m.target)}</td><td>${esc(m.title).slice(0,50)}</td><td><a href="${esc(m.url)}" target=_blank>열기</a></td></tr>`;
   el.innerHTML='<h3>MAKER가 만든 MR</h3><table><tr><th>#</th><th>상태</th><th>브랜치</th><th>제목</th><th></th></tr>'+(d.maker.map(row).join('')||'<tr><td colspan=5 class=muted>없음</td></tr>')+'</table>'+
    '<h3>내 MR (전체)</h3><table><tr><th>#</th><th>상태</th><th>브랜치</th><th>제목</th><th></th></tr>'+d.mine.map(row).join('')+'</table>';});
+ if(t==='branches'){
+  const names=(window.__repos||[]);
+  const sel='<label>레포 <select id="brepo">'+(names.length?names.map(n=>`<option>${esc(n)}</option>`).join(''):'<option value="">(config에 gitlab_projects 없음)</option>')+'</select></label>';
+  el.innerHTML='<h3>브랜치 / 릴리즈 <span class=muted>(내가·MAKER가 만든 작업 브랜치 + 승격 경로)</span></h3>'+sel+'<div id="bbody" class=muted style="margin-top:12px">불러오는 중…</div>';
+  const load=()=>{const repo=document.getElementById('brepo').value; const bb=document.getElementById('bbody');
+   if(!repo){bb.innerHTML='<div class=muted>config에 gitlab_projects 매핑이 필요합니다.</div>';return;}
+   bb.textContent='불러오는 중…';
+   Promise.all([fetch('/api/branches?repo='+encodeURIComponent(repo)).then(r=>r.json()),
+                fetch('/api/release?repo='+encodeURIComponent(repo)).then(r=>r.json())]).then(([b,rel])=>{
+    if(b.error){bb.innerHTML='<div class=muted>브랜치 조회 실패: '+esc(b.error)+' (.env에 GitLab 토큰/프로젝트 매핑 필요)</div>';return;}
+    const brow=x=>`<tr><td>${esc(x.name)}</td><td class=muted>${esc(x.author||'')}</td><td class=muted>${esc((x.when||'').slice(0,10))}</td></tr>`;
+    let h='<h4>작업 브랜치(최근)</h4><table><tr><th>브랜치</th><th>작성자</th><th>날짜</th></tr>'+((b.work_recent||[]).map(brow).join('')||'<tr><td colspan=3 class=muted>없음</td></tr>')+'</table>';
+    h+='<h4>보호 브랜치</h4><div class=muted>'+((b.protected||[]).map(esc).join(', ')||'-')+'</div>';
+    if(rel && rel.lands_on_env){h+='<h4 style="margin-top:14px">릴리즈 승격</h4><div>대상 env: <b>'+esc(rel.lands_on_env)+'</b> · 남은 승격: '+esc((rel.promotion_remaining||[]).join(' → ')||'없음')+'</div>';}
+    bb.innerHTML=h;
+   });};
+  document.getElementById('brepo').onchange=load; load();
+  return;
+ }
+ if(t==='diag') fetch('/api/diagnostics').then(r=>r.json()).then(d=>{
+  const yn=v=>v?'<span class="badge ok">OK</span>':'<span class="badge fail">아니오</span>';
+  const c=d.sdk.contract||{}; const inst=d.sdk.installed||{};
+  const miss=(c.missing||[]).length;
+  let h='<h3>자가진단 <span class=muted>(SDK 계약·엔진 구동·경계 — read-only)</span></h3>';
+  h+='<h4>SDK / 엔진</h4><table>'+
+     `<tr><td>엔진 설치</td><td>${esc(JSON.stringify(inst))}</td></tr>`+
+     `<tr><td>계약 심볼</td><td>${yn(c.ok)} 보유 ${(c.present||[]).length}개`+(miss?` · 누락 ${miss}: ${esc((c.missing||[]).join(', '))}`:'')+`</td></tr>`+
+     `<tr><td>샌드박스 격리(run_sandboxed)</td><td>${yn(c.sandbox_ok)}</td></tr>`+
+     `<tr><td>엔진 stage 등록(R3-A)</td><td>${yn(d.engine&&d.engine.ok)} ${esc((d.engine||{}).stage_id||(d.engine||{}).reason||'')}</td></tr>`+
+     `<tr><td>엔진 구동 기계장치(R3-B)</td><td>${yn(d.engine_levelb)}</td></tr>`+
+     `<tr><td>작업 커밋 저자 강제</td><td>${yn(d.git_author.email_set)} ${esc(d.git_author.name||'')}</td></tr>`+
+     '</table>';
+  const cap=(d.catalog||{}).capabilities||{};
+  h+='<h4>능력 카탈로그</h4><table>'+Object.keys(cap).map(k=>`<tr><td class=muted>${esc(k)}</td><td>${esc((cap[k]||[]).join(' · '))}</td></tr>`).join('')+'</table>';
+  h+='<div class=muted style="margin-top:10px">경계: '+esc((d.catalog||{}).boundary||'')+'</div>';
+  el.innerHTML=h;});
  if(t==='deploy') fetch('/api/status').then(r=>r.json()).then(d=>{
   let h='<h3>릴리즈 사다리 (develop→stg→main)</h3><table><tr><th>브랜치</th><th>환경</th><th>URL</th><th>Jenkins</th></tr>'+
    d.ladder.map(s=>`<tr><td>${esc(s.branch)}</td><td>${esc(s.env)}</td><td><a href="${esc(s.url)}" target=_blank>${esc(s.url)}</a></td><td class=muted>${esc(s.jenkins)}</td></tr>`).join('')+'</table>';
@@ -158,7 +199,8 @@ class _SSEJournal:
         detail = json.dumps({k: v for k, v in data.items()
                              if k in ("hits", "branch", "score", "env", "keywords",
                                       "affected", "nodes", "sha", "draft", "url", "reason",
-                                      "error", "promotion", "target", "count", "next_manual")},
+                                      "error", "promotion", "target", "count", "next_manual",
+                                      "n", "phase", "files", "sandbox", "decision")},
                             ensure_ascii=False, default=str)[:180]
         self._q.put({"type": "event", "step": step, "status": status, "detail": detail})
 
@@ -199,8 +241,12 @@ class MakerWebHandler(BaseHTTPRequestHandler):
         if parsed.path == "/":
             self._html(_PAGE)
         elif parsed.path == "/api/info":
+            names = sorted((self.config.gitlab_projects or {}).keys()
+                           or (self.config.repos or {}).keys()
+                           or {n["repo"] for n in self.graph.nodes.values()})
             self._json({"nodes": len(self.graph.nodes),
-                        "repos": len({n["repo"] for n in self.graph.nodes.values()})})
+                        "repos": len({n["repo"] for n in self.graph.nodes.values()}),
+                        "repo_names": names})
         elif parsed.path == "/api/sync":
             # 그래프 최신화 — git 변경분만 재추출(CLI maker kg sync와 동일 로직)
             from .kg.sync import sync_all
@@ -255,8 +301,24 @@ class MakerWebHandler(BaseHTTPRequestHandler):
             self._json(release_view(self.graph, repo, self.config.target_branch, self.config))
         elif parsed.path == "/api/branches":
             from .loop.gitlab_observe import branches
-            repo = parse_qs(parsed.query).get("repo", ["xgen-frontend-features"])[0]
-            self._json(branches(self.config, repo))
+            names = sorted((self.config.gitlab_projects or {}).keys())
+            default = names[0] if names else ""
+            repo = parse_qs(parsed.query).get("repo", [default])[0]
+            self._json(branches(self.config, repo) if repo else {"error": "repo 미지정"})
+        elif parsed.path == "/api/diagnostics":
+            # 읽기전용 자가진단 — SDK 계약/드리프트 + 엔진 stage 등록 상태(로컬만, 네트워크 X)
+            from .sdk_check import installed_versions, contract_probe, maker_catalog
+            from .engine_stage import register, _load_engine
+            eng = _load_engine()
+            self._json({
+                "sdk": {"installed": installed_versions(), "contract": contract_probe()},
+                "engine": register(),
+                "engine_levelb": eng is not None and all(
+                    hasattr(eng, n) for n in
+                    ("EventEmitter", "InMemorySessionStore", "PipelineState", "save_session")),
+                "catalog": maker_catalog(),
+                "git_author": {"name": self.config.git_author_name,
+                               "email_set": bool(self.config.git_author_email)}})
         else:
             self.send_error(404)
 
@@ -310,7 +372,18 @@ class MakerWebHandler(BaseHTTPRequestHandler):
                 break
 
 
+_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1", ""}
+
+
 def serve(config_path: str | None, host: str = "127.0.0.1", port: int = 8760) -> None:
+    # 무인증 노출 가드 — 이 대시보드는 인증이 없어 포트 접근자가 운영자 신원으로 act(push/MR) 가능.
+    # 비-loopback 바인드는 신뢰망에서 명시 동의(env)해야만 허용.
+    if host not in _LOOPBACK_HOSTS and os.environ.get("XGEN_MAKER_WEB_ALLOW_REMOTE") != "1":
+        raise SystemExit(
+            f"거부: 웹 UI를 비-loopback 호스트({host})로 여는 것은 무인증 노출입니다.\n"
+            "  이 대시보드엔 인증이 없어, 포트에 닿는 누구나 운영자의 저장된 GitLab 신원으로\n"
+            "  act(push/MR)를 일으킬 수 있습니다. 로컬 전용이면 --host 127.0.0.1(기본)을 쓰고,\n"
+            "  원격이 꼭 필요하면 신뢰망에서만 XGEN_MAKER_WEB_ALLOW_REMOTE=1 로 명시 동의하세요.")
     config = MakerConfig.from_file(config_path) if config_path else MakerConfig()
     graph = Graph.load(config.kg_path)
     from .kg.overlay import load_overlay, apply_overlay
