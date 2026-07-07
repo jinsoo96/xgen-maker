@@ -4,12 +4,11 @@ __pycache__/
 .pytest_cache/
 
 # 파생 산출물 — kg build/merge/enrich/domains/dashboard 로 재생성 (내부 코드베이스 구조 포함이라 커밋 제외)
-kg/
+# ※ 루트 앵커(/) 필수 — 소스 패키지 xgen_maker/kg/ 를 무시하지 않도록
+/kg/
 
 # UA 평가용 회사 소스 슬라이스 사본 (이 프로젝트 코드 아님) + 파생 KG + 실행 로그
-_ua-eval/slice/
-_ua-eval/slice.repo.json
-_ua-eval/ua-run.log
+/_ua-eval/
 
 # 로컬 임시
 *.log
@@ -24,20 +23,23 @@ auth.json
 
 # 자격 실값 — 절대 커밋 금지(.env.example만 커밋)
 .env
+.env.*
+!.env.example
 
 # portable 도구(helm 등) — 커밋 제외
 .tools/
 
-# 작업 학습 메모리(로컬 러닝, 머신별) — 코드 아님
-learnings/
+# 작업 학습 메모리(로컬 러닝, 머신별) — 코드 아님. 루트 앵커
+/learnings/
 
 # ── PUBLIC 안전: 내부/조직 정보는 커밋 금지 (외부인이 못 보게) ──
 # (git .gitignore는 인라인 주석 미지원 — 패턴만 단독 줄에)
-worklogs/
+# 출력/내부 디렉토리는 루트 앵커(/)로 — 동명 소스 하위폴더 오탐 방지
+/worklogs/
+/docs/
 maker.config.json
 maker.observe.config.json
+maker.*.local.json
 REQUIREMENTS.md
 XGEN-MAKER-PLAN.md
-docs/
 .mcp.json
-_ua-eval/

@@ -119,6 +119,22 @@ def run_doctor(config_path: str | None = None) -> bool:
         else:
             check.warn("의미층", "요약 없음 — maker kg enrich 필요")
 
+    # 목적 3-2: 인가 게이트 — act(실 push/MR)는 인가된 xgen 작업자만
+    try:
+        from .loop.authz import is_placeholder_target
+        if config and is_placeholder_target(config.gitlab_url):
+            check.warn("인가 게이트",
+                       f"gitlab_url 미설정/예시 — act 자동 거부(실 대상 아님). "
+                       f".env로 실 대상 주입 시 멤버십 검사")
+        elif config and config.gitlab_projects:
+            check.ok("인가 게이트",
+                     "act 전 대상 프로젝트 Developer+ 멤버십 검사(미인가 fail-fast)")
+        else:
+            check.warn("인가 게이트",
+                       "gitlab_projects 매핑 없음 — act 시 대상 미지정으로 거부")
+    except Exception as e:  # noqa: BLE001
+        check.warn("인가 게이트", str(e)[:80])
+
     # 목적 4: 안전하게 고침 — 브랜치 가드 + 자동검증 게이트 (실동작)
     try:
         from .loop.git_ops import GitRepo, GitOpsError

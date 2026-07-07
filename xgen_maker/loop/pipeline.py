@@ -149,6 +149,19 @@ class MakerLoop:
         report["branch"] = branch
         report["repo"] = repo
 
+        # 인가 게이트 — act(실 push/MR)는 인가된 xgen 작업자만(대상 프로젝트 Developer+ 멤버십).
+        # public 저장소라 코드는 누구나 받지만, 실 인프라 작업은 여기서 fail-fast 차단.
+        if config.mode == "act":
+            from .authz import authorize
+            authz = authorize(config, repo)
+            journal.event("authorize", "ok" if authz["ok"] else "denied",
+                          **{k: v for k, v in authz.items() if k != "ok"})
+            report["authorize"] = authz
+            if not authz["ok"]:
+                journal.close("unauthorized")
+                report["outcome"] = "unauthorized"
+                return report
+
         # plan-only 경로: 실레포 미접촉
         if not config.allow_write or repo_path is None:
             title, body = build_mr_draft(

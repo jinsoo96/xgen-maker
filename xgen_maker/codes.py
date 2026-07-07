@@ -40,6 +40,7 @@ class Event(str, Enum):
     DEPLOY_TEST = "deploy_test"
     RELEASE = "release"
     COST = "cost"
+    AUTHORIZE = "authorize"           # act 인가 게이트(대상 프로젝트 멤버십)
     COMMIT = "commit"
     PUSH = "push"
     MR_CREATE = "mr_create"
@@ -59,6 +60,7 @@ class Outcome(str, Enum):
     CHECKS_FAILED = "checks_failed"   # 자동 검증(테스트/구문) 실패 → MR 차단
     JUDGE_FAILED = "judge_failed"     # 품질 게이트 θ 미달
     PUSH_FAILED = "push_failed"       # act 푸시 실패
+    UNAUTHORIZED = "unauthorized"     # act 인가 실패 — 미인가 작업자/미설정 대상, 작업 전 차단
     MR_PREPARED = "mr_prepared"       # 정상 — MR 준비(observe) 또는 MR 생성(act)
 
 

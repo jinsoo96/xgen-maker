@@ -71,7 +71,10 @@ class TestActMrRegression(unittest.TestCase):
         def fake_push(self_git, branch, **kw): pushes.append(branch)
         def fake_mr(cfg, repo, branch, title, body):
             mrs.append((repo, branch)); return {"ok": True, "url": "http://gl/mr/1"}
+        ok_authz = lambda cfg, repo, **kw: {"ok": True, "user": "tester",
+                                            "project": "grp/demo", "level": 40}
         with patch("xgen_maker.loop.git_ops.GitRepo.push", fake_push), \
+             patch("xgen_maker.loop.authz.authorize", ok_authz), \
              patch("xgen_maker.loop.pipeline.create_gitlab_mr", fake_mr):
             report = MakerLoop(self.config).run("greet 함수 이름처리 버그 고쳐줘")
         self.assertEqual(report["outcome"], "mr_prepared")

@@ -103,17 +103,27 @@ maker engine register                            # 엔진 stage로 등록(R3)
 
 ---
 
-## 보안 (공개 저장소 안전)
+## 보안 (공개 저장소 안전 + 인가된 사용자만)
 
-이 저장소는 **자격·엔드포인트·조직 정보를 코드에 담지 않는다.** 전부 gitignore된 로컬 파일에만:
+**1) 코드에 자격·엔드포인트·조직 정보를 담지 않는다.** 전부 gitignore된 로컬 파일에만:
 
-- `.env` — 토큰·URL·계정 (커밋 금지, `.env.example`은 placeholder만)
+- `.env` — 토큰·URL·계정·작업 커밋 저자 (커밋 금지, `.env.example`은 placeholder만)
 - `maker.config.json` — 레포 경로·프로젝트 매핑 (커밋 금지, `.example`만)
 - `~/.xgen-maker/auth.json` — 로그인 저장 (홈 디렉토리)
-- `worklogs/` · `learnings/` · `kg/` — 작업 기록·그래프 (로컬만)
+- `worklogs/` · `learnings/` · `kg/` — 작업 기록·그래프·산출물 (로컬만)
 
 → 저장소를 public으로 바꿔도 dev/stg 도메인·계정·MR·인프라 정보가 노출되지 않는다.
-외부 사용자는 자기 GitLab/LLM 자격과 config를 직접 채워야 동작한다.
+
+**2) 실제 작업(act)은 인가된 사용자만.** 코드는 누구나 받을 수 있지만, 실 인프라
+push·MR은 **인가 게이트**를 통과해야 한다(작업 시작 전 fail-fast 차단):
+
+- 유효한 GitLab 토큰 + **대상 프로젝트 Developer+ 멤버십**을 요구 (실 GitLab이 권위).
+- `gitlab_url`이 미설정/예시(placeholder)면 act 자동 거부 — 실 대상이 아니면 동작 안 함.
+- 자격/엔드포인트를 모르고 멤버십도 없는 외부인은 코드를 받아도 실 작업을 할 수 없다.
+
+**3) 커밋 신원 분리.** 이 도구 자체 코드의 커밋 저자와, 도구가 대상 레포에 남기는
+작업 커밋 저자는 다르다. 작업 저자는 `XGEN_MAKER_GIT_AUTHOR_NAME/EMAIL`(`.env`)로만
+주입하며 코드에 하드코딩하지 않는다. `plan`/`observe` 모드는 로컬만 다루므로 게이트 없이 탐색 가능.
 
 ---
 
