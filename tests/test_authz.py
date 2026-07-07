@@ -73,6 +73,24 @@ class TestAuthorize(unittest.TestCase):
         self.assertFalse(r["ok"])
         self.assertIn("토큰 무효", r["reason"])
 
+    def test_origin_mismatch_denied(self):
+        # 로컬 origin이 인가 프로젝트와 다르면 거부(토큰 유효·멤버여도)
+        cfg = self._cfg()
+        with patch.object(authz, "_origin_url",
+                          return_value="https://gitlab.corp.internal/other/evil.git"):
+            r = authz.authorize(cfg, "frontend", repo_path="/some/clone")
+        self.assertFalse(r["ok"])
+        self.assertIn("불일치", r["reason"])
+
+    def test_origin_match_passes(self):
+        cfg = self._cfg()
+        with patch.object(authz, "_origin_url",
+                          return_value="https://gitlab.corp.internal/grp/frontend.git"), \
+             patch.object(authz, "_api", side_effect=[
+                {"id": 7, "username": "kim"}, {"id": 7, "access_level": 30}]):
+            r = authz.authorize(cfg, "frontend", repo_path="/some/clone")
+        self.assertTrue(r["ok"])
+
     def tearDown(self):
         patch.stopall()
 

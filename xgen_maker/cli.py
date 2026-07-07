@@ -449,9 +449,10 @@ def cmd_status(args) -> None:
     """read-only 관측 — Jenkins 빌드 + ArgoCD 배포 상태. MAKER는 트리거 안 함."""
     from .loop import jenkins, argocd
     from .loop.release import ladder
+    config = MakerConfig.from_file(args.config) if getattr(args, "config", None) else None
     print("═══ 배포 상태 (read-only — MAKER는 배포 안 함, 사용자 수동) ═══\n")
     print("릴리즈 사다리:")
-    for s in ladder():
+    for s in ladder(config):  # config.release_stages 반영(웹과 동일)
         print(f"  {s['branch']:8} → {s['env']:4} {s.get('url',''):32} Jenkins={s.get('jenkins','')}")
     print("\nJenkins jobs:", end=" ")
     if jenkins.available():
@@ -731,6 +732,7 @@ def main(argv: list[str] | None = None) -> None:
     p.set_defaults(func=cmd_engine)
 
     p = sub.add_parser("status", help="배포 상태 관측(read-only) — Jenkins·ArgoCD. MAKER는 배포 안 함")
+    p.add_argument("--config", default=None, help="release_stages 반영용 config")
     p.set_defaults(func=cmd_status)
 
     p = sub.add_parser("mrs", help="MR 이력 관측 — 본인 MR / MAKER가 만든 MR (read-only)")

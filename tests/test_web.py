@@ -129,6 +129,34 @@ class TestWebServer(unittest.TestCase):
         self.assertIn("maker", d)
 
 
+class TestJournalInjection(unittest.TestCase):
+    """웹 동시성 근본해결 — 전역 몽키패치 대신 인스턴스별 journal 팩토리 주입."""
+
+    def test_maker_loop_uses_injected_factory(self):
+        import tempfile
+        from pathlib import Path
+        from xgen_maker.loop.pipeline import MakerLoop
+        from xgen_maker.config import MakerConfig
+        with tempfile.TemporaryDirectory() as tmp:
+            g = Graph()
+            g.add_node("r:a.py", "function", "charge", repo="r",
+                       meta={"file": "a.py", "path": "a.py"})
+            kg = Path(tmp) / "kg.json"
+            g.save(kg)
+            cfg = MakerConfig(kg_path=str(kg), worklogs_dir=str(Path(tmp) / "wl"),
+                              llm_enabled=False, verbose=False)
+            captured = {}
+
+            from xgen_maker.loop.journal import Journal
+
+            def factory(worklogs_dir, q, verbose=False):
+                captured["used"] = True
+                return Journal(worklogs_dir, q, verbose=False)
+
+            MakerLoop(cfg, graph=g, journal_factory=factory).run("charge 어디 있어")
+            self.assertTrue(captured.get("used"), "주입한 journal 팩토리가 쓰여야 함")
+
+
 class TestWebLoopbackGuard(unittest.TestCase):
     """무인증 노출 가드 — 비-loopback 바인드는 명시 동의 없으면 거부."""
 

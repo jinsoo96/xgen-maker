@@ -215,18 +215,13 @@ class _SSEJournal:
 
 def _run_query(config: MakerConfig, graph: Graph, query: str, q: queue.Queue) -> None:
     from .loop.pipeline import MakerLoop
-    from .loop import pipeline as pl
+    from .loop.journal import Journal
     try:
-        loop = MakerLoop(config, graph=graph)
-        orig_journal = pl.Journal
-
-        def wrapped(worklogs_dir, qtext, verbose=False):
-            return _SSEJournal(orig_journal(worklogs_dir, qtext, verbose=False), q)
-        pl.Journal = wrapped
-        try:
-            report = loop.run(query)
-        finally:
-            pl.Journal = orig_journal
+        # journal 팩토리 주입 — 전역 몽키패치 없이 이 요청만 SSE로 스트리밍(동시 요청 안전)
+        def factory(worklogs_dir, qtext, verbose=False):
+            return _SSEJournal(Journal(worklogs_dir, qtext, verbose=False), q)
+        loop = MakerLoop(config, graph=graph, journal_factory=factory)
+        report = loop.run(query)
         q.put({"type": "result", "report": report})
     except Exception as error:  # noqa: BLE001
         q.put({"type": "error", "message": str(error)[:300]})

@@ -13,7 +13,7 @@ from ..codes import Outcome, ErrorCode
 from ..config import MakerConfig
 from ..kg.graph import Graph
 from ..kg.search import search, impact, retrieve_chain
-from ..kg.build import refresh_files
+from ..kg.build import refresh_files, git_head
 from .intent import classify
 from .converge import converge
 from .git_ops import GitRepo, GitOpsError
@@ -23,8 +23,11 @@ from .verify import verify
 
 
 class MakerLoop:
-    def __init__(self, config: MakerConfig, graph: Graph | None = None):
+    def __init__(self, config: MakerConfig, graph: Graph | None = None,
+                 journal_factory=None):
         self.config = config
+        # journal 주입(웹 SSE 등) — 전역 몽키패치 없이 인스턴스별로 스트리밍(동시성 안전)
+        self._journal_factory = journal_factory or Journal
         self.graph = graph if graph is not None else Graph.load(config.kg_path)
         if graph is None:
             # 사람 편집(오버레이) 반영 — deprecated 노드 착지 회피 등 (R8)
@@ -77,7 +80,7 @@ class MakerLoop:
     # ---- 메인 ----
     def run(self, query: str) -> dict:
         config = self.config
-        journal = Journal(config.worklogs_dir, query, verbose=config.verbose)
+        journal = self._journal_factory(config.worklogs_dir, query, verbose=config.verbose)
         from .cost import CostTracker
         cost = CostTracker()
         report: dict = {"query": query, "session_dir": str(journal.dir)}
@@ -157,7 +160,7 @@ class MakerLoop:
         # public 저장소라 코드는 누구나 받지만, 실 인프라 작업은 여기서 fail-fast 차단.
         if config.mode == "act":
             from .authz import authorize
-            authz = authorize(config, repo)
+            authz = authorize(config, repo, repo_path=repo_path)
             journal.event("authorize", "ok" if authz["ok"] else "denied",
                           **{k: v for k, v in authz.items() if k != "ok"})
             report["authorize"] = authz
@@ -374,8 +377,12 @@ class MakerLoop:
         # ⑩ 사후: KG 증분 갱신 + journal
         try:
             refreshed = refresh_files(self.graph, repo, repo_path, changed)
+            # repo_heads 전진 — 다음 kg sync가 이번 커밋 이후만 재diff(중복 재추출 방지)
+            new_head = git_head(repo_path)
+            if new_head:
+                self.graph.meta.setdefault("repo_heads", {})[repo] = new_head
             self.graph.save(config.kg_path)
-            journal.event("kg_refresh", "ok", files=refreshed)
+            journal.event("kg_refresh", "ok", files=refreshed, head=(new_head or "")[:12])
         except (OSError, KeyError) as error:
             journal.event("kg_refresh", "fail", error=str(error))
         # 성공 학습 — 이 영역에서 통과한 접근 기록(다음 작업 참고)

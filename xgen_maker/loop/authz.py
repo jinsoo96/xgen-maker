@@ -10,6 +10,7 @@ public 저장소이므로 코드는 누구나 받지만, 실제 인프라 작업
 from __future__ import annotations
 
 import json
+import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -31,12 +32,21 @@ def is_placeholder_target(gitlab_url: str) -> bool:
     return (not u) or any(p and p in u for p in _PLACEHOLDER)
 
 
+def _origin_url(repo_path) -> str:
+    try:
+        r = subprocess.run(["git", "remote", "get-url", "origin"], cwd=str(repo_path),
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
+        return (r.stdout or "").strip() if r.returncode == 0 else ""
+    except (OSError, ValueError):
+        return ""
+
+
 def authorize(config, repo: str, min_level: int = DEVELOPER,
-              timeout: int = 20) -> dict:
+              timeout: int = 20, repo_path=None) -> dict:
     """act(실 push/MR) 전 인가 확인. 반환 {ok, user?, level?, project?, reason?}.
 
     거부 사유: 토큰 없음 · placeholder 대상 · 프로젝트 매핑 없음 ·
-              토큰 무효 · 멤버 아님 · 접근레벨 부족.
+              토큰 무효 · 멤버 아님 · 접근레벨 부족 · 로컬 origin이 인가 프로젝트와 불일치.
     """
     token = config.gitlab_token
     if not token:
@@ -50,6 +60,13 @@ def authorize(config, repo: str, min_level: int = DEVELOPER,
     if not project:
         return {"ok": False, "reason":
                 f"'{repo}' → gitlab_projects 매핑 없음 — 대상 프로젝트 미지정"}
+    # 로컬 클론의 origin이 인가 대상 프로젝트를 실제로 가리키는지(다른 레포로 push 방지)
+    if repo_path is not None:
+        origin = _origin_url(repo_path)
+        norm = str(project).strip("/").lower()
+        if origin and norm not in origin.lower().replace(".git", ""):
+            return {"ok": False, "project": project, "reason":
+                    f"로컬 origin({origin[:60]})이 인가 프로젝트 '{project}'와 불일치 — push 대상 오염 의심"}
 
     # 1) 토큰 유효성 + 사용자 식별
     try:
