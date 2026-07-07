@@ -314,7 +314,9 @@ class MakerLoop:
                                      checks=checks["checks"] + [sandbox, deploy_test],
                                      release_md=render_ladder_md(rel_view))
         draft = save_draft(journal.dir, title, body)
-        commit = repo_git.commit_all(title, body)
+        commit = repo_git.commit_all(title, body,
+                                     author_name=config.git_author_name,
+                                     author_email=config.git_author_email)
         journal.event("commit", "ok", sha=commit[:12], files=len(changed))
         report["mr_draft"] = str(draft)
 

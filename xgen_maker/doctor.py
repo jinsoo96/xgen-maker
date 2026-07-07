@@ -82,6 +82,13 @@ def run_doctor(config_path: str | None = None) -> bool:
     graph = None
     try:
         config = MakerConfig.from_file(config_path) if config_path else MakerConfig()
+        # 목적 1-3: 작업 커밋 저자 — GitLab 작업이 지정 신원으로 커밋되는지(대상 레포 config 오염 방지)
+        if config.git_author_name and config.git_author_email:
+            check.ok("작업 커밋 저자", f"{config.git_author_name} <{config.git_author_email}> 강제")
+        else:
+            check.warn("작업 커밋 저자",
+                       "미설정 — 대상 레포 git config로 커밋됨. "
+                       ".env에 XGEN_MAKER_GIT_AUTHOR_NAME/EMAIL 권장")
         if Path(config.kg_path).exists():
             graph = Graph.load(config.kg_path)
             stats = graph.stats()

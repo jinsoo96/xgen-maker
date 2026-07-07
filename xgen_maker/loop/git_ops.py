@@ -93,10 +93,15 @@ class GitRepo:
     def staged_diff(self, base: str = "HEAD") -> str:
         return self._run("diff", "--cached", base)
 
-    def commit_all(self, title: str, body: str) -> str:
+    def commit_all(self, title: str, body: str,
+                   author_name: str = "", author_email: str = "") -> str:
         self._run("add", "-A")
         message = f"{title}\n\n{body}" if body else title
-        self._run("commit", "-m", message)
+        # 저자 지정 시 대상 레포 git config와 무관하게 강제(-c 로 저자·커미터 동시 고정)
+        ident: list[str] = []
+        if author_name and author_email:
+            ident = ["-c", f"user.name={author_name}", "-c", f"user.email={author_email}"]
+        self._run(*ident, "commit", "-m", message)
         return self._run("rev-parse", "HEAD").strip()
 
     def push(self, branch: str, remote: str = "origin",

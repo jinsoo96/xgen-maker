@@ -62,6 +62,9 @@ class MakerConfig:
         "XGEN_MAKER_INFRA_PATH", ""))                     # Helm 차트 위치(config/.env로 주입)
     worklogs_dir: str = "worklogs"
     learnings_dir: str = "learnings"                       # 작업 학습 메모리(실수 방지 참고)
+    # MAKER가 작업 대상(GitLab) 레포에 커밋할 때 강제할 저자 — 조직 정보라 env로만 주입(소스 미포함)
+    git_author_name: str = field(default_factory=lambda: os.environ.get("XGEN_MAKER_GIT_AUTHOR_NAME", ""))
+    git_author_email: str = field(default_factory=lambda: os.environ.get("XGEN_MAKER_GIT_AUTHOR_EMAIL", ""))
 
     @property
     def gitlab_token(self) -> str:
