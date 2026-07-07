@@ -30,6 +30,8 @@ _PAGE = """<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
  header{padding:12px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:16px}
  header b{font-size:16px;font-weight:700;background:var(--grad-text);-webkit-background-clip:text;background-clip:text;color:transparent}
  header .info{color:var(--text2);font-size:12px} header .mode{margin-left:auto;font-size:12px;color:var(--muted)}
+ #sync{padding:6px 12px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);border-radius:var(--radius);cursor:pointer;font-size:12px;transition:all var(--t-fast)}
+ #sync:hover{border-color:var(--primary);color:var(--primary)} #sync:disabled{opacity:.5} #sync.spin{color:var(--primary)}
  nav{display:flex;gap:4px;padding:0 20px;border-bottom:1px solid var(--border);background:var(--bg2)}
  nav button{padding:10px 16px;background:none;border:none;border-bottom:2px solid transparent;color:var(--text2);cursor:pointer;font-size:13px;transition:color var(--t-fast)}
  nav button:hover{color:var(--text)} nav button.on{color:var(--text);border-bottom-color:var(--primary)}
@@ -54,7 +56,8 @@ _PAGE = """<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
  h3{margin:16px 0 8px;font-size:14px;background:var(--grad-text);-webkit-background-clip:text;background-clip:text;color:transparent} .muted{color:var(--muted)}
 </style></head><body>
 <header><b>⚒ XGEN MAKER</b><span class="info">CLI(maker run) = 이 대시보드. 같은 엔진·같은 로그·같은 결과.</span>
- <span class="mode" id="mode"></span></header>
+ <span class="mode" id="mode"></span>
+ <button id="sync" title="지식그래프를 최신 코드로 갱신(변경분만)">⟳ Sync</button></header>
 <nav>
  <button class="on" data-t="run">실행</button>
  <button data-t="history">작업 이력</button>
@@ -76,7 +79,19 @@ _PAGE = """<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
 const log=document.getElementById('log'), q=document.getElementById('q'), go=document.getElementById('go');
 const esc=s=>String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 function line(cls,txt){const d=document.createElement('div');d.className='ev '+cls;d.textContent=txt;log.appendChild(d);log.scrollTop=log.scrollHeight;}
-fetch('/api/info').then(r=>r.json()).then(d=>{document.getElementById('mode').textContent=d.nodes.toLocaleString()+' 노드 · '+d.repos+' 레포';});
+function refreshInfo(){fetch('/api/info').then(r=>r.json()).then(d=>{document.getElementById('mode').textContent=d.nodes.toLocaleString()+' 노드 · '+d.repos+' 레포';});}
+refreshInfo();
+// Sync 버튼 — 그래프 최신화(변경분만)
+const syncBtn=document.getElementById('sync');
+syncBtn.onclick=()=>{
+ syncBtn.disabled=true; syncBtn.classList.add('spin'); const old=syncBtn.textContent; syncBtn.textContent='⟳ 동기화중…';
+ fetch('/api/sync').then(r=>r.json()).then(d=>{
+  if(d.ok){ syncBtn.textContent=d.changed>0?('✓ '+d.changed+'파일 갱신'):'✓ 최신'; refreshInfo();
+   line('info','⟳ Sync: '+(d.changed>0?d.changed+'개 파일 반영':'변경 없음(최신)')+' · '+d.nodes.toLocaleString()+'노드'); }
+  else line('fail','✗ Sync 실패: '+d.error);
+  setTimeout(()=>{syncBtn.textContent=old; syncBtn.classList.remove('spin'); syncBtn.disabled=false;},2500);
+ }).catch(e=>{line('fail','✗ Sync 오류'); syncBtn.textContent=old; syncBtn.classList.remove('spin'); syncBtn.disabled=false;});
+};
 // 탭 전환
 const loaded={};
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
@@ -185,6 +200,22 @@ class MakerWebHandler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/info":
             self._json({"nodes": len(self.graph.nodes),
                         "repos": len({n["repo"] for n in self.graph.nodes.values()})})
+        elif parsed.path == "/api/sync":
+            # 그래프 최신화 — git 변경분만 재추출(CLI maker kg sync와 동일 로직)
+            from .kg.sync import sync_all
+            from .kg.enrich import enrich_deterministic
+            try:
+                results = sync_all(self.graph)
+                total = sum(r.get("changed", 0) for r in results)
+                if total:
+                    enrich_deterministic(self.graph)
+                    self.graph.save(self.config.kg_path)
+                self._json({"ok": True, "changed": total,
+                            "nodes": len(self.graph.nodes),
+                            "per_repo": [{"repo": r.get("repo"), "changed": r.get("changed", 0),
+                                          "action": r.get("action")} for r in results]})
+            except Exception as error:  # noqa: BLE001
+                self._json({"ok": False, "error": str(error)[:200]})
         elif parsed.path == "/api/run":
             self._sse_run(parse_qs(parsed.query))
         elif parsed.path == "/api/history":

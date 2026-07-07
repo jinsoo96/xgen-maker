@@ -59,6 +59,20 @@ class TestWebServer(unittest.TestCase):
         self.assertEqual(data["nodes"], 2)
         self.assertEqual(data["repos"], 1)
 
+    def test_api_sync(self):
+        # Sync 버튼 백엔드 — 소스 없는 테스트 그래프는 full_rebuild_needed(변경 0)로 안전 반환
+        status, body = self._get("/api/sync")
+        self.assertEqual(status, 200)
+        d = json.loads(body)
+        self.assertTrue(d["ok"])
+        self.assertEqual(d["changed"], 0)
+        self.assertIn("nodes", d)
+
+    def test_sync_button_in_page(self):
+        _, body = self._get("/")
+        self.assertIn('id="sync"', body)      # 헤더 버튼
+        self.assertIn("/api/sync", body)       # 클릭 핸들러
+
     def test_sse_run_streams_events_and_result(self):
         import urllib.parse
         q = urllib.parse.quote("charge 함수 어디 있어")
