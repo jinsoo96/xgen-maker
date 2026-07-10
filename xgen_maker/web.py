@@ -19,14 +19,36 @@ from .kg.graph import Graph
 _PAGE = """<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
 <title>XGEN MAKER</title><style>
  /* 디자인 토큰 — CocoRoF/Geny 다크 라벤더 팔레트 차용 (muted 그라디언트·soft glow, 눈 안 아프게) */
+ /* 디자인 토큰 = CocoRoF/Geny frontend/src/app/globals.css 차용(다크 기본 + 라이트) */
  :root{--radius:10px;--radius-lg:16px;--t-fast:120ms ease;--t:200ms ease;
   --primary:#8573b8;--primary-hover:#74639f;--primary-subtle:rgba(141,121,201,.13);
   --success:#4ade80;--warning:#fbbf24;--danger:#f47171;
   --bg:#1a1726;--bg2:#1f1b2d;--bg3:#28233a;--card:#1f1b2d;--hover:#28233a;
   --text:#efecf6;--text2:#aca6bf;--muted:#797292;--border:#2f2942;--border2:#3c3553;
-  --grad:linear-gradient(135deg,#6f64a6 0%,#897ab4 100%);--grad-text:linear-gradient(118deg,#8b7cbe,#9b8dc8 55%,#ab9ed2);
+  --grad:linear-gradient(135deg,#6f64a6 0%,#897ab4 100%);
+  --grad-hover:linear-gradient(135deg,#635892 0%,#7a6ca3 100%);
+  --grad-text:linear-gradient(118deg,#8b7cbe,#9b8dc8 55%,#ab9ed2);
   --hero:radial-gradient(120% 130% at 82% -10%,rgba(133,115,184,.09),rgba(133,115,184,.028) 36%,transparent 64%);
-  --glow:0 0 16px rgba(133,115,184,.14);--shadow:0 4px 16px rgba(0,0,0,.5)}
+  --glow:0 0 16px rgba(133,115,184,.14);--glow-soft:0 0 28px rgba(133,115,184,.06);
+  --shadow-sm:0 1px 2px rgba(0,0,0,.5);--shadow:0 4px 16px rgba(0,0,0,.5);--shadow-lg:0 12px 32px rgba(0,0,0,.6);
+  --link:#a898da;
+  --ok-bg:#2f5741;--ok-fg:#8ff0b8;--info-bg:#3a3564;--info-fg:#c9b8ff;--neutral-bg:#3c3553;
+  --warn-bg:#5c4326;--warn-fg:#f0c88a;--err-bg:#5c2b2b;--err-fg:#f0a0a0}
+ /* Geny 라이트 팔레트(html.light) — OS 선호 따름 */
+ @media (prefers-color-scheme:light){:root{
+  --primary:#8268cf;--primary-hover:#6f54bd;--primary-subtle:rgba(130,104,207,.07);
+  --success:#059669;--warning:#d97706;--danger:#dc2626;
+  --bg:#f4f1f9;--bg2:#f8f6fc;--bg3:#ece7f2;--card:#f8f6fc;--hover:#efebf5;
+  --text:#221f30;--text2:#5d5870;--muted:#968fa8;--border:#e7e2ef;--border2:#dad3e7;
+  --grad:linear-gradient(135deg,#8b72d6 0%,#b69fe8 100%);
+  --grad-hover:linear-gradient(135deg,#7a61c9 0%,#a78ee0 100%);
+  --grad-text:linear-gradient(118deg,#8268cf 0%,#a888df 55%,#c4abee 100%);
+  --hero:radial-gradient(120% 130% at 82% -10%,rgba(139,114,214,.08) 0%,rgba(182,159,232,.028) 38%,transparent 66%);
+  --glow:0 0 20px rgba(130,104,207,.09);--glow-soft:0 0 32px rgba(130,104,207,.045);
+  --shadow-sm:0 1px 2px rgba(76,29,149,.04);--shadow:0 4px 14px rgba(76,29,149,.06);--shadow-lg:0 12px 30px rgba(76,29,149,.09);
+  --link:#6f54bd;
+  --ok-bg:#dcfce7;--ok-fg:#065f46;--info-bg:#ede9fe;--info-fg:#5b21b6;--neutral-bg:#ece7f2;
+  --warn-bg:#fef3c7;--warn-fg:#92400e;--err-bg:#fee2e2;--err-fg:#991b1b}}
  *{box-sizing:border-box} body{margin:0;font:14px/1.5 'Segoe UI',sans-serif;background:var(--bg);background-image:var(--hero);color:var(--text);height:100vh;display:flex;flex-direction:column}
  header{padding:12px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:16px}
  header b{font-size:16px;font-weight:700;background:var(--grad-text);-webkit-background-clip:text;background-clip:text;color:transparent}
@@ -46,14 +68,18 @@ _PAGE = """<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
  input[type=text]:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-subtle)}
  select{padding:11px 12px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);border-radius:var(--radius);cursor:pointer}
  button.act{padding:11px 20px;background:var(--grad);border:none;color:#fff;border-radius:var(--radius);cursor:pointer;font-weight:600;box-shadow:var(--glow);transition:transform var(--t-fast)}
- button.act:hover{transform:translateY(-1px)} button.act:disabled{opacity:.5;transform:none}
+ button.act:hover{transform:translateY(-1px);background:var(--grad-hover);box-shadow:var(--glow-soft)}
+ button.act:disabled{opacity:.5;transform:none}
  table{width:100%;border-collapse:collapse;font-size:13px} th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--border)}
  th{color:var(--text2);font-weight:600} tr:hover td{background:var(--hover)}
- .badge{padding:2px 8px;border-radius:6px;font-size:11px;font-weight:500} .merged{background:#2f5741;color:#8ff0b8}
- .opened{background:#3a3564;color:#c9b8ff} .closed{background:#3c3553;color:var(--text2)}
- .Synced{background:#2f5741;color:#8ff0b8} .OutOfSync{background:#5c4326;color:#f0c88a} .Healthy{color:var(--success)}
- .pitfall{background:#5c2b2b;color:#f0a0a0} .fix{background:#2f5741;color:#8ff0b8} .convention{background:#3a3564;color:#c9b8ff} .note{background:#3c3553;color:var(--text2)}
- a{color:#a898da;text-decoration:none} a:hover{text-decoration:underline}
+ /* 배지는 항상 pill — 미정의 클래스(outcome 등)도 중립 배경을 갖는다 */
+ .badge{padding:2px 8px;border-radius:6px;font-size:11px;font-weight:500;background:var(--neutral-bg);color:var(--text2)}
+ .badge.ok,.merged,.fix,.Synced,.badge.mr_prepared,.badge.answered{background:var(--ok-bg);color:var(--ok-fg)}
+ .badge.fail,.pitfall,.badge.checks_failed,.badge.judge_failed,.badge.unauthorized,.badge.push_failed{background:var(--err-bg);color:var(--err-fg)}
+ .opened,.convention,.badge.planned{background:var(--info-bg);color:var(--info-fg)}
+ .closed,.note,.badge.muted{background:var(--neutral-bg);color:var(--text2)}
+ .OutOfSync{background:var(--warn-bg);color:var(--warn-fg)} .Healthy{color:var(--success)}
+ a{color:var(--link);text-decoration:none} a:hover{text-decoration:underline}
  h3{margin:16px 0 8px;font-size:14px;background:var(--grad-text);-webkit-background-clip:text;background-clip:text;color:transparent} .muted{color:var(--muted)}
 </style></head><body>
 <header><b>⚒ XGEN MAKER</b><span class="info">CLI(maker run) = 이 대시보드. 같은 엔진·같은 로그·같은 결과.</span>

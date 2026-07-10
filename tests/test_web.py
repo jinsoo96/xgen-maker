@@ -93,6 +93,25 @@ class TestWebServer(unittest.TestCase):
                        "/api/branches", "/api/release", "/api/diagnostics"):
             self.assertIn(marker, body)
 
+    def test_geny_design_tokens_and_light_theme(self):
+        # CocoRoF/Geny globals.css 차용 토큰이 원본값 그대로인지 + 라이트 테마 존재
+        _, body = self._get("/")
+        for dark_token in ("--primary:#8573b8", "--bg:#1a1726",
+                           "linear-gradient(135deg,#6f64a6 0%,#897ab4 100%)",
+                           "--glow:0 0 16px rgba(133,115,184,.14)"):
+            self.assertIn(dark_token, body)
+        self.assertIn("@media (prefers-color-scheme:light)", body)
+        for light_token in ("--primary:#8268cf", "--bg:#f4f1f9", "--border:#e7e2ef"):
+            self.assertIn(light_token, body)
+
+    def test_badges_always_have_pill_background(self):
+        # 미정의 클래스(outcome 등)도 중립 배경 — 투명 배지 방지
+        _, body = self._get("/")
+        self.assertIn(".badge{padding:2px 8px", body)
+        self.assertIn("background:var(--neutral-bg)", body)
+        self.assertIn(".badge.ok", body)
+        self.assertIn(".badge.fail", body)
+
     def test_sse_run_streams_events_and_result(self):
         import urllib.parse
         q = urllib.parse.quote("charge 함수 어디 있어")
