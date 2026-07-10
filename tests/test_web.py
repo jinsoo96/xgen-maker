@@ -93,16 +93,18 @@ class TestWebServer(unittest.TestCase):
                        "/api/branches", "/api/release", "/api/diagnostics"):
             self.assertIn(marker, body)
 
-    def test_geny_design_tokens_and_light_theme(self):
-        # CocoRoF/Geny globals.css 차용 토큰이 원본값 그대로인지 + 라이트 테마 존재
+    def test_maker_palette_and_light_theme(self):
+        # 디자인 시스템(토큰 구조)은 Geny 방식, 팔레트는 XGEN MAKER 고유(청사진+단조)
         _, body = self._get("/")
-        for dark_token in ("--primary:#8573b8", "--bg:#1a1726",
-                           "linear-gradient(135deg,#6f64a6 0%,#897ab4 100%)",
-                           "--glow:0 0 16px rgba(133,115,184,.14)"):
+        for dark_token in ("--primary:#3aa8c9", "--bg:#0e161d", "--ember:#d99a63",
+                           "--glow:0 0 16px rgba(58,168,201,.15)"):
             self.assertIn(dark_token, body)
         self.assertIn("@media (prefers-color-scheme:light)", body)
-        for light_token in ("--primary:#8268cf", "--bg:#f4f1f9", "--border:#e7e2ef"):
+        for light_token in ("--primary:#2b8aa8", "--bg:#eff5f7", "--border:#dbe7ec"):
             self.assertIn(light_token, body)
+        # Geny 라벤더 팔레트를 그대로 쓰지 않는다(고유 팔레트)
+        for lavender in ("#8573b8", "#1a1726", "#8268cf", "#f4f1f9"):
+            self.assertNotIn(lavender, body)
 
     def test_badges_always_have_pill_background(self):
         # 미정의 클래스(outcome 등)도 중립 배경 — 투명 배지 방지

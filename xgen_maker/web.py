@@ -18,37 +18,40 @@ from .kg.graph import Graph
 
 _PAGE = """<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
 <title>XGEN MAKER</title><style>
- /* 디자인 토큰 — CocoRoF/Geny 다크 라벤더 팔레트 차용 (muted 그라디언트·soft glow, 눈 안 아프게) */
- /* 디자인 토큰 = CocoRoF/Geny frontend/src/app/globals.css 차용(다크 기본 + 라이트) */
+ /* 디자인 시스템(토큰 구조·hero wash·soft glow·muted 철학)은 CocoRoF/Geny 방식을 따르되,
+    팔레트는 XGEN MAKER 고유 — "청사진 + 단조(forge)": 스틸 잉크 베이스 · azure-cyan primary ·
+    타이틀/hero에만 은은한 ember(구리) 꼬리. primary(~195°)를 success/warning/danger와 멀리 둬 의미색 혼동 없음. */
  :root{--radius:10px;--radius-lg:16px;--t-fast:120ms ease;--t:200ms ease;
-  --primary:#8573b8;--primary-hover:#74639f;--primary-subtle:rgba(141,121,201,.13);
-  --success:#4ade80;--warning:#fbbf24;--danger:#f47171;
-  --bg:#1a1726;--bg2:#1f1b2d;--bg3:#28233a;--card:#1f1b2d;--hover:#28233a;
-  --text:#efecf6;--text2:#aca6bf;--muted:#797292;--border:#2f2942;--border2:#3c3553;
-  --grad:linear-gradient(135deg,#6f64a6 0%,#897ab4 100%);
-  --grad-hover:linear-gradient(135deg,#635892 0%,#7a6ca3 100%);
-  --grad-text:linear-gradient(118deg,#8b7cbe,#9b8dc8 55%,#ab9ed2);
-  --hero:radial-gradient(120% 130% at 82% -10%,rgba(133,115,184,.09),rgba(133,115,184,.028) 36%,transparent 64%);
-  --glow:0 0 16px rgba(133,115,184,.14);--glow-soft:0 0 28px rgba(133,115,184,.06);
+  --primary:#3aa8c9;--primary-hover:#2f8ea9;--primary-subtle:rgba(58,168,201,.13);
+  --ember:#d99a63;
+  --success:#5cc98a;--warning:#e0a95c;--danger:#e07070;
+  --bg:#0e161d;--bg2:#141f28;--bg3:#1c2a35;--card:#141f28;--hover:#1c2a35;
+  --text:#e7eff3;--text2:#a0b3bd;--muted:#6d818d;--border:#22323d;--border2:#2f4350;
+  --grad:linear-gradient(135deg,#2b8aa8 0%,#3aa8c9 55%,#57c2cf 100%);
+  --grad-hover:linear-gradient(135deg,#24788f 0%,#3195b3 55%,#49aeba 100%);
+  --grad-text:linear-gradient(118deg,#3aa8c9 0%,#5cc3cf 48%,#d99a63 100%);
+  --hero:radial-gradient(120% 130% at 82% -10%,rgba(58,168,201,.10) 0%,rgba(217,154,99,.03) 38%,transparent 66%);
+  --glow:0 0 16px rgba(58,168,201,.15);--glow-soft:0 0 28px rgba(58,168,201,.07);
   --shadow-sm:0 1px 2px rgba(0,0,0,.5);--shadow:0 4px 16px rgba(0,0,0,.5);--shadow-lg:0 12px 32px rgba(0,0,0,.6);
-  --link:#a898da;
-  --ok-bg:#2f5741;--ok-fg:#8ff0b8;--info-bg:#3a3564;--info-fg:#c9b8ff;--neutral-bg:#3c3553;
-  --warn-bg:#5c4326;--warn-fg:#f0c88a;--err-bg:#5c2b2b;--err-fg:#f0a0a0}
- /* Geny 라이트 팔레트(html.light) — OS 선호 따름 */
+  --link:#5cc3cf;
+  --ok-bg:#1e4438;--ok-fg:#7fe0ac;--info-bg:#1e3a4a;--info-fg:#8fd0e6;--neutral-bg:#2b3d49;
+  --warn-bg:#4a3720;--warn-fg:#e8c08a;--err-bg:#4a2626;--err-fg:#eda0a0}
+ /* 라이트 — 흰색이 아니라 azure로 살짝 물들인 베이스(눈 안 아프게) */
  @media (prefers-color-scheme:light){:root{
-  --primary:#8268cf;--primary-hover:#6f54bd;--primary-subtle:rgba(130,104,207,.07);
-  --success:#059669;--warning:#d97706;--danger:#dc2626;
-  --bg:#f4f1f9;--bg2:#f8f6fc;--bg3:#ece7f2;--card:#f8f6fc;--hover:#efebf5;
-  --text:#221f30;--text2:#5d5870;--muted:#968fa8;--border:#e7e2ef;--border2:#dad3e7;
-  --grad:linear-gradient(135deg,#8b72d6 0%,#b69fe8 100%);
-  --grad-hover:linear-gradient(135deg,#7a61c9 0%,#a78ee0 100%);
-  --grad-text:linear-gradient(118deg,#8268cf 0%,#a888df 55%,#c4abee 100%);
-  --hero:radial-gradient(120% 130% at 82% -10%,rgba(139,114,214,.08) 0%,rgba(182,159,232,.028) 38%,transparent 66%);
-  --glow:0 0 20px rgba(130,104,207,.09);--glow-soft:0 0 32px rgba(130,104,207,.045);
-  --shadow-sm:0 1px 2px rgba(76,29,149,.04);--shadow:0 4px 14px rgba(76,29,149,.06);--shadow-lg:0 12px 30px rgba(76,29,149,.09);
-  --link:#6f54bd;
-  --ok-bg:#dcfce7;--ok-fg:#065f46;--info-bg:#ede9fe;--info-fg:#5b21b6;--neutral-bg:#ece7f2;
-  --warn-bg:#fef3c7;--warn-fg:#92400e;--err-bg:#fee2e2;--err-fg:#991b1b}}
+  --primary:#2b8aa8;--primary-hover:#22738d;--primary-subtle:rgba(43,138,168,.08);
+  --ember:#c07a3e;
+  --success:#0f8f5f;--warning:#b5741f;--danger:#c94141;
+  --bg:#eff5f7;--bg2:#f6fafb;--bg3:#e3edf1;--card:#f6fafb;--hover:#e8f1f4;
+  --text:#16242c;--text2:#4d626d;--muted:#8399a4;--border:#dbe7ec;--border2:#c6d7de;
+  --grad:linear-gradient(135deg,#3596b5 0%,#4fb2c6 55%,#7fd0d6 100%);
+  --grad-hover:linear-gradient(135deg,#2c839f 0%,#439fb2 55%,#6dbcc3 100%);
+  --grad-text:linear-gradient(118deg,#2b8aa8 0%,#3fa8bb 48%,#c07a3e 100%);
+  --hero:radial-gradient(120% 130% at 82% -10%,rgba(58,168,201,.09) 0%,rgba(192,122,62,.028) 38%,transparent 66%);
+  --glow:0 0 20px rgba(43,138,168,.10);--glow-soft:0 0 32px rgba(43,138,168,.05);
+  --shadow-sm:0 1px 2px rgba(12,74,94,.05);--shadow:0 4px 14px rgba(12,74,94,.07);--shadow-lg:0 12px 30px rgba(12,74,94,.10);
+  --link:#22738d;
+  --ok-bg:#d6f5e3;--ok-fg:#0b5c3c;--info-bg:#d9edf6;--info-fg:#15556e;--neutral-bg:#e3edf1;
+  --warn-bg:#fbeed3;--warn-fg:#7d4d13;--err-bg:#fbdede;--err-fg:#8f2b2b}}
  *{box-sizing:border-box} body{margin:0;font:14px/1.5 'Segoe UI',sans-serif;background:var(--bg);background-image:var(--hero);color:var(--text);height:100vh;display:flex;flex-direction:column}
  header{padding:12px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:16px}
  header b{font-size:16px;font-weight:700;background:var(--grad-text);-webkit-background-clip:text;background-clip:text;color:transparent}
@@ -61,7 +64,10 @@ _PAGE = """<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
  .tab{flex:1;overflow-y:auto;padding:16px 20px;display:none} .tab.on{display:block}
  #log{font-family:Consolas,monospace;font-size:13px;min-height:200px}
  .ev{padding:3px 0;border-bottom:1px solid var(--border);white-space:pre-wrap;word-break:break-all}
- .ok{color:var(--success)} .fail{color:var(--danger)} .info{color:var(--text2)} .step{color:var(--primary);font-weight:600}
+ /* 로그: 상태 글리프만 색 · 본문은 중립(가독성 + 톤 정돈) */
+ .ev{color:var(--text2)} .ev .mk{display:inline-block;width:1.2em;font-weight:700;color:var(--muted)}
+ .ev.ok .mk{color:var(--success)} .ev.fail{color:var(--danger)} .ev.fail .mk{color:var(--danger)}
+ .ev.step{color:var(--text);font-weight:600} .ev.step .mk{color:var(--primary)} .ev.info{color:var(--muted)}
  .result{margin-top:12px;padding:12px 14px;background:var(--card);border-radius:var(--radius);border-left:3px solid var(--primary);box-shadow:var(--glow)}
  form{display:flex;gap:10px;padding:14px 20px;border-top:1px solid var(--border);background:var(--bg2)}
  input[type=text]{flex:1;padding:11px 14px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);border-radius:var(--radius);font-size:14px;transition:border var(--t-fast)}
@@ -109,7 +115,9 @@ _PAGE = """<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
 <script>
 const log=document.getElementById('log'), q=document.getElementById('q'), go=document.getElementById('go');
 const esc=s=>String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
-function line(cls,txt){const d=document.createElement('div');d.className='ev '+cls;d.textContent=txt;log.appendChild(d);log.scrollTop=log.scrollHeight;}
+function line(cls,txt,mark){const d=document.createElement('div');d.className='ev '+cls;
+ if(mark){const s=document.createElement('span');s.className='mk';s.textContent=mark;d.appendChild(s);}
+ d.appendChild(document.createTextNode(txt));log.appendChild(d);log.scrollTop=log.scrollHeight;}
 function refreshInfo(){fetch('/api/info').then(r=>r.json()).then(d=>{window.__repos=d.repo_names||[];document.getElementById('mode').textContent=d.nodes.toLocaleString()+' 노드 · '+d.repos+' 레포';});}
 refreshInfo();
 // Sync 버튼 — 그래프 최신화(변경분만)
@@ -118,10 +126,10 @@ syncBtn.onclick=()=>{
  syncBtn.disabled=true; syncBtn.classList.add('spin'); const old=syncBtn.textContent; syncBtn.textContent='⟳ 동기화중…';
  fetch('/api/sync').then(r=>r.json()).then(d=>{
   if(d.ok){ syncBtn.textContent=d.changed>0?('✓ '+d.changed+'파일 갱신'):'✓ 최신'; refreshInfo();
-   line('info','⟳ Sync: '+(d.changed>0?d.changed+'개 파일 반영':'변경 없음(최신)')+' · '+d.nodes.toLocaleString()+'노드'); }
-  else line('fail','✗ Sync 실패: '+d.error);
+   line('info','Sync: '+(d.changed>0?d.changed+'개 파일 반영':'변경 없음(최신)')+' · '+d.nodes.toLocaleString()+'노드','⟳'); }
+  else line('fail','Sync 실패: '+d.error,'✗');
   setTimeout(()=>{syncBtn.textContent=old; syncBtn.classList.remove('spin'); syncBtn.disabled=false;},2500);
- }).catch(e=>{line('fail','✗ Sync 오류'); syncBtn.textContent=old; syncBtn.classList.remove('spin'); syncBtn.disabled=false;});
+ }).catch(e=>{line('fail','Sync 오류','✗'); syncBtn.textContent=old; syncBtn.classList.remove('spin'); syncBtn.disabled=false;});
 };
 // 탭 전환
 const loaded={};
@@ -198,19 +206,19 @@ function render(t){
 document.getElementById('f').addEventListener('submit',e=>{
  e.preventDefault(); const query=q.value.trim(); if(!query)return;
  document.querySelector('nav button[data-t=run]').click();
- go.disabled=true; line('step','▶ '+query); q.value='';
+ go.disabled=true; line('step',query,'▶'); q.value='';
  const es=new EventSource('/api/run?q='+encodeURIComponent(query)+'&mode='+document.getElementById('m').value);
  es.onmessage=ev=>{
   const e=JSON.parse(ev.data);
   if(e.type==='event'){const mark={ok:'✓',pass:'✓',fail:'✗',empty:'·',skipped:'·',observe:'◇',act:'◆'}[e.status]||'▸';
-   line(e.status==='fail'?'fail':'ok', mark+' '+e.step.padEnd(14)+' '+e.status+(e.detail?'  '+e.detail:''));}
+   line(e.status==='fail'?'fail':'ok', e.step.padEnd(14)+' '+e.status+(e.detail?'  '+e.detail:''), mark);}
   else if(e.type==='result'){const r=e.report; let html='<b>결과: '+esc(r.outcome)+'</b>';
    if(r.branch)html+='<br>브랜치: '+esc(r.branch); if(r.iterations)html+=' · 수렴 '+r.iterations+'회';
    if(r.mr_draft)html+='<br>MR초안: '+esc(r.mr_draft); if(r.mr&&r.mr.url)html+='<br>MR: <a href="'+esc(r.mr.url)+'" target=_blank>'+esc(r.mr.url)+'</a>';
    if(r.answer)html+='<br>'+esc(r.answer).replace(/\\n/g,'<br>');
    const d=document.createElement('div');d.className='result';d.innerHTML=html;log.appendChild(d);log.scrollTop=log.scrollHeight;
    go.disabled=false; es.close(); loaded['history']=0;}  // 이력 갱신 유도
-  else if(e.type==='error'){line('fail','✗ '+esc(e.message)); go.disabled=false; es.close();}
+  else if(e.type==='error'){line('fail',e.message,'✗'); go.disabled=false; es.close();}
  };
  es.onerror=()=>{go.disabled=false; es.close();};
 });
