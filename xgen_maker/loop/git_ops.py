@@ -11,13 +11,16 @@ from pathlib import Path
 
 from ..config import is_allowed_branch, is_protected_branch, branch_name_issue
 
-# https://user:TOKEN@host — 인증 URL의 자격을 마스킹(에러/로그/저널로 새는 것 방지)
-_CRED_URL = re.compile(r"(?P<scheme>[a-zA-Z][a-zA-Z0-9+.-]*://)(?P<user>[^:/@\s]+):(?P<secret>[^@\s]+)@")
+# 인증 URL의 자격을 마스킹(에러/로그/저널로 새는 것 방지):
+#  https://user:TOKEN@host  그리고  https://TOKEN@host (토큰=userinfo, GitLab PAT 형식)
+_CRED_URL_UP = re.compile(r"(?P<scheme>[a-zA-Z][a-zA-Z0-9+.-]*://)(?P<user>[^:/@\s]+):(?P<secret>[^@\s]+)@")
+_CRED_URL_U = re.compile(r"(?P<scheme>[a-zA-Z][a-zA-Z0-9+.-]*://)(?P<secret>[^:/@\s]+)@")
 
 
 def redact(text: str) -> str:
-    """문자열 속 인증 URL의 비밀값을 ***로 치환."""
-    return _CRED_URL.sub(lambda m: f"{m['scheme']}{m['user']}:***@", str(text))
+    """문자열 속 인증 URL의 비밀값을 ***로 치환(user:token@ · token@ 둘 다)."""
+    s = _CRED_URL_UP.sub(lambda m: f"{m['scheme']}{m['user']}:***@", str(text))
+    return _CRED_URL_U.sub(lambda m: f"{m['scheme']}***@", s)
 
 
 class GitOpsError(RuntimeError):

@@ -87,17 +87,19 @@ class MakerLoop:
         path, main_git = self._worktree, self._main_git
         self._worktree = self._main_git = None
         if path is None:
-            return
+            return None  # 정리할 worktree 없음
+        removed = True
         try:
             if main_git is not None:
                 main_git.remove_worktree(path)
         except Exception:  # noqa: BLE001 — 정리 실패가 결과를 덮지 않게
-            pass
+            removed = False
         try:
             import shutil
             shutil.rmtree(path, ignore_errors=True)
         except Exception:  # noqa: BLE001
             pass
+        return removed
 
     def run(self, query: str) -> dict:
         self._worktree = None
@@ -238,24 +240,27 @@ class MakerLoop:
                 journal.event("worktree", "ok", path=str(worktree_path))
             else:
                 repo_git.create_branch(branch, base_ref=base_ref)  # 최신 base에서 분기
+            relanded_ok = False
             if base_ref and changed_since:
                 refresh_files(self.graph, repo, repo_path, changed_since)
                 # "최신 그래프로 작업" — 그래프가 갱신됐으니 착지 지도를 최신 그래프로 재계산.
-                # (안 하면 코드는 최신인데 지도만 fetch 이전 스냅샷 → 원칙 위배)
+                # 단, 브랜치·repo_path는 이미 원래 repo로 고정됐으므로 재착지 top이 '같은 repo'일
+                # 때만 반영한다. 다른 repo로 튀면 landing/legacy_notes가 repo/worktree와 어긋나
+                # 코딩에이전트에게 엉뚱한 레포 파일을 지시하게 되므로 원래 착지를 유지한다.
                 relanded = search(self.graph, query, k=8)
-                if relanded:
+                if relanded and relanded[0]["repo"] == repo:
                     landing = relanded
                     top = landing[0]
-                    if top["repo"] == repo:  # 같은 레포일 때만(브랜치는 이미 만듦)
-                        impact_nodes = impact(self.graph, top["id"], depth=3)
-                        chain_nodes = retrieve_chain(self.graph, query, k=6, hops=2)["chain"]
-                # legacy_notes도 최신 코드(FETCH_HEAD 체크아웃)에서 다시 발췌 — "코드가 권위"
-                legacy_notes = self._legacy_notes(landing, repo_path)
-                if past:  # 학습 메모리 재주입(재발췌로 덮였으므로)
-                    legacy_notes = (as_prompt_block(past) + "\n\n" + legacy_notes).strip()
+                    impact_nodes = impact(self.graph, top["id"], depth=3)
+                    chain_nodes = retrieve_chain(self.graph, query, k=6, hops=2)["chain"]
+                    # 최신 코드(FETCH_HEAD 체크아웃)에서 다시 발췌 — "코드가 권위"
+                    legacy_notes = self._legacy_notes(landing, repo_path)
+                    if past:  # 학습 메모리 재주입(재발췌로 덮였으므로)
+                        legacy_notes = (as_prompt_block(past) + "\n\n" + legacy_notes).strip()
+                    relanded_ok = True
                 journal.event("fetch_latest", "ok", target=config.target_branch,
                               sha=fetch_sha[:12], kg_refreshed=len(changed_since),
-                              relanded=bool(relanded))
+                              relanded=relanded_ok)
         except GitOpsError as error:
             journal.event("branch", "fail", error=str(error))
             journal.close("branch_failed")
@@ -442,8 +447,9 @@ class MakerLoop:
                f"'{query[:60]}' → {conv['iterations']}회 수렴 통과, 변경 {len(changed)}파일", query)
         # 격리 worktree 정리(브랜치·커밋은 보존됨) — 실패 경로는 run()의 finally가 처리
         if worktree_path is not None:
-            self._cleanup_worktree()
-            journal.event("worktree", "removed", path=str(worktree_path))
+            removed = self._cleanup_worktree()
+            journal.event("worktree", "removed" if removed else "remove_failed",
+                          path=str(worktree_path))
         report["cost"] = cost.summary()
         journal.event("cost", "ok", **cost.summary())
         journal.close("mr_prepared")

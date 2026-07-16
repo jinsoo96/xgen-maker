@@ -13,6 +13,10 @@ class TestTokenRedaction(unittest.TestCase):
         from xgen_maker.loop.git_ops import GitRepo, GitOpsError, redact
         self.assertEqual(redact("git push https://oauth2:glpat-SECRET@h/p.git 실패"),
                          "git push https://oauth2:***@h/p.git 실패")
+        # 콜론 없는 토큰 형식(https://TOKEN@host)도 마스킹
+        self.assertNotIn("glpat-SECRET", redact("git fetch https://glpat-SECRET@h/p.git"))
+        # 자격 없는 포트 URL은 훼손하지 않음
+        self.assertEqual(redact("https://host:8080/g/r.git"), "https://host:8080/g/r.git")
         with tempfile.TemporaryDirectory() as t:
             r = Path(t)
             for a in (["init", "-b", "trunk"], ["config", "user.email", "a@b"],

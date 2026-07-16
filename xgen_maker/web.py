@@ -120,7 +120,7 @@ const cls=s=>String(s==null?'':s).replace(/[^a-zA-Z0-9_-]/g,'');
 function line(cls,txt,mark){const d=document.createElement('div');d.className='ev '+cls;
  if(mark){const s=document.createElement('span');s.className='mk';s.textContent=mark;d.appendChild(s);}
  d.appendChild(document.createTextNode(txt));log.appendChild(d);log.scrollTop=log.scrollHeight;}
-function refreshInfo(){fetch('/api/info').then(r=>r.json()).then(d=>{window.__repos=d.repo_names||[];document.getElementById('mode').textContent=d.nodes.toLocaleString()+' 노드 · '+d.repos+' 레포';});}
+function refreshInfo(){fetch('/api/info').then(r=>r.json()).then(d=>{if(!d||d.repo_names===undefined)return;window.__repos=d.repo_names||[];document.getElementById('mode').textContent=(d.nodes||0).toLocaleString()+' 노드 · '+(d.repos||0)+' 레포';}).catch(()=>{});}
 refreshInfo();
 // Sync 버튼 — 그래프 최신화(변경분만)
 const syncBtn=document.getElementById('sync');
@@ -159,8 +159,13 @@ function render(t){
   el.innerHTML='<h3>MAKER가 만든 MR</h3><table><tr><th>#</th><th>상태</th><th>브랜치</th><th>제목</th><th></th></tr>'+(d.maker.map(row).join('')||'<tr><td colspan=5 class=muted>없음</td></tr>')+'</table>'+
    '<h3>내 MR (전체)</h3><table><tr><th>#</th><th>상태</th><th>브랜치</th><th>제목</th><th></th></tr>'+d.mine.map(row).join('')+'</table>';}).catch(tabErr(el));
  if(t==='branches'){
-  // window.__repos가 /api/info 미도착으로 비어있을 수 있음 → 없으면 즉시 채워서 렌더
-  if(!(window.__repos&&window.__repos.length)){jget('/api/info').then(d=>{window.__repos=d.repo_names||[];loaded['branches']=0;render('branches');}).catch(tabErr(el));return;}
+  // window.__repos가 /api/info 미도착으로 아직 없을 수 있음 → 딱 한 번만 채우고 재렌더.
+  // (빈 배열은 '레포 없음'의 정상 상태이므로 무한 refetch하지 않는다)
+  if(window.__repos===undefined && !window.__reposTried){
+   window.__reposTried=1;
+   jget('/api/info').then(d=>{window.__repos=d.repo_names||[];loaded['branches']=0;render('branches');}).catch(tabErr(el));
+   return;
+  }
   const names=(window.__repos||[]);
   const sel='<label>레포 <select id="brepo">'+(names.length?names.map(n=>`<option>${esc(n)}</option>`).join(''):'<option value="">(config에 gitlab_projects 없음)</option>')+'</select></label>';
   el.innerHTML='<h3>브랜치 / 릴리즈 <span class=muted>(내가·MAKER가 만든 작업 브랜치 + 승격 경로)</span></h3>'+sel+'<div id="bbody" class=muted style="margin-top:12px">불러오는 중…</div>';
@@ -254,8 +259,10 @@ class _SSEJournal:
         return self._real.close(outcome)
 
 
-# 공유 Graph는 스레드 간 가변 — sync/run/info가 겹치면 KG 손상·dict 변경 중 순회 크래시.
-# 대시보드는 단일 사용자용이므로 그래프를 만지는 구간을 직렬화한다.
+# 공유 Graph 접근 직렬화용 락. 단, 실행(run) 전체를 감싸면 분 단위로 락을 잡아
+# /api/info·/api/sync가 그동안 얼어붙는다(회귀). 그래서 run은 락을 잡지 않고
+# (파일 손상은 Graph.save의 원자적 교체가 방지), 명시적 mutator인 /api/sync만 직렬화하며,
+# 읽기(/api/info)는 순회 중 mutation 시 RuntimeError를 회복재시도한다.
 _GRAPH_LOCK = threading.Lock()
 
 
@@ -267,8 +274,7 @@ def _run_query(config: MakerConfig, graph: Graph, query: str, q: queue.Queue) ->
         def factory(worklogs_dir, qtext, verbose=False):
             return _SSEJournal(Journal(worklogs_dir, qtext, verbose=False), q)
         loop = MakerLoop(config, graph=graph, journal_factory=factory)
-        with _GRAPH_LOCK:  # 공유 그래프 mutate/save 직렬화(Sync·동시 실행과 경합 방지)
-            report = loop.run(query)
+        report = loop.run(query)  # 락 없이 — 대시보드 프리즈 방지(파일은 원자적 저장으로 안전)
         q.put({"type": "result", "report": report})
     except Exception as error:  # noqa: BLE001
         q.put({"type": "error", "message": str(error)[:300]})
@@ -285,29 +291,41 @@ class MakerWebHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         # 어떤 핸들러가 예외를 던져도 스레드가 죽지 않게 500으로 감싼다(빈 응답/hang 방지)
+        self._response_started = False
         try:
             self._route()
         except (BrokenPipeError, ConnectionResetError):
             pass
         except Exception as error:  # noqa: BLE001
+            # 이미 응답(SSE 등)이 시작됐으면 두 번째 응답을 쏘지 않는다(HTTP 손상 방지)
+            if not self._response_started:
+                try:
+                    self._json({"ok": False, "error": str(error)[:200]})
+                except Exception:  # noqa: BLE001
+                    pass
+
+    def _graph_info(self) -> dict:
+        # 락 없이 읽되, 실행 루프가 그래프를 mutate 중이면 순회 크래시를 회복재시도
+        import time
+        for _ in range(5):
             try:
-                self._json({"ok": False, "error": str(error)[:200]})
-            except Exception:  # noqa: BLE001
-                pass
+                snapshot = list(self.graph.nodes.values())
+                names = sorted((self.config.gitlab_projects or {}).keys()
+                               or (self.config.repos or {}).keys()
+                               or {n["repo"] for n in snapshot})
+                return {"nodes": len(snapshot),
+                        "repos": len({n["repo"] for n in snapshot}),
+                        "repo_names": names}
+            except RuntimeError:  # dict changed size during iteration
+                time.sleep(0.02)
+        return {"nodes": len(self.graph.nodes), "repos": 0, "repo_names": []}
 
     def _route(self):
         parsed = urlparse(self.path)
         if parsed.path == "/":
             self._html(_PAGE)
         elif parsed.path == "/api/info":
-            with _GRAPH_LOCK:  # 그래프 순회 중 다른 스레드가 mutate하면 RuntimeError
-                names = sorted((self.config.gitlab_projects or {}).keys()
-                               or (self.config.repos or {}).keys()
-                               or {n["repo"] for n in self.graph.nodes.values()})
-                info = {"nodes": len(self.graph.nodes),
-                        "repos": len({n["repo"] for n in self.graph.nodes.values()}),
-                        "repo_names": names}
-            self._json(info)
+            self._json(self._graph_info())
         elif parsed.path == "/api/sync":
             # 그래프 최신화 — git 변경분만 재추출(CLI maker kg sync와 동일 로직)
             from .kg.sync import sync_all
@@ -366,9 +384,8 @@ class MakerWebHandler(BaseHTTPRequestHandler):
                        if repo else {"error": "repo 미지정"})
         elif parsed.path == "/api/branches":
             from .loop.gitlab_observe import branches
-            names = sorted((self.config.gitlab_projects or {}).keys())
-            default = names[0] if names else ""
-            repo = parse_qs(parsed.query).get("repo", [default])[0]
+            from .config import resolve_default_repo
+            repo = parse_qs(parsed.query).get("repo", [resolve_default_repo(self.config)])[0]
             self._json(branches(self.config, repo) if repo else {"error": "repo 미지정"})
         elif parsed.path == "/api/diagnostics":
             self._json(self._diagnostics())
@@ -402,6 +419,7 @@ class MakerWebHandler(BaseHTTPRequestHandler):
 
     def _html(self, body: str):
         data = body.encode("utf-8")
+        self._response_started = True
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
@@ -410,6 +428,7 @@ class MakerWebHandler(BaseHTTPRequestHandler):
 
     def _json(self, obj):
         data = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+        self._response_started = True
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
@@ -431,6 +450,7 @@ class MakerWebHandler(BaseHTTPRequestHandler):
         else:
             cfg.allow_write = True
             cfg.mode = mode
+        self._response_started = True  # 이후 예외는 do_GET에서 2차 응답 금지
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-cache")
