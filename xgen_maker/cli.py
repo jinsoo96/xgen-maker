@@ -251,6 +251,7 @@ def cmd_web(args) -> None:
 
 def cmd_ui(args) -> None:
     from .loop.ui_verify import ui_verify, affected_routes
+    from .config import resolve_default_repo
     from pathlib import Path as _P
     config = MakerConfig.from_file(args.config) if args.config else MakerConfig()
     if args.kg:
@@ -259,8 +260,9 @@ def cmd_ui(args) -> None:
         config.preview_base = args.preview
     graph = Graph.load(config.kg_path)
     changed = args.changed or []
+    repo = args.repo or resolve_default_repo(config)
     if args.ui_action == "routes":
-        routes = affected_routes(graph, changed, args.repo)
+        routes = affected_routes(graph, changed, repo)
         print(json.dumps([r["route"] for r in routes], ensure_ascii=False))
         return
     out_dir = _P(args.out)
@@ -272,7 +274,7 @@ def cmd_ui(args) -> None:
         baseline_dir.mkdir(parents=True, exist_ok=True)
         if not http_reachable(config.preview_base, timeout=6):
             print(f"[ui baseline] {config.preview_base} 미도달"); return
-        targets = [r["route"] for r in affected_routes(graph, changed, args.repo)] \
+        targets = [r["route"] for r in affected_routes(graph, changed, repo)] \
             if changed else [args.route or "/"]
         for rp in targets:
             if "[" in rp:
@@ -283,7 +285,7 @@ def cmd_ui(args) -> None:
             print(f"[ui baseline] {rp} → {snap.get('ok')}")
         return
     # verify
-    report = ui_verify(config, graph, changed, args.repo, out_dir, vision=not args.no_vision)
+    report = ui_verify(config, graph, changed, repo, out_dir, vision=not args.no_vision)
     print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
 
 
@@ -496,12 +498,17 @@ def cmd_mrs(args) -> None:
 
 def cmd_branches(args) -> None:
     from .loop.gitlab_observe import branches
+    from .config import resolve_default_repo
     config = MakerConfig.from_file(args.config) if args.config else MakerConfig()
-    b = branches(config, args.repo)
+    repo = args.repo or resolve_default_repo(config)
+    if not repo:
+        print("[branches] --repo 미지정 + config에 레포 없음 — gitlab_projects를 설정하세요")
+        return
+    b = branches(config, repo)
     if "error" in b:
         print(f"[branches] {b['error']}")
         return
-    print(f"═══ {args.repo} 브랜치 ({b['total']}개) ═══")
+    print(f"═══ {repo} 브랜치 ({b['total']}개) ═══")
     print(f"  release: {b['release']}  ·  보호: {b['protected']}")
     print(f"  작업 브랜치(최근 {len(b['work_recent'])}):")
     for w in b["work_recent"]:
@@ -511,14 +518,16 @@ def cmd_branches(args) -> None:
 
 def cmd_learn(args) -> None:
     from .loop.learnings import record, retrieve, _all
+    from .config import resolve_default_repo
     config = MakerConfig.from_file(args.config) if args.config else MakerConfig()
+    repo = args.repo or resolve_default_repo(config)
     if args.note:  # 기록
-        record(config.learnings_dir, args.repo, args.area or "general",
+        record(config.learnings_dir, repo, args.area or "general",
                args.kind, args.note)
-        print(f"[learn] 기록됨 → {config.learnings_dir} ({args.repo}/{args.area})")
+        print(f"[learn] 기록됨 → {config.learnings_dir} ({repo}/{args.area})")
     else:  # 조회
-        entries = _all(config.learnings_dir, args.repo)
-        print(f"═══ {args.repo} 학습 {len(entries)}건 ═══")
+        entries = _all(config.learnings_dir, repo)
+        print(f"═══ {repo} 학습 {len(entries)}건 ═══")
         for e in entries[-20:]:
             print(f"  ({e['kind']}) {e.get('area','')}: {e['note']}")
 
@@ -542,30 +551,33 @@ def cmd_history(args) -> None:
 
 def cmd_release(args) -> None:
     from .loop.release import release_view, render_ladder_md
+    from .config import resolve_default_repo
     config = MakerConfig.from_file(args.config) if args.config else MakerConfig()
     if args.kg:
         config.kg_path = args.kg
     graph = Graph.load(config.kg_path)
-    view = release_view(graph, args.repo, args.branch or config.target_branch, config)
-    print(f"[release] {args.repo}: 이 변경은 '{args.branch or config.target_branch}' "
+    repo = args.repo or resolve_default_repo(config)
+    view = release_view(graph, repo, args.branch or config.target_branch, config)
+    print(f"[release] {repo}: 이 변경은 '{args.branch or config.target_branch}' "
           f"→ 환경 '{view['lands_on_env']}'")
     print(f"[release] 승격 경로: {' → '.join(view['promotion_remaining'])}")
     print(render_ladder_md(view))
 
 
 def cmd_deploy(args) -> None:
-    from .loop.deploy import deploy_render_test, app_for_repo
+    from .loop.deploy import deploy_render_test
+    from .config import resolve_default_repo
     config = MakerConfig.from_file(args.config) if args.config else MakerConfig()
     if args.infra:
         config.infra_path = args.infra
+    repo = args.repo or resolve_default_repo(config)
     if args.deploy_action == "test":
-        result = deploy_render_test(config, args.repo)
+        result = deploy_render_test(config, repo)
         print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
         if result["status"] == "failed":
             sys.exit(1)
     elif args.deploy_action == "apps":
-        from .loop.deploy import _REPO_TO_APP
-        print(json.dumps(_REPO_TO_APP, ensure_ascii=False, indent=2))
+        print(json.dumps(config.deploy_app_map or {}, ensure_ascii=False, indent=2))
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -694,7 +706,7 @@ def main(argv: list[str] | None = None) -> None:
 
     p = sub.add_parser("ui", help="UI/UX 검증 — 라우트 매핑 + 스냅샷 + 픽셀diff + 비전판정")
     p.add_argument("ui_action", choices=["routes", "baseline", "verify"])
-    p.add_argument("--repo", default="xgen-frontend-features")
+    p.add_argument("--repo", default=None, help="미지정 시 config에서 유추")
     p.add_argument("--changed", nargs="*", help="변경 파일(레포 상대경로)")
     p.add_argument("--route", default=None, help="baseline 대상 라우트(변경 미지정 시)")
     p.add_argument("--config", default=None)
@@ -752,12 +764,12 @@ def main(argv: list[str] | None = None) -> None:
     p.set_defaults(func=cmd_mrs)
 
     p = sub.add_parser("branches", help="레포 브랜치 관측 — release·보호·작업 브랜치 (read-only)")
-    p.add_argument("--repo", default="xgen-frontend-features")
+    p.add_argument("--repo", default=None, help="미지정 시 config에서 유추")
     p.add_argument("--config", default=None)
     p.set_defaults(func=cmd_branches)
 
     p = sub.add_parser("learn", help="작업 학습 메모리 — 기록/조회 (하네스가 다음 작업 시 참고, 실수방지)")
-    p.add_argument("--repo", default="xgen-workflow")
+    p.add_argument("--repo", default=None, help="미지정 시 config에서 유추")
     p.add_argument("--area", default=None)
     p.add_argument("--kind", default="note", choices=["pitfall", "fix", "convention", "note"])
     p.add_argument("--note", default=None, help="기록할 학습(없으면 조회)")
@@ -770,7 +782,7 @@ def main(argv: list[str] | None = None) -> None:
     p.set_defaults(func=cmd_history)
 
     p = sub.add_parser("release", help="릴리즈 사다리 — 이 변경이 develop→stg→main 어디에 놓이나")
-    p.add_argument("--repo", default="xgen-core")
+    p.add_argument("--repo", default=None, help="미지정 시 config에서 유추")
     p.add_argument("--branch", default=None, help="타깃 브랜치(기본 develop)")
     p.add_argument("--config", default=None)
     p.add_argument("--kg", default=None)
@@ -778,7 +790,7 @@ def main(argv: list[str] | None = None) -> None:
 
     p = sub.add_parser("deploy", help="배포 렌더 검증(T1, tmp 격리 helm template) — MR 전 배포통과 확인")
     p.add_argument("deploy_action", choices=["test", "apps"])
-    p.add_argument("--repo", default="xgen-core")
+    p.add_argument("--repo", default=None, help="미지정 시 config에서 유추")
     p.add_argument("--config", default=None)
     p.add_argument("--infra", default=None, help="xgen-infra 경로 override")
     p.set_defaults(func=cmd_deploy)

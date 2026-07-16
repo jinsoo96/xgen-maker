@@ -12,10 +12,10 @@ def make_infra(root: Path) -> None:
     (chart / "values").mkdir(parents=True)
     (chart / "Chart.yaml").write_text("apiVersion: v2\nname: xgen-service\nversion: 0.1\n",
                                       encoding="utf-8")
-    (chart / "values" / "xgen-core.yaml").write_text(
-        "serviceName: xgen-core\n", encoding="utf-8")
-    (chart / "values" / "xgen-frontend.yaml").write_text(
-        "serviceName: xgen-frontend\n", encoding="utf-8")
+    (chart / "values" / "svc-core.yaml").write_text(
+        "serviceName: svc-core\n", encoding="utf-8")
+    (chart / "values" / "svc-frontend.yaml").write_text(
+        "serviceName: svc-frontend\n", encoding="utf-8")
     proj = root / "k3s" / "argocd" / "projects"
     proj.mkdir(parents=True)
     (proj / "xgen.yaml").write_text(
@@ -23,12 +23,12 @@ def make_infra(root: Path) -> None:
         "destinations:\n  dev:\n    domain: \"app.example.com\"\n"
         "site: main\n"
         "environments:\n  dev:\n    services:\n"
-        "      - name: xgen-frontend\n        hasDomain: true\n"
-        "      - name: xgen-core\n", encoding="utf-8")
+        "      - name: svc-frontend\n        hasDomain: true\n"
+        "      - name: svc-core\n", encoding="utf-8")
     (proj / "project-b.yaml").write_text(
         "project:\n  name: project-b\n  namespace: project-b\n"
         "destinations:\n  dev:\n    domain: \"app-a-dev.example.com\"\n"
-        "environments:\n  dev:\n    services:\n      - name: xgen-core\n",
+        "environments:\n  dev:\n    services:\n      - name: svc-core\n",
         encoding="utf-8")
 
 
@@ -58,17 +58,18 @@ class TestInfraExtract(unittest.TestCase):
                             for e in serves))
 
     def test_link_and_targets(self):
-        # 코드 레포 노드 추가 후 연결
-        self.g.add_node("xgen-core", "repo", "xgen-core", "xgen-core", "/path")
-        self.g.add_node("xgen-frontend-features", "repo", "xgen-frontend-features",
-                        "xgen-frontend-features", "/path")
-        n = link_infra_to_code(self.g)
+        # 코드 레포 노드 추가 후 연결. 앱 매핑(frontend-* → svc-frontend)은 config로 주입.
+        app_map = {"svc-frontend-features": "svc-frontend"}
+        self.g.add_node("svc-core", "repo", "svc-core", "svc-core", "/path")
+        self.g.add_node("svc-frontend-features", "repo", "svc-frontend-features",
+                        "svc-frontend-features", "/path")
+        n = link_infra_to_code(self.g, app_map)
         self.assertGreaterEqual(n, 2)
-        targets = deploy_targets(self.g, "xgen-core")
+        targets = deploy_targets(self.g, "svc-core", app_map)
         names = {t["project"] for t in targets}
         self.assertEqual(names, {"xgen", "project-b"})
-        # frontend alias → xgen-frontend app
-        ft = deploy_targets(self.g, "xgen-frontend-features")
+        # config 매핑으로 frontend-features → svc-frontend app 수렴
+        ft = deploy_targets(self.g, "svc-frontend-features", app_map)
         self.assertTrue(any(t["domain"] == "app.example.com" for t in ft))
 
 

@@ -47,7 +47,7 @@ class TestDeployInterlock(unittest.TestCase):
 class TestVerifyReuse(unittest.TestCase):
     def test_unreachable_records_note_not_start(self):
         with tempfile.TemporaryDirectory() as tmp:
-            report = verify(True, ["xgen-frontend"], Path(tmp),
+            report = verify(True, ["svc-frontend"], Path(tmp),
                             preview_base="http://127.0.0.1:59999")
         self.assertFalse(report["preview_reachable"])
         self.assertIn("자동 기동", report["note"])

@@ -268,10 +268,14 @@ def run_doctor(config_path: str | None = None) -> bool:
         apps = graph.nodes_by_kind("helm_app")
         if projects:
             from .kg.extract_infra import deploy_targets
-            tgt = deploy_targets(graph, "xgen-core")
+            from .config import resolve_default_repo
+            probe_repo = resolve_default_repo(config) or (
+                next(iter(graph.nodes_by_kind("repo")), {}).get("name", ""))
+            tgt = deploy_targets(graph, probe_repo,
+                                 getattr(config, "deploy_app_map", None)) if probe_repo else []
             domains = sorted({t["domain"] for t in tgt if t["domain"]})
             check.ok("인프라 KG", f"배포 프로젝트 {len(projects)}·helm앱 {len(apps)} "
-                     f"· xgen-core→도메인 {len(domains)}개")
+                     f"· {probe_repo or '(레포미상)'}→도메인 {len(domains)}개")
         else:
             check.warn("인프라 KG", "인프라 미포함 — maker kg infra 후 재병합")
 
@@ -295,16 +299,18 @@ def run_doctor(config_path: str | None = None) -> bool:
     except Exception as e:
         check.warn("배포 관측(read-only)", str(e)[:80])
 
-    # 목적 6-2: 배포 렌더 검증 (상사님 tmp 방식 — MR 전 배포통과 확인)
+    # 목적 6-2: 배포 렌더 검증 (tmp 복사 방식 — MR 전 배포통과 확인)
     try:
         from .loop.deploy import _find_helm, deploy_render_test
+        from .config import resolve_default_repo
         helm = _find_helm()
+        probe_repo = resolve_default_repo(config) if config else ""
         if helm is None:
-            check.warn("배포 렌더검증", "helm 미설치 — T1 렌더검증 불가")
-        elif config is not None:
-            r = deploy_render_test(config, "xgen-core")
+            check.warn("배포 렌더검증", "helm 미설치 — 렌더검증 불가")
+        elif config is not None and probe_repo:
+            r = deploy_render_test(config, probe_repo)
             if r["status"] == "passed":
-                check.ok("배포 렌더검증", f"helm template 통과 (xgen-core: {r['manifests']}개 매니페스트)")
+                check.ok("배포 렌더검증", f"helm template 통과 ({probe_repo}: {r['manifests']}개 매니페스트)")
             elif r["status"] == "skipped":
                 check.warn("배포 렌더검증", f"helm 있음 · {r['reason'][:50]}")
             else:

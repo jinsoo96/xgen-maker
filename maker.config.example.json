@@ -27,6 +27,16 @@
   "deploy_mode": "off",
   "preview_base": "",
   "infra_path": "",
+  "default_repo": "",
+  "deploy_app_map": {
+    "_comment": "레포명 → Helm 앱명(조직 서비스명은 여기 로컬 config에만). 예: frontend 스코프 여러 개를 앱 하나로 수렴",
+    "frontend-app": "frontend",
+    "frontend-features": "frontend"
+  },
+  "stack_profile_map": {
+    "_comment": "레포명 → 로컬 스택 프로파일(선택). 미설정 시 레포명 그대로 사용",
+    "frontend": "web"
+  },
   "worklogs_dir": "worklogs",
   "learnings_dir": "learnings"
 }

@@ -9,11 +9,11 @@ from xgen_maker.loop.release import (ladder, env_for_branch, promotion_path,
 
 def infra_graph() -> Graph:
     g = Graph()
-    g.add_node("xgen-core", "repo", "xgen-core", "xgen-core", "/p")
-    g.add_node("xi:app:xgen-core", "helm_app", "xgen-core", "xgen-infra", "")
+    g.add_node("svc-core", "repo", "svc-core", "svc-core", "/p")
+    g.add_node("xi:app:svc-core", "helm_app", "svc-core", "xgen-infra", "")
     g.add_node("xi:project:xgen", "deploy_project", "xgen", "xgen-infra", "",
                namespace="xgen", domains={"dev": "app.example.com", "prd": "prd.example.com"})
-    g.add_edge("xi:project:xgen", "xi:app:xgen-core", "deploys",
+    g.add_edge("xi:project:xgen", "xi:app:svc-core", "deploys",
                envs=["dev", "prd"],
                domains={"dev": "app.example.com", "prd": "prd.example.com"})
     return g
@@ -38,14 +38,14 @@ class TestLadder(unittest.TestCase):
 
     def test_deploy_targets_by_env(self):
         g = infra_graph()
-        by_env = deploy_targets_by_env(g, "xgen-core")
+        by_env = deploy_targets_by_env(g, "svc-core")
         self.assertIn("dev", by_env)
         self.assertIn("prd", by_env)
         self.assertEqual(by_env["dev"][0]["domain"], "app.example.com")
 
     def test_release_view_and_render(self):
         g = infra_graph()
-        v = release_view(g, "xgen-core", "develop", MakerConfig())
+        v = release_view(g, "svc-core", "develop", MakerConfig())
         self.assertEqual(v["lands_on_env"], "dev")
         self.assertEqual(v["promotion_remaining"], ["develop", "stg", "main"])
         current = [s for s in v["ladder"] if s["current"]]

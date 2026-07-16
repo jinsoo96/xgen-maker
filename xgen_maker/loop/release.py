@@ -49,11 +49,11 @@ def promotion_path(from_branch: str, config=None) -> list[dict]:
     return lad[idx:]
 
 
-def deploy_targets_by_env(graph, repo: str) -> dict[str, list[dict]]:
+def deploy_targets_by_env(graph, repo: str, app_map=None) -> dict[str, list[dict]]:
     """코드 레포 → 환경별 배포 대상 {env: [{project, domain, namespace}]}."""
     from ..kg.extract_infra import deploy_targets
     grouped: dict[str, list[dict]] = {}
-    for t in deploy_targets(graph, repo):
+    for t in deploy_targets(graph, repo, app_map):
         grouped.setdefault(t["env"], []).append(
             {"project": t["project"], "domain": t["domain"], "namespace": t["namespace"]})
     return grouped
@@ -62,7 +62,8 @@ def deploy_targets_by_env(graph, repo: str) -> dict[str, list[dict]]:
 def release_view(graph, repo: str, target_branch: str, config=None) -> dict:
     """MR/journal용 릴리즈 사다리 뷰. 이 변경이 사다리 어디에 놓이고 무엇이 남았나."""
     lad = ladder(config)
-    by_env = deploy_targets_by_env(graph, repo) if graph is not None else {}
+    app_map = getattr(config, "deploy_app_map", None)
+    by_env = deploy_targets_by_env(graph, repo, app_map) if graph is not None else {}
     stages = []
     for stage in lad:
         stages.append({**stage, "targets": by_env.get(stage["env"], []),

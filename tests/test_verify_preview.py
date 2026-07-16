@@ -29,7 +29,7 @@ class TestVerifyPreview(unittest.TestCase):
             with patch.object(V, "http_reachable", return_value=True), \
                  patch.object(V, "playwright_snapshot",
                               return_value={"ok": True, "snapshot": "x.png", "bytes": 123}):
-                report = V.verify(True, ["xgen-frontend"], Path(tmp),
+                report = V.verify(True, ["svc-frontend"], Path(tmp),
                                   preview_base="http://localhost:3100")
         self.assertTrue(report["preview_reachable"])
         self.assertEqual(report["snapshots"][0]["ok"], True)
@@ -37,7 +37,7 @@ class TestVerifyPreview(unittest.TestCase):
     def test_unreachable_records_note(self):
         with tempfile.TemporaryDirectory() as tmp:
             with patch.object(V, "http_reachable", return_value=False):
-                report = V.verify(True, ["xgen-frontend"], Path(tmp),
+                report = V.verify(True, ["svc-frontend"], Path(tmp),
                                   preview_base="http://localhost:59999")
         self.assertFalse(report["preview_reachable"])
         self.assertIn("자동 기동", report["note"])

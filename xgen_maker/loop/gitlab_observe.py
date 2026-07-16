@@ -48,7 +48,7 @@ def branches(config, repo: str, limit: int = 100) -> dict:
 
 
 def my_mrs(config, state: str = "all", limit: int = 15) -> list[dict]:
-    """본인(토큰 소유자=김진수) MR 이력."""
+    """본인(토큰 소유자) MR 이력."""
     data = _api(config, f"/merge_requests?scope=created_by_me&state={state}"
                         f"&per_page={limit}&order_by=updated_at")
     if not isinstance(data, list):

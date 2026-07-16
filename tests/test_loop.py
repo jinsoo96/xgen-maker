@@ -140,8 +140,12 @@ class TestJournalAndVerify(unittest.TestCase):
         self.assertEqual(slugify("fix graph refresh"), "fix-graph-refresh")
 
     def test_suggest_profiles(self):
-        self.assertEqual(suggest_profiles(["xgen-frontend", "xgen-core"]),
+        # config.stack_profile_map 주입 시 매핑, 미설정 시 레포명 identity
+        cfg = MakerConfig(stack_profile_map={"svc-frontend": "frontend", "svc-core": "core"})
+        self.assertEqual(suggest_profiles(["svc-frontend", "svc-core"], cfg),
                          ["core", "frontend"])
+        self.assertEqual(suggest_profiles(["svc-frontend", "svc-core"], None),
+                         ["svc-core", "svc-frontend"])  # identity
 
 
 if __name__ == "__main__":

@@ -245,7 +245,8 @@ class _SSEJournal:
                              if k in ("hits", "branch", "score", "env", "keywords",
                                       "affected", "nodes", "sha", "draft", "url", "reason",
                                       "error", "promotion", "target", "count", "next_manual",
-                                      "n", "phase", "files", "sandbox", "decision", "regression")},
+                                      "n", "phase", "files", "sandbox", "decision", "regression",
+                                      "source", "detail")},
                             ensure_ascii=False, default=str)[:180]
         self._q.put({"type": "event", "step": step, "status": status, "detail": detail})
 
@@ -359,8 +360,10 @@ class MakerWebHandler(BaseHTTPRequestHandler):
                         "argocd": argocd.list_apps() if argocd.available() else None})
         elif parsed.path == "/api/release":
             from .loop.release import release_view
-            repo = parse_qs(parsed.query).get("repo", ["xgen-core"])[0]
-            self._json(release_view(self.graph, repo, self.config.target_branch, self.config))
+            from .config import resolve_default_repo
+            repo = parse_qs(parsed.query).get("repo", [resolve_default_repo(self.config)])[0]
+            self._json(release_view(self.graph, repo, self.config.target_branch, self.config)
+                       if repo else {"error": "repo 미지정"})
         elif parsed.path == "/api/branches":
             from .loop.gitlab_observe import branches
             names = sorted((self.config.gitlab_projects or {}).keys())

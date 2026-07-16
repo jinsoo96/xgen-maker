@@ -11,7 +11,7 @@ from xgen_maker.loop.history import read_sessions
 
 class TestGitlabObserve(unittest.TestCase):
     def setUp(self):
-        self.cfg = MakerConfig(gitlab_projects={"xgen-frontend": "grp/frontend"})
+        self.cfg = MakerConfig(gitlab_projects={"svc-frontend": "grp/frontend"})
 
     def test_branches_needs_mapping(self):
         r = GO.branches(self.cfg, "unmapped-repo")
@@ -21,12 +21,12 @@ class TestGitlabObserve(unittest.TestCase):
         fake = [
             {"name": "develop", "protected": True, "commit": {}},
             {"name": "fix/task-1", "merged": False,
-             "commit": {"author_name": "김진수", "committed_date": "2026-07-06T00:00:00"}},
+             "commit": {"author_name": "Alice Kim", "committed_date": "2026-07-06T00:00:00"}},
             {"name": "feature/x", "merged": True,
-             "commit": {"author_name": "손성준", "committed_date": "2026-07-01T00:00:00"}},
+             "commit": {"author_name": "Bob Son", "committed_date": "2026-07-01T00:00:00"}},
         ]
         with patch.object(GO, "_api", return_value=fake):
-            r = GO.branches(self.cfg, "xgen-frontend")
+            r = GO.branches(self.cfg, "svc-frontend")
         self.assertEqual(r["release"], ["develop"])
         self.assertEqual(r["protected"], ["develop"])
         self.assertEqual(len(r["work_recent"]), 2)

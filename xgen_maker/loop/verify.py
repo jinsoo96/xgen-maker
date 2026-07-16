@@ -11,13 +11,11 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 
-PROFILE_MAP = {"xgen-frontend": "frontend", "xgen-workflow": "workflow",
-               "xgen-documents": "documents", "xgen-core": "core",
-               "xgen-mcp-station": "mcp"}
-
-
-def suggest_profiles(repos_touched: list[str]) -> list[str]:
-    return sorted({PROFILE_MAP[r] for r in repos_touched if r in PROFILE_MAP})
+def suggest_profiles(repos_touched: list[str], config=None) -> list[str]:
+    """레포 → 로컬 스택 프로파일. config.stack_profile_map(조직 서비스명이라 config 주입)
+    우선, 없으면 레포명 자체. 조직 서비스 매핑을 소스에 담지 않는다(public 안전)."""
+    mapping = getattr(config, "stack_profile_map", None) or {}
+    return sorted({mapping.get(r, r) for r in repos_touched if r})
 
 
 def docker_guard(max_running: int = 0) -> dict:
@@ -74,13 +72,13 @@ def http_reachable(url: str, timeout: int = 8) -> bool:
 
 
 def verify(enable: bool, repos_touched: list[str], session_dir: Path,
-           preview_base: str = "") -> dict:
+           preview_base: str = "", config=None) -> dict:
     """프리뷰 검증 — 이미 떠 있는 스택을 재사용한다(자동 기동은 RAM 가드로 안 함)."""
-    profiles = suggest_profiles(repos_touched)
+    profiles = suggest_profiles(repos_touched, config)
+    hint = f"수동: 로컬 스택을 프로파일 {','.join(profiles) or '(기본)'}로 기동해 확인"
     if not enable:
         return {"skipped": True, "reason": "enable_verify=False (리소스 가드 기본값)",
-                "suggested_profiles": profiles,
-                "manual": f"수동 검증: xgen-stack.ps1 up -Profiles {','.join(profiles) or 'core'}"}
+                "suggested_profiles": profiles, "manual": hint}
     report: dict = {"skipped": False, "profiles": profiles, "snapshots": []}
     if not preview_base:
         report.update({"skipped": True, "reason": "preview_base 미설정"})
@@ -91,6 +89,5 @@ def verify(enable: bool, repos_touched: list[str], session_dir: Path,
         snap = playwright_snapshot(preview_base, session_dir / "preview.png")
         report["snapshots"].append(snap)
     else:
-        report["note"] = ("preview_base 미도달 — 스택 자동 기동은 RAM 가드로 수행하지 않음. "
-                          f"수동: xgen-stack.ps1 up -Profiles {','.join(profiles) or 'core'}")
+        report["note"] = "preview_base 미도달 — 스택 자동 기동은 RAM 가드로 수행하지 않음. " + hint
     return report

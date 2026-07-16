@@ -1,10 +1,12 @@
-"""R20 배포 트리거 — dev 기준 설계, 실발사 금지 인터록 내장.
+"""배포 트리거 — dev 기준 설계, 실발사 금지 인터록 내장.
 
-오너 방침(2026-07-03): "dev 기준으로 하되 진짜 해놓진 말고 아직은."
-→ 모드 3단: off(기본) / dry_run(보낼 요청을 계획으로만 기록, 전송 0) / live.
+모드 3단: off(기본) / dry_run(보낼 요청을 계획으로만 기록, 전송 0) / live.
    live는 이중 인터록 — config.deploy_mode=="live" **그리고** 환경변수
    XGEN_MAKER_DEPLOY_LIVE=="1" 둘 다일 때만 실제 전송. 하나라도 빠지면 거부 기록.
-방식: MR 머지 후 target_branch(develop) 기준 GitLab 파이프라인 트리거(dev 배포 파이프라인).
+방식: MR 머지 후 target_branch 기준 GitLab 파이프라인 트리거.
+
+레포→Helm 앱 매핑은 config.deploy_app_map(.env/config 주입)로만 온다 — 조직의
+서비스명·인프라 구조를 소스에 담지 않는다(public 안전). 매핑 없으면 레포명=앱명 폴백.
 """
 from __future__ import annotations
 
@@ -20,16 +22,6 @@ from pathlib import Path
 
 from ..config import MakerConfig
 
-# 레포 → Helm values 앱 매핑 (xgen-infra k3s/helm-chart/values/<app>.yaml)
-_REPO_TO_APP = {
-    "xgen-core": "xgen-core", "xgen-workflow": "xgen-workflow",
-    "xgen-documents": "xgen-documents", "xgen-mcp-station": "xgen-mcp-station",
-    "xgen-model": "xgen-model", "xgen-workbench": "xgen-workbench",
-    "xgen-frontend": "xgen-frontend", "xgen-frontend-app": "xgen-frontend",
-    "xgen-frontend-lib": "xgen-frontend", "xgen-frontend-features": "xgen-frontend",
-    "xgen-backend-gateway": "xgen-backend-gateway",
-}
-
 
 def _find_helm() -> str | None:
     exe = shutil.which("helm")
@@ -43,8 +35,10 @@ def _find_helm() -> str | None:
     return None
 
 
-def app_for_repo(repo: str) -> str | None:
-    return _REPO_TO_APP.get(repo)
+def app_for_repo(repo: str, config: MakerConfig | None = None) -> str | None:
+    """레포→Helm 앱명. config.deploy_app_map 우선, 없으면 레포명 자체(identity)."""
+    mapping = getattr(config, "deploy_app_map", None) or {}
+    return mapping.get(repo, repo if repo else None)
 
 
 def deploy_render_test(config: MakerConfig, repo: str) -> dict:
@@ -53,7 +47,7 @@ def deploy_render_test(config: MakerConfig, repo: str) -> dict:
     Helm 차트를 tmp에 복사 → `helm template`로 매니페스트 렌더 → YAML 파싱 검증.
     깨진 values/템플릿/이미지태그 오류를 배포 전(=MR 전)에 잡는다. 통과해야 자신 있게 MR.
     """
-    app = app_for_repo(repo)
+    app = app_for_repo(repo, config)
     if app is None:
         return {"name": "deploy_render", "status": "skipped", "reason": f"'{repo}' → Helm 앱 매핑 없음"}
     infra = Path(getattr(config, "infra_path", "") or "")

@@ -60,9 +60,14 @@ class MakerConfig:
     verbose: bool = True                                   # 진행 로그 실시간 출력
     deploy_mode: str = "off"                               # off | dry_run | live (live=이중 인터록)
     deploy_env: str = "dev"
-    enable_deploy_test: bool = False                       # MR 전 배포 렌더 검증(T1, 상사님 tmp 방식)
+    enable_deploy_test: bool = False                       # MR 전 배포 렌더 검증
     infra_path: str = field(default_factory=lambda: os.environ.get(
         "XGEN_MAKER_INFRA_PATH", ""))                     # Helm 차트 위치(config/.env로 주입)
+    # 레포명 → Helm 앱명 / 로컬 스택 프로파일 매핑(조직 서비스명이라 소스 미포함, config로만).
+    # 미설정 시 레포명=앱명 폴백. frontend-* 여러 스코프를 앱 하나로 수렴시키는 등에 사용.
+    deploy_app_map: dict = field(default_factory=dict)     # {repo: helm_app}
+    stack_profile_map: dict = field(default_factory=dict)  # {repo: 로컬스택 프로파일}
+    default_repo: str = ""                                 # CLI/web 관측 기본 대상(미설정 시 config에서 유추)
     worklogs_dir: str = "worklogs"
     learnings_dir: str = "learnings"                       # 작업 학습 메모리(실수 방지 참고)
     # MAKER가 작업 대상(GitLab) 레포에 커밋할 때 강제할 저자 — 조직 정보라 env로만 주입(소스 미포함)
@@ -109,6 +114,17 @@ class MakerConfig:
         apply_to_env(auth)
         self.llm_base = auth.resolved_base()
         self.llm_model = auth.resolved_model()
+
+
+def resolve_default_repo(config) -> str:
+    """관측 명령(branches/release 등)의 기본 대상 — config.default_repo 우선,
+    없으면 gitlab_projects/repos의 첫 키. 조직 레포명을 소스에 박지 않기 위함."""
+    if getattr(config, "default_repo", ""):
+        return config.default_repo
+    for src in (getattr(config, "gitlab_projects", None), getattr(config, "repos", None)):
+        if src:
+            return sorted(src.keys())[0]
+    return ""
 
 
 def is_protected_branch(name: str) -> bool:

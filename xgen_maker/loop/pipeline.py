@@ -240,8 +240,22 @@ class MakerLoop:
                 repo_git.create_branch(branch, base_ref=base_ref)  # 최신 base에서 분기
             if base_ref and changed_since:
                 refresh_files(self.graph, repo, repo_path, changed_since)
+                # "최신 그래프로 작업" — 그래프가 갱신됐으니 착지 지도를 최신 그래프로 재계산.
+                # (안 하면 코드는 최신인데 지도만 fetch 이전 스냅샷 → 원칙 위배)
+                relanded = search(self.graph, query, k=8)
+                if relanded:
+                    landing = relanded
+                    top = landing[0]
+                    if top["repo"] == repo:  # 같은 레포일 때만(브랜치는 이미 만듦)
+                        impact_nodes = impact(self.graph, top["id"], depth=3)
+                        chain_nodes = retrieve_chain(self.graph, query, k=6, hops=2)["chain"]
+                # legacy_notes도 최신 코드(FETCH_HEAD 체크아웃)에서 다시 발췌 — "코드가 권위"
+                legacy_notes = self._legacy_notes(landing, repo_path)
+                if past:  # 학습 메모리 재주입(재발췌로 덮였으므로)
+                    legacy_notes = (as_prompt_block(past) + "\n\n" + legacy_notes).strip()
                 journal.event("fetch_latest", "ok", target=config.target_branch,
-                              sha=fetch_sha[:12], kg_refreshed=len(changed_since))
+                              sha=fetch_sha[:12], kg_refreshed=len(changed_since),
+                              relanded=bool(relanded))
         except GitOpsError as error:
             journal.event("branch", "fail", error=str(error))
             journal.close("branch_failed")
@@ -249,6 +263,7 @@ class MakerLoop:
                            "code": ErrorCode.GIT_DIRTY.value, "error": str(error)})
             return report
         journal.event("branch", "ok", branch=branch, base=base_branch, repo=repo)
+        report["branch"] = branch  # 재착지로 top이 바뀌어도 브랜치명은 최초 결정 유지
 
         # diff 기준은 '실제로 분기한 지점'(fetch한 최신 target sha). 진입 시 current_branch()는
         # 이전 실행이 남긴 feature 브랜치일 수 있어, 그걸 기준 삼으면 변경 목록이 오염된다.
@@ -313,7 +328,8 @@ class MakerLoop:
         report["judge"] = judge_result
 
         # ⑦-2 로컬 프리뷰 검증 (리소스 가드 내장)
-        verify_report = verify(config.enable_verify, [repo], journal.dir, config.preview_base)
+        verify_report = verify(config.enable_verify, [repo], journal.dir,
+                               config.preview_base, config)
         journal.event("verify", "skipped" if verify_report.get("skipped") else "ok",
                       **verify_report)
 
@@ -341,7 +357,7 @@ class MakerLoop:
         if config.enable_deploy_test:
             from .deploy import deploy_render_test
             from ..kg.extract_infra import deploy_targets
-            targets = deploy_targets(self.graph, repo)
+            targets = deploy_targets(self.graph, repo, config.deploy_app_map)
             if targets:
                 journal.event("deploy_test", "targets",
                               domains=[t["domain"] for t in targets if t["domain"]])

@@ -9,7 +9,7 @@ xgen-infra(K3s+Helm+ArgoCD)를 파싱해 배포 평면을 KG에 넣는다:
 - deploy_project --serves--> helm_app    (hasDomain=frontend → 도메인 주입)
 - helm_app --values_of--> helm_chart
 코드 연결(link_infra_to_code): helm_app <--deploys--> 동명 코드 레포 노드.
-그래서 "xgen-core 고치면 어느 도메인/프로젝트로 배포되나"를 그래프가 답한다.
+그래서 "svc-core 고치면 어느 도메인/프로젝트로 배포되나"를 그래프가 답한다.
 """
 from __future__ import annotations
 
@@ -116,14 +116,13 @@ def extract_infra(infra_root: str | Path, repo: str = "xgen-infra") -> Graph:
     return graph
 
 
-def deploy_targets(graph: Graph, repo: str) -> list[dict]:
+def deploy_targets(graph: Graph, repo: str, app_map: dict | None = None) -> list[dict]:
     """코드 레포 → 배포 대상(프로젝트·환경·도메인). LLM/MR이 '이 변경이 어디 배포되나' 인지.
 
     반환 [{project, env, domain, namespace}]. KG에 인프라 평면이 없으면 [].
+    app_map: 레포→helm앱 매핑(config.deploy_app_map). 조직 서비스명은 소스에 안 담고 주입.
     """
-    alias = {"xgen-frontend-app": "xgen-frontend", "xgen-frontend-lib": "xgen-frontend",
-             "xgen-frontend-features": "xgen-frontend"}
-    app_name = alias.get(repo, repo)
+    app_name = (app_map or {}).get(repo, repo)
     app_ids = {n["id"] for n in graph.nodes_by_kind("helm_app") if n["name"] == app_name}
     if not app_ids:
         return []
@@ -143,13 +142,13 @@ def deploy_targets(graph: Graph, repo: str) -> list[dict]:
     return out
 
 
-def link_infra_to_code(graph: Graph) -> int:
+def link_infra_to_code(graph: Graph, app_map: dict | None = None) -> int:
     """helm_app <--deploys--> 동명 코드 레포 노드. 반환 = 생성된 엣지 수.
 
-    코드 레포 매핑: frontend-* 스코프는 xgen-frontend 앱 하나로 수렴.
+    app_map(config.deploy_app_map): 여러 코드 스코프를 앱 하나로 수렴(예: frontend-*).
+    조직 서비스명을 소스에 담지 않는다.
     """
-    alias = {"xgen-frontend-app": "xgen-frontend", "xgen-frontend-lib": "xgen-frontend",
-             "xgen-frontend-features": "xgen-frontend"}
+    alias = app_map or {}
     apps = {n["name"]: n["id"] for n in graph.nodes_by_kind("helm_app")}
     code_repos = {n["name"] for n in graph.nodes_by_kind("repo")
                   if n["meta"].get("plane") != "infra"}

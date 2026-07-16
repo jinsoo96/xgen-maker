@@ -8,11 +8,11 @@ from xgen_maker.loop.learnings import record, retrieve, as_prompt_block, _all, a
 class TestLearnings(unittest.TestCase):
     def test_record_retrieve_relevance(self):
         with tempfile.TemporaryDirectory() as tmp:
-            record(tmp, "xgen-workflow", "harness/endpoints", "pitfall",
+            record(tmp, "svc-workflow", "harness/endpoints", "pitfall",
                    "harness endpoint 수정 시 locale_ko 확인")
-            record(tmp, "xgen-workflow", "service/quality", "fix",
+            record(tmp, "svc-workflow", "service/quality", "fix",
                    "품질평가는 stage2 라우팅 확인")
-            got = retrieve(tmp, "xgen-workflow", ["harness", "endpoint", "locale"])
+            got = retrieve(tmp, "svc-workflow", ["harness", "endpoint", "locale"])
             self.assertTrue(got)
             self.assertIn("locale", got[0]["note"])
             block = as_prompt_block(got)

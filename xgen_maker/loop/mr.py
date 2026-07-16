@@ -71,6 +71,7 @@ def build_mr_draft(query: str, intent: str, branch: str, target_branch: str,
 
 ## 품질 게이트
 - judge: **{judge_result.get('score')}** (θ={judge_result.get('theta')}, {judge_result.get('source')})
+{"- ⚠️ **휴리스틱 판정** — LLM judge 미가동(크기·집중도 기반 근사치). 실제 품질 평가 아님, 리뷰 필수." if judge_result.get('source') == 'heuristic' else ""}
 {chr(10).join(f"- {r}" for r in judge_result.get('reasons', []))}
 
 ## 릴리즈 사다리 (develop → stg → main)

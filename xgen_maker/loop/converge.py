@@ -144,7 +144,8 @@ def converge(config, repo_path: Path, repo: str, query: str, intent: str,
             judge_result = judge(config, query, diff_text, changed,
                                  checks=checks["summary"])
             journal.event("judge", "pass" if judge_result.get("passed") else "fail",
-                          n=iteration, score=judge_result.get("score"))
+                          n=iteration, score=judge_result.get("score"),
+                          source=judge_result.get("source"))  # heuristic vs llm 정직 노출
 
         # ④ UI 수렴 신호 — 코드·품질 통과 후 UI 검증. 문제면 vision issues를 되먹여 retry.
         ui = {"status": "skipped"}
