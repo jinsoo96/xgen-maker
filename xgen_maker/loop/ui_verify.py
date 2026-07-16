@@ -29,22 +29,29 @@ def authed_snapshot(base: str, email: str, password: str, routes: list[str],
     import shutil
     if shutil.which("node") is None or not _PW_MODULES.is_dir():
         return {"ok": False, "reason": "node/playwright 미설치 — 인증 스냅샷 불가"}
+    import tempfile
     out_dir.mkdir(parents=True, exist_ok=True)
     cfg = {"base": base, "email": email, "password": password,
            "routes": routes, "outDir": str(out_dir), "waitMs": 4000}
-    cfg_path = out_dir / "_pwcfg.json"
-    cfg_path.write_text(json.dumps(cfg), encoding="utf-8")
+    # 비밀번호는 worklogs(공유·검토 대상)에 남기지 않는다 — 시스템 임시파일에 쓰고 반드시 삭제
+    handle, tmp_name = tempfile.mkstemp(prefix="maker-pw-", suffix=".json")
+    cfg_path = Path(tmp_name)
     env = dict(os.environ, NODE_PATH=str(_PW_MODULES))
     try:
-        result = subprocess.run(["node", str(_PW_LOGIN), str(cfg_path)],
-                                capture_output=True, text=True, encoding="utf-8",
-                                errors="replace", timeout=timeout, env=env)
-    except (subprocess.TimeoutExpired, OSError) as error:
-        return {"ok": False, "reason": str(error)[:200]}
-    try:
-        return json.loads((result.stdout or "").strip() or "{}")
-    except json.JSONDecodeError:
-        return {"ok": False, "reason": (result.stderr or result.stdout or "")[-300:]}
+        with os.fdopen(handle, "w", encoding="utf-8") as f:
+            json.dump(cfg, f)
+        try:
+            result = subprocess.run(["node", str(_PW_LOGIN), str(cfg_path)],
+                                    capture_output=True, text=True, encoding="utf-8",
+                                    errors="replace", timeout=timeout, env=env)
+        except (subprocess.TimeoutExpired, OSError) as error:
+            return {"ok": False, "reason": str(error)[:200]}
+        try:
+            return json.loads((result.stdout or "").strip() or "{}")
+        except json.JSONDecodeError:
+            return {"ok": False, "reason": (result.stderr or result.stdout or "")[-300:]}
+    finally:
+        cfg_path.unlink(missing_ok=True)
 
 
 def affected_routes(graph, changed_files: list[str], repo: str,

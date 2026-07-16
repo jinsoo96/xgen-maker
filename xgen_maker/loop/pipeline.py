@@ -78,7 +78,36 @@ class MakerLoop:
         return "\n\n".join(notes)
 
     # ---- 메인 ----
+    def _cleanup_worktree(self) -> None:
+        """격리 worktree를 어떤 종료 경로에서도 반드시 정리(브랜치·커밋은 보존됨).
+
+        누수되면 (a) temp 디스크 축적 (b) 브랜치가 체크아웃 상태로 잡혀 rollback의
+        `git branch -D`가 실패 (c) 같은 브랜치명 재실행 충돌.
+        """
+        path, main_git = self._worktree, self._main_git
+        self._worktree = self._main_git = None
+        if path is None:
+            return
+        try:
+            if main_git is not None:
+                main_git.remove_worktree(path)
+        except Exception:  # noqa: BLE001 — 정리 실패가 결과를 덮지 않게
+            pass
+        try:
+            import shutil
+            shutil.rmtree(path, ignore_errors=True)
+        except Exception:  # noqa: BLE001
+            pass
+
     def run(self, query: str) -> dict:
+        self._worktree = None
+        self._main_git = None
+        try:
+            return self._run_inner(query)
+        finally:
+            self._cleanup_worktree()
+
+    def _run_inner(self, query: str) -> dict:
         config = self.config
         journal = self._journal_factory(config.worklogs_dir, query, verbose=config.verbose)
         from .cost import CostTracker
@@ -199,9 +228,11 @@ class MakerLoop:
                     journal.event("fetch_latest", "skipped", reason=str(fe)[:100])
             worktree_path = None
             main_git = repo_git
+            self._main_git = main_git
             if getattr(config, "isolate_worktree", False):
                 import tempfile
                 worktree_path = Path(tempfile.mkdtemp(prefix="maker-wt-"))
+                self._worktree = worktree_path  # 실패/조기return에도 finally가 정리
                 repo_git = main_git.add_worktree(worktree_path, branch, base_ref or "HEAD")
                 repo_path = worktree_path  # 이후 구현·검증은 격리 사본에서
                 journal.event("worktree", "ok", path=str(worktree_path))
@@ -219,9 +250,13 @@ class MakerLoop:
             return report
         journal.event("branch", "ok", branch=branch, base=base_branch, repo=repo)
 
+        # diff 기준은 '실제로 분기한 지점'(fetch한 최신 target sha). 진입 시 current_branch()는
+        # 이전 실행이 남긴 feature 브랜치일 수 있어, 그걸 기준 삼으면 변경 목록이 오염된다.
+        diff_base = fetch_sha or base_branch
+
         # ⑥~⑧ 수렴 루프 — 구현 → 샌드박스+checks → judge → 실패 시 되먹여 재시도(통과까지)
         conv = converge(config, repo_path, repo, query, intent, landing, chain_nodes,
-                        legacy_notes, base_branch, repo_git, journal, cost=cost,
+                        legacy_notes, diff_base, repo_git, journal, cost=cost,
                         graph=self.graph)
         report["iterations"] = conv["iterations"]
         report["converged"] = conv["converged"]
@@ -377,8 +412,9 @@ class MakerLoop:
         # ⑩ 사후: KG 증분 갱신 + journal
         try:
             refreshed = refresh_files(self.graph, repo, repo_path, changed)
-            # repo_heads 전진 — 다음 kg sync가 이번 커밋 이후만 재diff(중복 재추출 방지)
-            new_head = git_head(repo_path)
+            # repo_heads 전진 — 반드시 **메인 클론**의 HEAD로. worktree의 feature HEAD를 넣으면
+            # 다음 kg sync가 메인 클론에서 그 sha를 못 봐 역방향 diff로 KG를 되돌려버린다.
+            new_head = git_head(main_git.path)
             if new_head:
                 self.graph.meta.setdefault("repo_heads", {})[repo] = new_head
             self.graph.save(config.kg_path)
@@ -388,13 +424,10 @@ class MakerLoop:
         # 성공 학습 — 이 영역에서 통과한 접근 기록(다음 작업 참고)
         record(config.learnings_dir, repo, area, "fix",
                f"'{query[:60]}' → {conv['iterations']}회 수렴 통과, 변경 {len(changed)}파일", query)
-        # 격리 worktree 정리(브랜치·커밋은 push로 보존됨)
+        # 격리 worktree 정리(브랜치·커밋은 보존됨) — 실패 경로는 run()의 finally가 처리
         if worktree_path is not None:
-            try:
-                main_git.remove_worktree(worktree_path)
-                journal.event("worktree", "removed", path=str(worktree_path))
-            except GitOpsError:
-                pass
+            self._cleanup_worktree()
+            journal.event("worktree", "removed", path=str(worktree_path))
         report["cost"] = cost.summary()
         journal.event("cost", "ok", **cost.summary())
         journal.close("mr_prepared")

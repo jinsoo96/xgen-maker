@@ -114,7 +114,9 @@ _PAGE = """<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
  <button class="act" id="go">실행</button></form>
 <script>
 const log=document.getElementById('log'), q=document.getElementById('q'), go=document.getElementById('go');
-const esc=s=>String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// 속성/클래스에 넣는 값은 [a-z0-9_-]만 허용(뜻밖의 badge 클래스·주입 차단)
+const cls=s=>String(s==null?'':s).replace(/[^a-zA-Z0-9_-]/g,'');
 function line(cls,txt,mark){const d=document.createElement('div');d.className='ev '+cls;
  if(mark){const s=document.createElement('span');s.className='mk';s.textContent=mark;d.appendChild(s);}
  d.appendChild(document.createTextNode(txt));log.appendChild(d);log.scrollTop=log.scrollHeight;}
@@ -139,22 +141,26 @@ document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
  b.classList.add('on'); document.getElementById('tab-'+b.dataset.t).classList.add('on');
  if(b.dataset.t!=='run' && !loaded[b.dataset.t]){loaded[b.dataset.t]=1; render(b.dataset.t);}
 });
+function jget(url){return fetch(url).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json();});}
+function tabErr(el){return e=>{el.innerHTML='<div class=muted>불러오기 실패: '+esc(e&&e.message||e)+' — 서버/설정 확인</div>';};}
 function render(t){
  const el=document.getElementById('tab-'+t);
- if(t==='history') fetch('/api/history').then(r=>r.json()).then(d=>{
+ if(t==='history') jget('/api/history').then(d=>{
   el.innerHTML='<h3>MAKER 작업 이력</h3><table><tr><th>결과</th><th>쿼리</th><th>브랜치</th><th>env</th><th>MR</th></tr>'+
-   d.sessions.map(s=>`<tr><td><span class="badge ${s.outcome}">${esc(s.outcome)}</span></td><td>${esc(s.query).slice(0,60)}</td><td class="muted">${esc(s.branch)}</td><td>${esc(s.env)}</td><td>${s.mr?`<a href="${esc(s.mr)}" target=_blank>MR</a>`:''}</td></tr>`).join('')+'</table>';});
- if(t==='learn') fetch('/api/learnings').then(r=>r.json()).then(d=>{
+   d.sessions.map(s=>`<tr><td><span class="badge ${cls(s.outcome)}">${esc(s.outcome)}</span></td><td>${esc(s.query).slice(0,60)}</td><td class="muted">${esc(s.branch)}</td><td>${esc(s.env)}</td><td>${s.mr?`<a href="${esc(s.mr)}" target=_blank>MR</a>`:''}</td></tr>`).join('')+'</table>';}).catch(tabErr(el));
+ if(t==='learn') jget('/api/learnings').then(d=>{
   let h='<h3>작업 학습 메모리 <span class=muted>(하네스가 다음 작업 시 참고 — 실수 방지)</span></h3>';
   if(!d.learnings.length){h+='<div class=muted>아직 없음. 작업이 쌓이면 실패/성공 교훈이 자동 기록됩니다.</div>';}
   else h+='<table><tr><th>종류</th><th>레포</th><th>영역</th><th>교훈</th></tr>'+
-   d.learnings.map(e=>`<tr><td><span class="badge ${esc(e.kind)}">${esc(e.kind)}</span></td><td class=muted>${esc(e.repo)}</td><td class=muted>${esc(e.area)}</td><td>${esc(e.note)}</td></tr>`).join('')+'</table>';
-  el.innerHTML=h;});
- if(t==='mrs') fetch('/api/mrs').then(r=>r.json()).then(d=>{
-  const row=m=>`<tr><td>!${m.iid}</td><td><span class="badge ${m.state}">${m.state}</span></td><td>${esc(m.source)}→${esc(m.target)}</td><td>${esc(m.title).slice(0,50)}</td><td><a href="${esc(m.url)}" target=_blank>열기</a></td></tr>`;
+   d.learnings.map(e=>`<tr><td><span class="badge ${cls(e.kind)}">${esc(e.kind)}</span></td><td class=muted>${esc(e.repo)}</td><td class=muted>${esc(e.area)}</td><td>${esc(e.note)}</td></tr>`).join('')+'</table>';
+  el.innerHTML=h;}).catch(tabErr(el));
+ if(t==='mrs') jget('/api/mrs').then(d=>{
+  const row=m=>`<tr><td>!${esc(m.iid)}</td><td><span class="badge ${cls(m.state)}">${esc(m.state)}</span></td><td>${esc(m.source)}→${esc(m.target)}</td><td>${esc(m.title).slice(0,50)}</td><td><a href="${esc(m.url)}" target=_blank>열기</a></td></tr>`;
   el.innerHTML='<h3>MAKER가 만든 MR</h3><table><tr><th>#</th><th>상태</th><th>브랜치</th><th>제목</th><th></th></tr>'+(d.maker.map(row).join('')||'<tr><td colspan=5 class=muted>없음</td></tr>')+'</table>'+
-   '<h3>내 MR (전체)</h3><table><tr><th>#</th><th>상태</th><th>브랜치</th><th>제목</th><th></th></tr>'+d.mine.map(row).join('')+'</table>';});
+   '<h3>내 MR (전체)</h3><table><tr><th>#</th><th>상태</th><th>브랜치</th><th>제목</th><th></th></tr>'+d.mine.map(row).join('')+'</table>';}).catch(tabErr(el));
  if(t==='branches'){
+  // window.__repos가 /api/info 미도착으로 비어있을 수 있음 → 없으면 즉시 채워서 렌더
+  if(!(window.__repos&&window.__repos.length)){jget('/api/info').then(d=>{window.__repos=d.repo_names||[];loaded['branches']=0;render('branches');}).catch(tabErr(el));return;}
   const names=(window.__repos||[]);
   const sel='<label>레포 <select id="brepo">'+(names.length?names.map(n=>`<option>${esc(n)}</option>`).join(''):'<option value="">(config에 gitlab_projects 없음)</option>')+'</select></label>';
   el.innerHTML='<h3>브랜치 / 릴리즈 <span class=muted>(내가·MAKER가 만든 작업 브랜치 + 승격 경로)</span></h3>'+sel+'<div id="bbody" class=muted style="margin-top:12px">불러오는 중…</div>';
@@ -173,7 +179,7 @@ function render(t){
   document.getElementById('brepo').onchange=load; load();
   return;
  }
- if(t==='diag') fetch('/api/diagnostics').then(r=>r.json()).then(d=>{
+ if(t==='diag') jget('/api/diagnostics').then(d=>{
   const yn=v=>v?'<span class="badge ok">OK</span>':'<span class="badge fail">아니오</span>';
   const c=d.sdk.contract||{}; const inst=d.sdk.installed||{};
   const miss=(c.missing||[]).length;
@@ -194,13 +200,13 @@ function render(t){
   const cap=(d.catalog||{}).capabilities||{};
   h+='<h4>능력 카탈로그</h4><table>'+Object.keys(cap).map(k=>`<tr><td class=muted>${esc(k)}</td><td>${esc((cap[k]||[]).join(' · '))}</td></tr>`).join('')+'</table>';
   h+='<div class=muted style="margin-top:10px">경계: '+esc((d.catalog||{}).boundary||'')+'</div>';
-  el.innerHTML=h;});
- if(t==='deploy') fetch('/api/status').then(r=>r.json()).then(d=>{
+  el.innerHTML=h;}).catch(tabErr(el));
+ if(t==='deploy') jget('/api/status').then(d=>{
   let h='<h3>릴리즈 사다리 (develop→stg→main)</h3><table><tr><th>브랜치</th><th>환경</th><th>URL</th><th>Jenkins</th></tr>'+
    d.ladder.map(s=>`<tr><td>${esc(s.branch)}</td><td>${esc(s.env)}</td><td><a href="${esc(s.url)}" target=_blank>${esc(s.url)}</a></td><td class=muted>${esc(s.jenkins)}</td></tr>`).join('')+'</table>';
   h+='<h3>Jenkins</h3>'+(d.jenkins?('<table><tr><th>job</th><th>env</th></tr>'+d.jenkins.map(j=>`<tr><td>${esc(j.name)}</td><td>${esc(j.env)}</td></tr>`).join('')+'</table>'):'<div class=muted>.env에 XGEN_MAKER_JENKINS_* 없음</div>');
-  h+='<h3>ArgoCD 배포 상태 <span class=muted>(read-only — MAKER는 배포 안 함)</span></h3>'+(d.argocd?('<table><tr><th>app</th><th>sync</th><th>health</th></tr>'+d.argocd.map(a=>`<tr><td>${esc(a.name)}</td><td><span class="badge ${esc(a.sync)}">${esc(a.sync)}</span></td><td class="${esc(a.health)}">${esc(a.health)}</td></tr>`).join('')+'</table>'):'<div class=muted>.env에 XGEN_MAKER_ARGOCD_* 없음</div>');
-  el.innerHTML=h;});
+  h+='<h3>ArgoCD 배포 상태 <span class=muted>(read-only — MAKER는 배포 안 함)</span></h3>'+(d.argocd?('<table><tr><th>app</th><th>sync</th><th>health</th></tr>'+d.argocd.map(a=>`<tr><td>${esc(a.name)}</td><td><span class="badge ${cls(a.sync)}">${esc(a.sync)}</span></td><td class="${cls(a.health)}">${esc(a.health)}</td></tr>`).join('')+'</table>'):'<div class=muted>.env에 XGEN_MAKER_ARGOCD_* 없음</div>');
+  el.innerHTML=h;}).catch(tabErr(el));
 }
 // 실행 (SSE)
 document.getElementById('f').addEventListener('submit',e=>{
@@ -247,6 +253,11 @@ class _SSEJournal:
         return self._real.close(outcome)
 
 
+# 공유 Graph는 스레드 간 가변 — sync/run/info가 겹치면 KG 손상·dict 변경 중 순회 크래시.
+# 대시보드는 단일 사용자용이므로 그래프를 만지는 구간을 직렬화한다.
+_GRAPH_LOCK = threading.Lock()
+
+
 def _run_query(config: MakerConfig, graph: Graph, query: str, q: queue.Queue) -> None:
     from .loop.pipeline import MakerLoop
     from .loop.journal import Journal
@@ -255,7 +266,8 @@ def _run_query(config: MakerConfig, graph: Graph, query: str, q: queue.Queue) ->
         def factory(worklogs_dir, qtext, verbose=False):
             return _SSEJournal(Journal(worklogs_dir, qtext, verbose=False), q)
         loop = MakerLoop(config, graph=graph, journal_factory=factory)
-        report = loop.run(query)
+        with _GRAPH_LOCK:  # 공유 그래프 mutate/save 직렬화(Sync·동시 실행과 경합 방지)
+            report = loop.run(query)
         q.put({"type": "result", "report": report})
     except Exception as error:  # noqa: BLE001
         q.put({"type": "error", "message": str(error)[:300]})
@@ -271,37 +283,53 @@ class MakerWebHandler(BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
+        # 어떤 핸들러가 예외를 던져도 스레드가 죽지 않게 500으로 감싼다(빈 응답/hang 방지)
+        try:
+            self._route()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except Exception as error:  # noqa: BLE001
+            try:
+                self._json({"ok": False, "error": str(error)[:200]})
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _route(self):
         parsed = urlparse(self.path)
         if parsed.path == "/":
             self._html(_PAGE)
         elif parsed.path == "/api/info":
-            names = sorted((self.config.gitlab_projects or {}).keys()
-                           or (self.config.repos or {}).keys()
-                           or {n["repo"] for n in self.graph.nodes.values()})
-            self._json({"nodes": len(self.graph.nodes),
+            with _GRAPH_LOCK:  # 그래프 순회 중 다른 스레드가 mutate하면 RuntimeError
+                names = sorted((self.config.gitlab_projects or {}).keys()
+                               or (self.config.repos or {}).keys()
+                               or {n["repo"] for n in self.graph.nodes.values()})
+                info = {"nodes": len(self.graph.nodes),
                         "repos": len({n["repo"] for n in self.graph.nodes.values()}),
-                        "repo_names": names})
+                        "repo_names": names}
+            self._json(info)
         elif parsed.path == "/api/sync":
             # 그래프 최신화 — git 변경분만 재추출(CLI maker kg sync와 동일 로직)
             from .kg.sync import sync_all
             from .kg.enrich import enrich_deterministic
             try:
-                results = sync_all(self.graph)
-                total = sum(r.get("changed", 0) for r in results)
-                if total or any(r.get("action") for r in results):
-                    enrich_deterministic(self.graph)
-                    self.graph.save(self.config.kg_path)
-                    # CLI kg sync와 동일 — 사람 편집(overlay)을 재적용해 유실 방지
-                    from .kg.overlay import load_overlay, apply_overlay
-                    from pathlib import Path as _Path
-                    overlay = load_overlay(_Path(self.config.kg_path).parent / "overlay.json")
-                    if overlay["node_overrides"] or overlay["custom_edges"]:
-                        apply_overlay(self.graph, overlay)
+                with _GRAPH_LOCK:  # 실행 중인 루프의 그래프 갱신/저장과 겹치지 않게
+                    results = sync_all(self.graph)
+                    total = sum(r.get("changed", 0) for r in results)
+                    if total or any(r.get("action") for r in results):
+                        enrich_deterministic(self.graph)
                         self.graph.save(self.config.kg_path)
-                self._json({"ok": True, "changed": total,
-                            "nodes": len(self.graph.nodes),
-                            "per_repo": [{"repo": r.get("repo"), "changed": r.get("changed", 0),
-                                          "action": r.get("action")} for r in results]})
+                        # CLI kg sync와 동일 — 사람 편집(overlay)을 재적용해 유실 방지
+                        from .kg.overlay import load_overlay, apply_overlay
+                        from pathlib import Path as _Path
+                        overlay = load_overlay(_Path(self.config.kg_path).parent / "overlay.json")
+                        if overlay["node_overrides"] or overlay["custom_edges"]:
+                            apply_overlay(self.graph, overlay)
+                            self.graph.save(self.config.kg_path)
+                    payload = {"ok": True, "changed": total,
+                               "nodes": len(self.graph.nodes),
+                               "per_repo": [{"repo": r.get("repo"), "changed": r.get("changed", 0),
+                                             "action": r.get("action")} for r in results]}
+                self._json(payload)
             except Exception as error:  # noqa: BLE001
                 self._json({"ok": False, "error": str(error)[:200]})
         elif parsed.path == "/api/run":
@@ -340,25 +368,34 @@ class MakerWebHandler(BaseHTTPRequestHandler):
             repo = parse_qs(parsed.query).get("repo", [default])[0]
             self._json(branches(self.config, repo) if repo else {"error": "repo 미지정"})
         elif parsed.path == "/api/diagnostics":
-            # 읽기전용 자가진단 — SDK 계약/드리프트 + 엔진 stage 등록 상태(로컬만, 네트워크 X)
-            from .sdk_check import installed_versions, contract_probe, maker_catalog
-            from .engine_stage import register, _load_engine
-            from .loop.converge import HAS_HARNESS
-            eng = _load_engine()
-            self._json({
-                "sdk": {"installed": installed_versions(), "contract": contract_probe()},
-                "engine": register(),
-                "engine_levelb": eng is not None and all(
-                    hasattr(eng, n) for n in
-                    ("EventEmitter", "InMemorySessionStore", "PipelineState", "save_session")),
-                "catalog": maker_catalog(),
-                "verification": {
-                    "sandbox_isolated": bool(HAS_HARNESS),  # [harness] 있어야 진짜 격리
-                    "strict_regression": bool(getattr(self.config, "strict_regression", False))},
-                "git_author": {"name": self.config.git_author_name,
-                               "email_set": bool(self.config.git_author_email)}})
+            self._json(self._diagnostics())
         else:
             self.send_error(404)
+
+    # 진단은 register()(레지스트리 변형)·contract_probe()(샌드박스 서브프로세스)를 타므로
+    # GET마다 재실행하지 않고 클래스 레벨에서 1회 계산 후 캐시(설정 불변 가정).
+    _diag_cache = None
+
+    def _diagnostics(self) -> dict:
+        if MakerWebHandler._diag_cache is not None:
+            return MakerWebHandler._diag_cache
+        from .sdk_check import installed_versions, contract_probe, maker_catalog
+        from .engine_stage import register, _load_engine
+        from .loop.converge import HAS_HARNESS
+        eng = _load_engine()
+        MakerWebHandler._diag_cache = {
+            "sdk": {"installed": installed_versions(), "contract": contract_probe()},
+            "engine": register(),
+            "engine_levelb": eng is not None and all(
+                hasattr(eng, n) for n in
+                ("EventEmitter", "InMemorySessionStore", "PipelineState", "save_session")),
+            "catalog": maker_catalog(),
+            "verification": {
+                "sandbox_isolated": bool(HAS_HARNESS),
+                "strict_regression": bool(getattr(self.config, "strict_regression", False))},
+            "git_author": {"name": self.config.git_author_name,
+                           "email_set": bool(self.config.git_author_email)}}
+        return MakerWebHandler._diag_cache
 
     def _html(self, body: str):
         data = body.encode("utf-8")
@@ -410,7 +447,8 @@ class MakerWebHandler(BaseHTTPRequestHandler):
                 break
 
 
-_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1", ""}
+# ""(빈 호스트)는 ThreadingHTTPServer가 0.0.0.0으로 바인드하므로 loopback이 아니다.
+_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
 def serve(config_path: str | None, host: str = "127.0.0.1", port: int = 8760) -> None:

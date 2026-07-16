@@ -41,6 +41,24 @@ def _origin_url(repo_path) -> str:
         return ""
 
 
+def origin_project_path(origin: str) -> str:
+    """origin URL에서 'group/repo' 경로만 정규화 추출.
+
+    https://user:tok@host/grp/repo.git · git@host:grp/repo.git · ssh://host/grp/repo 모두 지원.
+    부분문자열 비교는 fork('grp/repo-fork')를 통과시키므로 정확 비교용 경로를 뽑는다.
+    """
+    o = (origin or "").strip().rstrip("/")
+    if o.lower().endswith(".git"):
+        o = o[:-4]
+    if "://" in o:                       # scheme://[creds@]host/path
+        o = o.split("://", 1)[1]
+        o = o.split("@")[-1]             # 자격 제거
+        o = o.split("/", 1)[1] if "/" in o else ""
+    elif ":" in o:                       # scp 형식 git@host:grp/repo
+        o = o.split(":", 1)[1]
+    return o.strip("/").lower()
+
+
 def authorize(config, repo: str, min_level: int = DEVELOPER,
               timeout: int = 20, repo_path=None) -> dict:
     """act(실 push/MR) 전 인가 확인. 반환 {ok, user?, level?, project?, reason?}.
@@ -60,11 +78,12 @@ def authorize(config, repo: str, min_level: int = DEVELOPER,
     if not project:
         return {"ok": False, "reason":
                 f"'{repo}' → gitlab_projects 매핑 없음 — 대상 프로젝트 미지정"}
-    # 로컬 클론의 origin이 인가 대상 프로젝트를 실제로 가리키는지(다른 레포로 push 방지)
-    if repo_path is not None:
+    # 로컬 클론의 origin이 인가 대상 프로젝트를 실제로 가리키는지(다른 레포·fork로 push 방지)
+    # 숫자 project id는 URL에 안 나타나므로 경로 비교를 건너뛴다(GitLab 권한이 최종 방어).
+    if repo_path is not None and not str(project).isdigit():
         origin = _origin_url(repo_path)
         norm = str(project).strip("/").lower()
-        if origin and norm not in origin.lower().replace(".git", ""):
+        if origin and origin_project_path(origin) != norm:
             return {"ok": False, "project": project, "reason":
                     f"로컬 origin({origin[:60]})이 인가 프로젝트 '{project}'와 불일치 — push 대상 오염 의심"}
 

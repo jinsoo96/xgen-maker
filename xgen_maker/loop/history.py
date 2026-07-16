@@ -26,11 +26,11 @@ def read_sessions(worklogs_dir: str | Path, limit: int = 20) -> list[dict]:
             continue
         if not events:
             continue
-        query = next((e.get("query") for e in events if e["step"] == "session_start"), "")
-        outcome = next((e["status"] for e in events if e["step"] == "session_end"), "?")
-        branch = next((e.get("branch") for e in events if e["step"] == "branch"), "")
-        mr = next((e.get("url") for e in events if e["step"] == "mr_create" and e.get("url")), "")
-        env = next((e.get("env") for e in events if e["step"] == "release"), "")
+        query = next((e.get("query") for e in events if e.get("step") == "session_start"), "")
+        outcome = next((e.get("status") for e in events if e.get("step") == "session_end"), "?")
+        branch = next((e.get("branch") for e in events if e.get("step") == "branch"), "")
+        mr = next((e.get("url") for e in events if e.get("step") == "mr_create" and e.get("url")), "")
+        env = next((e.get("env") for e in events if e.get("step") == "release"), "")
         sessions.append({"session": session_dir.name, "query": query,
                          "outcome": outcome, "branch": branch, "mr": mr,
                          "env": env, "steps": len(events)})

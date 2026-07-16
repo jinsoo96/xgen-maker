@@ -5,10 +5,19 @@
 """
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
 from ..config import is_allowed_branch, is_protected_branch, branch_name_issue
+
+# https://user:TOKEN@host — 인증 URL의 자격을 마스킹(에러/로그/저널로 새는 것 방지)
+_CRED_URL = re.compile(r"(?P<scheme>[a-zA-Z][a-zA-Z0-9+.-]*://)(?P<user>[^:/@\s]+):(?P<secret>[^@\s]+)@")
+
+
+def redact(text: str) -> str:
+    """문자열 속 인증 URL의 비밀값을 ***로 치환."""
+    return _CRED_URL.sub(lambda m: f"{m['scheme']}{m['user']}:***@", str(text))
 
 
 class GitOpsError(RuntimeError):
@@ -21,11 +30,19 @@ class GitRepo:
         if not (self.path / ".git").exists():
             raise GitOpsError(f"git 저장소가 아님: {self.path}")
 
-    def _run(self, *args: str, check: bool = True) -> str:
-        result = subprocess.run(["git", *args], cwd=self.path, capture_output=True,
-                                text=True, encoding="utf-8", errors="replace")
+    def _run(self, *args: str, check: bool = True, timeout: int = 300) -> str:
+        try:
+            result = subprocess.run(
+                ["git", *args], cwd=self.path, capture_output=True,
+                text=True, encoding="utf-8", errors="replace",
+                timeout=timeout,
+                # 자격 프롬프트로 무기한 blocking되지 않게(웹 데몬 스레드 보호)
+                stdin=subprocess.DEVNULL)
+        except subprocess.TimeoutExpired:
+            raise GitOpsError(redact(f"git {' '.join(args)} 타임아웃({timeout}s)")) from None
         if check and result.returncode != 0:
-            raise GitOpsError(f"git {' '.join(args)} 실패: {result.stderr.strip()}")
+            # args·stderr 모두 마스킹 — 토큰이 저널/SUMMARY/report로 새지 않게
+            raise GitOpsError(redact(f"git {' '.join(args)} 실패: {result.stderr.strip()}"))
         return result.stdout
 
     def current_branch(self) -> str:

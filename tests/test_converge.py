@@ -95,15 +95,12 @@ class TestConvergenceLoop(unittest.TestCase):
         # 스텁이 프롬프트/마커를 repo에서 읽으려면 cwd=repo여야 함 — run_agent는 cwd=repo_path.
         # 프롬프트 파일은 세션 dir에 쓰이므로, 스텁은 repo에 복사된 마커만 사용하게 조정.
         report = MakerLoop(self.config).run("greet 함수의 이름 처리 버그 고쳐줘")
-        # 1회차 구문오류 → retry → 2회차 수정 → 수렴
-        self.assertIn(report["outcome"], ("mr_prepared", "checks_failed"))
-        if report["outcome"] == "mr_prepared":
-            self.assertTrue(report["converged"])
-            self.assertGreaterEqual(report["iterations"], 2)
-
-
-if __name__ == "__main__":
-    unittest.main()
+        # 1회차 구문오류(py_compile은 항상 실행) → retry → 2회차 수정 → 수렴.
+        # 자가수정이 실제로 동작해야 하므로 mr_prepared를 단정(회귀 마스킹 방지).
+        self.assertEqual(report["outcome"], "mr_prepared",
+                         f"self-heal이 수렴에 실패: {report.get('outcome')} / {report.get('failed')}")
+        self.assertTrue(report["converged"])
+        self.assertGreaterEqual(report["iterations"], 2)
 
 
 class TestUiConvergeSignal(unittest.TestCase):
@@ -129,3 +126,7 @@ class TestUiConvergeSignal(unittest.TestCase):
         d = decide(self._ck(False), self._sb("passed"), {"passed": True}, 1, 3,
                    ui={"status": "passed"})
         self.assertEqual(d, "stop")
+
+
+if __name__ == "__main__":
+    unittest.main()

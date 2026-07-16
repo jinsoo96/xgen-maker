@@ -784,4 +784,13 @@ def main(argv: list[str] | None = None) -> None:
     p.set_defaults(func=cmd_deploy)
 
     args = parser.parse_args(argv)
-    args.func(args)
+    cfg_path = getattr(args, "config", None)
+    if cfg_path and not Path(cfg_path).is_file():
+        parser.error(f"config 파일 없음: {cfg_path} "
+                     "(maker.config.example.json을 복사해 만드세요)")
+    try:
+        args.func(args)
+    except json.JSONDecodeError as error:
+        parser.error(f"config JSON 파싱 실패({cfg_path}): {error}")
+    except FileNotFoundError as error:
+        parser.error(str(error))

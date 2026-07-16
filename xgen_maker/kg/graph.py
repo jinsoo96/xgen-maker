@@ -72,11 +72,33 @@ class Graph:
 
     # ---- 영속화 ----
     def save(self, path: str | Path) -> None:
+        """원자적 저장 — 임시파일에 쓰고 os.replace로 교체.
+
+        동시 save(웹 Sync + 루프 사후 갱신)가 겹쳐도 반쯤 쓰인 KG 파일이 남지 않는다.
+        """
+        import os
+        import tempfile
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = {"meta": self.meta, "stats": self.stats(),
                    "nodes": list(self.nodes.values()), "edges": self.edges}
-        path.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
+        import time
+        handle, tmp_name = tempfile.mkstemp(dir=str(path.parent), suffix=".kgtmp")
+        try:
+            with os.fdopen(handle, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=1)
+            # 원자적 교체. Windows에선 대상이 동시에 열려 있으면 PermissionError → 짧게 재시도.
+            for attempt in range(10):
+                try:
+                    os.replace(tmp_name, path)
+                    break
+                except PermissionError:
+                    if attempt == 9:
+                        raise
+                    time.sleep(0.02)
+        except BaseException:
+            Path(tmp_name).unlink(missing_ok=True)
+            raise
 
     @classmethod
     def load(cls, path: str | Path) -> "Graph":

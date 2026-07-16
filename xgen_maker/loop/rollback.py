@@ -28,14 +28,15 @@ def last_action(worklogs_dir: str | Path) -> dict | None:
                     events.append(json.loads(line))
         except (OSError, json.JSONDecodeError):
             continue
-        branch_ev = next((e for e in events if e["step"] == "branch" and e["status"] == "ok"), None)
+        branch_ev = next((e for e in events
+                          if e.get("step") == "branch" and e.get("status") == "ok"), None)
         if not branch_ev:
             continue  # 브랜치 안 만든 세션은 되돌릴 것 없음
-        repo = next((e.get("repo") for e in events if e["step"] == "session_end"), "") or \
+        repo = next((e.get("repo") for e in events if e.get("step") == "session_end"), "") or \
             next((e.get("repo") for e in events if "repo" in e), "")
-        pushed = any(e["step"] == "push" and e["status"] == "ok" for e in events)
-        mr = next((e.get("url") for e in events if e["step"] == "mr_create" and e.get("url")), "")
-        committed = any(e["step"] == "commit" and e["status"] == "ok" for e in events)
+        pushed = any(e.get("step") == "push" and e.get("status") == "ok" for e in events)
+        mr = next((e.get("url") for e in events if e.get("step") == "mr_create" and e.get("url")), "")
+        committed = any(e.get("step") == "commit" and e.get("status") == "ok" for e in events)
         return {"session": session_dir.name, "branch": branch_ev.get("branch"),
                 "base": branch_ev.get("base", ""), "repo": repo,
                 "pushed": pushed, "mr": mr, "committed": committed}
