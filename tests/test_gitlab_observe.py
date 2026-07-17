@@ -39,9 +39,42 @@ class TestGitlabObserve(unittest.TestCase):
                  "updated_at": "2026-07-06T00:00:00", "references": {"full": "grp/frontend!42"}}]
         with patch.object(GO, "_api", return_value=fake):
             mrs = GO.my_mrs(self.cfg)
-            maker = GO.maker_mrs(self.cfg)
         self.assertEqual(mrs[0]["iid"], 42)
+        self.assertEqual(mrs[0]["updated"], "2026-07-06")  # 날짜 노출
+
+    def test_maker_mrs_matches_only_journal_branches(self):
+        # 수정된 동작: 이름 추측 금지 — 로컬 journal에 기록된 브랜치와 일치하는 MR만
+        fake = [
+            {"iid": 42, "state": "opened", "title": "fix: x",
+             "source_branch": "fix/some-feature-x", "target_branch": "develop",
+             "web_url": "http://gl/mr/42", "updated_at": "2026-07-06T00:00:00",
+             "references": {"full": "grp/frontend!42"}},
+            {"iid": 99, "state": "merged", "title": "손으로 만든 feature",
+             "source_branch": "feature/manual-work", "target_branch": "develop",
+             "web_url": "http://gl/mr/99", "updated_at": "2026-07-05T00:00:00",
+             "references": {"full": "grp/frontend!99"}},
+        ]
+        with tempfile.TemporaryDirectory() as t:
+            sess = Path(t) / "2026-07-06-000000-x"; sess.mkdir()
+            # MAKER는 fix/some-feature-x만 만들었다고 기록(feature/manual-work은 사람 것)
+            (sess / "journal.jsonl").write_text(
+                '{"step":"branch","status":"ok","branch":"fix/some-feature-x"}\n',
+                encoding="utf-8")
+            cfg = MakerConfig(gitlab_projects={"svc-frontend": "grp/frontend"},
+                              worklogs_dir=t)
+            with patch.object(GO, "_api", return_value=fake):
+                maker = GO.maker_mrs(cfg)
+        self.assertEqual(len(maker), 1)                       # 사람 것(99)은 제외
         self.assertEqual(maker[0]["source"], "fix/some-feature-x")
+
+    def test_activity_search_parse(self):
+        fake = [{"short_id": "abc1234", "author_name": "Alice Kim",
+                 "committed_date": "2026-07-06T10:00:00", "title": "fix(gov): x",
+                 "web_url": "http://gl/c/abc1234"}]
+        with patch.object(GO, "_api", return_value=fake):
+            r = GO.activity(self.cfg, "svc-frontend", "gov")
+        self.assertEqual(r["commits"][0]["author"], "Alice Kim")
+        self.assertEqual(r["commits"][0]["sha"], "abc1234")
 
     def test_no_token_returns_empty(self):
         cfg = MakerConfig(gitlab_projects={})

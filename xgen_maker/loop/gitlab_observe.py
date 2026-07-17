@@ -47,6 +47,37 @@ def branches(config, repo: str, limit: int = 100) -> dict:
             "work_recent": work[:15]}
 
 
+def activity(config, repo: str, query: str = "", limit: int = 30) -> dict:
+    """레포 커밋 활동 — 누가 언제 뭘 고쳤나. query 있으면 커밋 메시지 검색(GitLab Search API)."""
+    enc = _project_enc(config, repo)
+    if enc is None:
+        return {"error": f"'{repo}' gitlab_projects 매핑 없음"}
+    q = query.strip()
+    if q:
+        # 커밋 메시지 검색
+        path = (f"/projects/{enc}/search?scope=commits"
+                f"&search={urllib.parse.quote_plus(q)}&per_page={limit}")
+    else:
+        path = f"/projects/{enc}/repository/commits?per_page={limit}"
+    data = _api(config, path)
+    if not isinstance(data, list):
+        return {"error": "조회 실패(토큰/네트워크/권한)"}
+    ql = q.lower()
+    commits = []
+    for c in data:
+        author = c.get("author_name", "") or c.get("committer_name", "")
+        message = c.get("message") or ""
+        title = c.get("title") or (message.splitlines()[0] if message.strip() else "")
+        # 검색어가 저자명에도 걸리면 포함(서버 검색은 메시지만 보므로 보강)
+        if q and ql not in title.lower() and ql not in author.lower() and ql not in message.lower():
+            continue
+        commits.append({"sha": c.get("short_id", "") or c.get("id", "")[:8],
+                        "author": author,
+                        "when": (c.get("committed_date", "") or c.get("created_at", ""))[:16].replace("T", " "),
+                        "title": title, "url": c.get("web_url", "")})
+    return {"commits": commits[:limit], "query": q}
+
+
 def my_mrs(config, state: str = "all", limit: int = 15) -> list[dict]:
     """본인(토큰 소유자) MR 이력."""
     data = _api(config, f"/merge_requests?scope=created_by_me&state={state}"
@@ -61,8 +92,11 @@ def my_mrs(config, state: str = "all", limit: int = 15) -> list[dict]:
 
 
 def maker_mrs(config, limit: int = 15) -> list[dict]:
-    """MAKER가 만든 브랜치(fix/*-<slug>)에서 나온 MR만 필터."""
+    """MAKER가 실제로 만든 MR만 — 로컬 journal에 기록된 브랜치와 일치하는 것.
+    (이름 추측 금지: 사람이 손으로 만든 feature/* 브랜치를 MAKER 것으로 오인하지 않는다.)"""
+    from .history import maker_branches
+    made = maker_branches(config.worklogs_dir)
+    if not made:
+        return []
     mrs = my_mrs(config, "all", 50)
-    maker = [m for m in mrs if m["source"].startswith(("fix/", "feature/", "refactor/"))
-             and any(seg in m["source"] for seg in ("-", "task-"))]
-    return maker[:limit]
+    return [m for m in mrs if m["source"] in made][:limit]

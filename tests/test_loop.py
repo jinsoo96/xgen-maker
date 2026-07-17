@@ -83,6 +83,21 @@ class TestIntent(unittest.TestCase):
         result = classify("이 에러 왜 나는지 보고 고쳐줄래?")
         self.assertEqual(result["intent"], "bug")
 
+    def test_removal_commands_are_changes_not_questions(self):
+        # '지워/삭제' 같은 제거 명령이 question으로 새면 루프가 답만 하고 끝난다
+        for q in ("주석 지워줘", "하네스 노드 주석 지워줘", "과한 주석 정리해"):
+            self.assertEqual(classify(q)["intent"], "refactor", q)
+
+    def test_descriptive_change_verb_stays_question(self):
+        # 회귀 방지: 서술형 '변경/수정'이 질문을 가로채면 MAKER가 답 대신 브랜치를 만들어
+        # 코드를 고치려 든다(observe/act에선 실제 변경). 질문 신호가 더 강하면 질문이어야 함.
+        for q in ("이 설정 어디서 변경되는지 알려줘",
+                  "로그인 로직 어디서 수정되는지 설명해줘",
+                  "배포 설정 뭐가 바뀌었는지 알려줘"):
+            r = classify(q)
+            self.assertEqual(r["intent"], "question", f"{q} → {r['scores']}")
+            self.assertEqual(r["branch_prefix"], "")  # 브랜치를 만들지 않는다
+
 
 class TestJudge(unittest.TestCase):
     def setUp(self):

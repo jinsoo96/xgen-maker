@@ -12,6 +12,41 @@ from ..config import is_protected_branch, is_allowed_branch
 from .git_ops import GitRepo, GitOpsError
 
 
+def _action_from_events(session_name: str, events: list[dict]) -> dict | None:
+    """단일 세션 이벤트에서 되돌릴 액션 추출(브랜치 없으면 None)."""
+    branch_ev = next((e for e in events
+                      if e.get("step") == "branch" and e.get("status") == "ok"), None)
+    if not branch_ev:
+        return None  # 브랜치 안 만든 세션은 되돌릴 것 없음
+    repo = next((e.get("repo") for e in events if e.get("step") == "session_end"), "") or \
+        next((e.get("repo") for e in events if "repo" in e), "")
+    pushed = any(e.get("step") == "push" and e.get("status") == "ok" for e in events)
+    mr = next((e.get("url") for e in events if e.get("step") == "mr_create" and e.get("url")), "")
+    committed = any(e.get("step") == "commit" and e.get("status") == "ok" for e in events)
+    return {"session": session_name, "branch": branch_ev.get("branch"),
+            "base": branch_ev.get("base", ""), "repo": repo,
+            "pushed": pushed, "mr": mr, "committed": committed}
+
+
+def _read_events(journal: Path) -> list[dict]:
+    events = []
+    try:
+        for line in journal.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                events.append(json.loads(line))
+    except (OSError, json.JSONDecodeError):
+        return []
+    return events
+
+
+def action_from_session(worklogs_dir: str | Path, session_name: str) -> dict | None:
+    """특정 세션의 되돌릴 액션(웹 이력에서 개별 세션 undo용)."""
+    journal = Path(worklogs_dir) / session_name / "journal.jsonl"
+    if not journal.is_file():
+        return None
+    return _action_from_events(session_name, _read_events(journal))
+
+
 def last_action(worklogs_dir: str | Path) -> dict | None:
     """최근 세션 journal에서 되돌릴 액션 추출."""
     root = Path(worklogs_dir)
@@ -21,25 +56,12 @@ def last_action(worklogs_dir: str | Path) -> dict | None:
         journal = session_dir / "journal.jsonl"
         if not journal.is_file():
             continue
-        events = []
-        try:
-            for line in journal.read_text(encoding="utf-8").splitlines():
-                if line.strip():
-                    events.append(json.loads(line))
-        except (OSError, json.JSONDecodeError):
+        events = _read_events(journal)
+        if not events:
             continue
-        branch_ev = next((e for e in events
-                          if e.get("step") == "branch" and e.get("status") == "ok"), None)
-        if not branch_ev:
-            continue  # 브랜치 안 만든 세션은 되돌릴 것 없음
-        repo = next((e.get("repo") for e in events if e.get("step") == "session_end"), "") or \
-            next((e.get("repo") for e in events if "repo" in e), "")
-        pushed = any(e.get("step") == "push" and e.get("status") == "ok" for e in events)
-        mr = next((e.get("url") for e in events if e.get("step") == "mr_create" and e.get("url")), "")
-        committed = any(e.get("step") == "commit" and e.get("status") == "ok" for e in events)
-        return {"session": session_dir.name, "branch": branch_ev.get("branch"),
-                "base": branch_ev.get("base", ""), "repo": repo,
-                "pushed": pushed, "mr": mr, "committed": committed}
+        action = _action_from_events(session_dir.name, events)
+        if action:
+            return action
     return None
 
 

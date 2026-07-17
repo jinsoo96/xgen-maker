@@ -37,3 +37,124 @@ def read_sessions(worklogs_dir: str | Path, limit: int = 20) -> list[dict]:
         if len(sessions) >= limit:
             break
     return sessions
+
+
+# 이벤트별로 사람이 볼 한 줄 요약을 뽑는다(원시 dict는 감춘다)
+def _step_summary(e: dict) -> str:
+    step = e.get("step", "")
+    if step == "session_start":
+        return e.get("query", "")
+    if step == "intent":
+        return f"{e.get('intent', '')}"
+    if step == "query_expand":
+        return e.get("keywords", "")
+    if step == "kg_search":
+        hits = e.get("hits", [])
+        top = hits[0].get("id", "") if hits else ""
+        return f"{len(hits)}곳 후보 · 최상위 {top}" if hits else ""
+    if step == "impact":
+        return e.get("target", "")
+    if step == "branch":
+        return f"{e.get('branch', '')} (base {e.get('base', '')})"
+    if step in ("commit", "push"):
+        return e.get("branch", "") or e.get("sha", "")
+    if step == "mr_create":
+        return e.get("url", "")
+    if step in ("checks", "judge"):
+        return str({k: v for k, v in e.items()
+                    if k not in ("step", "status", "ts", "iso", "time")})[:120]
+    if step == "answer":
+        return f"인용 {e.get('hits', '')}곳"
+    return str({k: v for k, v in e.items()
+                if k not in ("step", "status", "ts", "iso", "time")})[:120]
+
+
+def read_test_runs(worklogs_dir: str | Path, limit: int = 40) -> list[dict]:
+    """검증·테스트 이력 — 세션별 checks/verify/sandbox/judge 결과를 모은다(테스트 탭용)."""
+    root = Path(worklogs_dir)
+    if not root.is_dir():
+        return []
+    runs = []
+    for session_dir in sorted(root.iterdir(), reverse=True):
+        journal = session_dir / "journal.jsonl"
+        if not journal.is_file():
+            continue
+        try:
+            events = [json.loads(l) for l in
+                      journal.read_text(encoding="utf-8").splitlines() if l.strip()]
+        except (OSError, json.JSONDecodeError):
+            continue
+        checks = [e for e in events if e.get("step") == "checks"]
+        verify = next((e for e in events if e.get("step") == "verify"), None)
+        judge = next((e for e in events if e.get("step") == "judge"), None)
+        if not checks and not verify and not judge:
+            continue  # 검증을 아예 안 탄 세션(질문형 등)은 제외
+        query = next((e.get("query") for e in events if e.get("step") == "session_start"), "")
+        last = checks[-1] if checks else {}
+        runs.append({
+            "session": session_dir.name, "query": query,
+            "iterations": len(checks),
+            "checks_status": last.get("status", "-"),
+            "sandbox": last.get("sandbox", verify.get("status") if verify else "-"),
+            "regression": last.get("regression") or "-",
+            "summary": last.get("summary", "") or (verify.get("reason", "") if verify else ""),
+            "judge": (judge.get("status") if judge else "-"),
+        })
+        if len(runs) >= limit:
+            break
+    return runs
+
+
+def maker_branches(worklogs_dir: str | Path, limit: int = 200) -> set[str]:
+    """MAKER가 실제로 만든 브랜치 이름 집합 — journal의 branch/ok 이벤트가 정본.
+    (GitLab에서 이름만 보고 추측하지 않고, 자기가 만든 것만 정확히 안다.)
+    세션은 무한히 쌓이므로 최근 limit개만 읽는다(MR 탭 열 때마다 전량 파싱 방지)."""
+    root = Path(worklogs_dir)
+    names: set[str] = set()
+    if not root.is_dir():
+        return names
+    for session_dir in sorted(root.iterdir(), reverse=True)[:limit]:
+        journal = session_dir / "journal.jsonl"
+        if not journal.is_file():
+            continue
+        try:
+            for line in journal.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                e = json.loads(line)
+                if e.get("step") == "branch" and e.get("status") == "ok" and e.get("branch"):
+                    names.add(e["branch"])
+        except (OSError, json.JSONDecodeError):
+            continue
+    return names
+
+
+def read_session_detail(worklogs_dir: str | Path, session_name: str) -> dict | None:
+    """단일 세션 상세 — 단계 타임라인 + SUMMARY.md 원문."""
+    sess_dir = Path(worklogs_dir) / session_name
+    journal = sess_dir / "journal.jsonl"
+    if not journal.is_file():
+        return None
+    events = []
+    try:
+        for line in journal.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                events.append(json.loads(line))
+    except (OSError, json.JSONDecodeError):
+        return None
+    steps = [{"step": e.get("step", ""), "status": e.get("status", ""),
+              "iso": e.get("iso", "") or e.get("ts", ""),
+              "summary": _step_summary(e)} for e in events]
+    query = next((e.get("query") for e in events if e.get("step") == "session_start"), "")
+    outcome = next((e.get("status") for e in events if e.get("step") == "session_end"), "?")
+    branch = next((e.get("branch") for e in events if e.get("step") == "branch"), "")
+    mr = next((e.get("url") for e in events if e.get("step") == "mr_create" and e.get("url")), "")
+    summary_md = ""
+    sm = sess_dir / "SUMMARY.md"
+    if sm.is_file():
+        try:
+            summary_md = sm.read_text(encoding="utf-8")
+        except OSError:
+            summary_md = ""
+    return {"session": session_name, "query": query, "outcome": outcome,
+            "branch": branch, "mr": mr, "steps": steps, "summary_md": summary_md}

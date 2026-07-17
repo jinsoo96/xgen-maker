@@ -126,8 +126,11 @@ class MakerLoop:
         report["intent"] = intent
 
         # ③ KG 검색 (착지점) — 한글 쿼리는 코드 심볼과 어휘가 달라 LLM 키워드 확장 폴백
+        # 검색·LLM확장이 수 초~십수 초 걸릴 수 있어, 진입 즉시 진행 신호를 흘려 '멈춤'처럼 안 보이게.
+        journal.event("kg_search", "start")
         landing = search(self.graph, query, k=8)
         if not landing and config.llm_enabled:
+            journal.event("query_expand", "start", note="한글 쿼리 → 코드 키워드 확장(LLM)")
             expanded = llm.json_chat(config.llm_base, config.llm_model, [
                 {"role": "system", "content":
                  'Extract English code-search keywords from the dev request. '
@@ -139,7 +142,11 @@ class MakerLoop:
                 landing = search(self.graph, keyword_query, k=8)
         journal.event("kg_search", "ok" if landing else "empty",
                       hits=[{"id": n["id"], "kind": n["kind"], "score": n["score"]}
-                            for n in landing[:8]])
+                            for n in landing[:8]],
+                      landing=[{"id": n.get("id"), "name": n.get("name"), "kind": n.get("kind"),
+                                "repo": n.get("repo"), "path": n.get("path"),
+                                "line": n.get("line"), "score": n.get("score")}
+                               for n in landing[:8]])
         if intent == "question":
             result = self._answer_question(query, landing, journal)
             report.update(result)
