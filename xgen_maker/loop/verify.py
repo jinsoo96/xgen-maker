@@ -22,8 +22,10 @@ def docker_guard(max_running: int = 0) -> dict:
     if not shutil.which("docker"):
         return {"ok": False, "reason": "docker 미발견"}
     try:
+        # encoding 미지정이면 Windows 기본 코드페이지(cp949 등)로 디코드해, docker가
+        # 지역화된 오류를 뱉는 순간 UnicodeDecodeError로 터진다(except 밖이라 전파).
         result = subprocess.run(["docker", "ps", "-q"], capture_output=True,
-                                text=True, timeout=15)
+                                text=True, encoding="utf-8", errors="replace", timeout=15)
     except (subprocess.TimeoutExpired, OSError):
         return {"ok": False, "reason": "docker ps 실패"}
     running = len([line for line in result.stdout.splitlines() if line.strip()])

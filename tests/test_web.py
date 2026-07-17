@@ -1,4 +1,6 @@
 import json
+import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -544,6 +546,95 @@ class TestWebServer(unittest.TestCase):
         d = json.loads(body)
         self.assertIn("mine", d)
         self.assertIn("maker", d)
+
+
+class TestObserveLoopOverSSE(unittest.TestCase):
+    """웹 SSE 경로로 수렴 루프 전 구간(implement→checks→judge→commit)을 태운다.
+
+    기존 SSE 테스트는 plan(질문형)만 덮어, _SSEJournal 래퍼가 실제 쓰기 루프를
+    끝까지 견디는지·landing payload가 흐르는지는 미검증이었다.
+    GitLab 미접촉: gitlab_projects={} + 127.0.0.1 바인드.
+    """
+    NL = chr(10)
+    # 에이전트 스텁 — 이스케이프 층을 안 타게 chr(10)으로 조립
+    STUB = ("import pathlib" + chr(10) +
+            "p = pathlib.Path('app.py')" + chr(10) +
+            "p.write_text('def greet(name):' + chr(10) + \"    return 'hello ' + name\""
+            " + chr(10), encoding='utf-8')" + chr(10))
+
+    def _git(self, root, *a):
+        subprocess.run(["git", *a], cwd=root, capture_output=True, check=True)
+
+    def test_observe_loop_converges_and_commits(self):
+        import threading
+        import urllib.parse
+        from http.server import ThreadingHTTPServer
+        from pathlib import Path as _P
+        from xgen_maker.kg.build import build_repo
+
+        with tempfile.TemporaryDirectory() as t:
+            base = _P(t)
+            repo = base / "demo"; repo.mkdir()
+            self._git(repo, "init", "-b", "develop")
+            self._git(repo, "config", "user.email", "t@t")
+            self._git(repo, "config", "user.name", "t")
+            (repo / "app.py").write_text("def greet(name):" + self.NL +
+                                         "    return 'hi ' + name" + self.NL, encoding="utf-8")
+            self._git(repo, "add", "-A"); self._git(repo, "commit", "-m", "init")
+            stub = base / "stub.py"; stub.write_text(self.STUB, encoding="utf-8")
+
+            g = build_repo("demo", repo); kg = base / "kg.json"; g.save(kg)
+            cfg = MakerConfig(repos={"demo": str(repo)}, kg_path=str(kg),
+                              worklogs_dir=str(base / "wl"), mode="observe",
+                              allow_write=True, llm_enabled=False, verbose=False,
+                              max_iterations=3, fetch_latest=False, gitlab_projects={},
+                              agent_cmd='"' + sys.executable + '" "' + str(stub) + '"')
+            prev_cfg, prev_graph = web.MakerWebHandler.config, web.MakerWebHandler.graph
+            web.MakerWebHandler.config = cfg
+            web.MakerWebHandler.graph = Graph.load(kg)
+            srv = ThreadingHTTPServer(("127.0.0.1", 0), web.MakerWebHandler)
+            port = srv.server_address[1]
+            threading.Thread(target=srv.serve_forever, daemon=True).start()
+            try:
+                q = urllib.parse.quote("greet 함수 인사말 고쳐줘")
+                url = f"http://127.0.0.1:{port}/api/run?q={q}&mode=observe"
+                steps, report, landing = [], None, False
+                with urllib.request.urlopen(url, timeout=240) as resp:
+                    for raw in resp:
+                        ln = raw.decode("utf-8").strip()
+                        if not ln.startswith("data: "):
+                            continue
+                        e = json.loads(ln[6:])
+                        if e.get("type") == "event":
+                            steps.append(e["step"] + "/" + e["status"])
+                            landing = landing or bool(e.get("landing"))
+                        elif e.get("type") == "result":
+                            report = e["report"]
+            finally:
+                srv.shutdown()
+                web.MakerWebHandler.config, web.MakerWebHandler.graph = prev_cfg, prev_graph
+
+            self.assertIsNotNone(report, f"result 미수신 — steps={steps}")
+            self.assertEqual(report["outcome"], "mr_prepared", f"steps={steps}")
+            self.assertTrue(report["branch"].startswith("fix/"))
+            self.assertTrue(landing, "우측 패널용 landing payload가 흘러야 함")
+            for want in ("kg_search/start", "implement/ok", "checks/ok",
+                         "judge/pass", "commit/ok"):
+                self.assertIn(want, steps)
+            # 실제로 파일이 바뀌고 커밋됐는가
+            self.assertIn("hello", (repo / "app.py").read_text(encoding="utf-8"))
+            log = subprocess.run(["git", "log", "--oneline"], cwd=repo, capture_output=True,
+                                 text=True, encoding="utf-8", errors="replace").stdout
+            self.assertEqual(len(log.strip().splitlines()), 2)  # init + MAKER 커밋
+            # 내가 만든 리더들이 이 실제 세션을 읽어내는가
+            from xgen_maker.loop.history import read_sessions, read_session_detail, read_test_runs
+            from xgen_maker.loop.rollback import action_from_session
+            ss = read_sessions(cfg.worklogs_dir, 5)
+            self.assertEqual(ss[0]["outcome"], "mr_prepared")
+            self.assertTrue(read_session_detail(cfg.worklogs_dir, ss[0]["session"])["steps"])
+            self.assertTrue(action_from_session(cfg.worklogs_dir, ss[0]["session"]))
+            runs = read_test_runs(cfg.worklogs_dir, 5)
+            self.assertEqual((runs[0]["checks_status"], runs[0]["judge"]), ("ok", "pass"))
 
 
 class TestJournalInjection(unittest.TestCase):
