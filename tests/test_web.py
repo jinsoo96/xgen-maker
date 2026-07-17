@@ -304,6 +304,90 @@ class TestWebServer(unittest.TestCase):
         self.assertNotEqual(s1, s2)
         self.assertEqual(s1, web.MakerWebHandler._ui_slug("http://h/a/b"))  # 결정론
 
+    def test_graph_reads_survive_concurrent_mutation(self):
+        # 5회차 검수 버그: 기존 코드는 sync 중 순회 크래시를 재시도로 막고 있었는데
+        # 내가 새로 넣은 그래프 함수들엔 그 가드가 없어, Sync 중 그래프 탭이 500이 났다.
+        import threading
+        import time
+        from xgen_maker.kg.graph import Graph
+        g = Graph()
+        for i in range(60):
+            g.add_node(f"r:f{i}.py", "file", f"f{i}.py", "r", f"f{i}.py")
+        h = web.MakerWebHandler.__new__(web.MakerWebHandler)
+        h.config = web.MakerWebHandler.config
+        h.graph = g
+        stop = [False]
+
+        def mutate():  # sync가 하는 일: 제자리에서 노드/엣지를 넣고 뺀다
+            i = 0
+            while not stop[0]:
+                nid = f"__probe{i}__"
+                g.add_node(nid, "file", nid, "r", nid)
+                g.edges.append({"src": nid, "dst": nid, "kind": "contains", "meta": {}})
+                g.nodes.pop(nid, None)
+                if g.edges and g.edges[-1]["src"] == nid:
+                    g.edges.pop()
+                i += 1
+        t = threading.Thread(target=mutate, daemon=True)
+        t.start()
+        try:
+            for _ in range(40):  # 변경 중에도 예외 없이 결과를 줘야 한다
+                self.assertIn("nodes", h._repo_graph())
+                self.assertIn("nodes", h._graph_status())
+                self.assertIn("nodes", h._graph_info())
+        finally:
+            stop[0] = True
+            t.join(timeout=2)
+
+    def test_graph_read_guard_falls_back_not_raises(self):
+        # 계속 변경 중이라 끝내 못 읽어도 500이 아니라 fallback을 준다
+        def always_racing():
+            raise RuntimeError("dictionary changed size during iteration")
+        got = web.MakerWebHandler._graph_read(always_racing, {"nodes": [], "reason": "busy"},
+                                              tries=2)
+        self.assertEqual(got["reason"], "busy")
+
+    def test_annotate_survives_node_removed_midway(self):
+        # TOCTOU: membership 검사 통과 후 sync가 노드를 지우면 KeyError로 500이 났다.
+        # overlay는 정본이므로 편집은 남고, 라이브 반영만 조용히 건너뛴다.
+        import tempfile
+        from pathlib import Path
+        from xgen_maker.kg.graph import Graph
+        from xgen_maker.config import MakerConfig
+        with tempfile.TemporaryDirectory() as t:
+            g = Graph()
+            g.add_node("r:a.py#f", "function", "f", "r", "a.py", 1)
+            kg = Path(t) / "kg.json"
+            g.save(kg)
+            h = web.MakerWebHandler.__new__(web.MakerWebHandler)
+            h.config = MakerConfig(kg_path=str(kg), worklogs_dir=str(Path(t) / "wl"),
+                                   llm_enabled=False)
+            h.graph = g
+
+            class VanishingNodes(dict):
+                """membership 검사는 통과시키고, 라이브 반영 시점엔 sync가 지운 상태."""
+                def get(self, k, d=None):
+                    self.pop("r:a.py#f", None)
+                    return super().get(k, d)
+            g.nodes = VanishingNodes(g.nodes)
+            r = h._annotate({"node": ["r:a.py#f"], "note": ["레거시"]})
+            self.assertTrue(r["ok"])  # 크래시 없이 overlay에는 기록
+            import json as _j
+            ov = _j.loads((Path(t) / "overlay.json").read_text(encoding="utf-8"))
+            self.assertEqual(ov["node_overrides"]["r:a.py#f"]["note"], "레거시")
+
+    def test_link_local_blocks_hostname_not_just_ip(self):
+        # 5회차: IP 리터럴만 막아 호스트명 하나로 우회됐다 → 실제 해소해서 판정
+        import socket
+        from xgen_maker.web import _is_link_local
+        orig = socket.getaddrinfo
+        socket.getaddrinfo = lambda h, p, *a, **k: [(2, 1, 6, '', ('169.254.169.254', 80))]
+        try:
+            self.assertTrue(_is_link_local("http://metadata.internal.example/"))
+        finally:
+            socket.getaddrinfo = orig
+        self.assertFalse(_is_link_local("http://localhost:3100/"))
+
     def test_run_mode_whitelist_fails_closed(self):
         # 4회차 검수 버그: 'plan' 정확일치만 읽기전용이라 오타·미지의 모드가 전부
         # allow_write=True로 새어 실제 레포에 브랜치·커밋이 나갔다(fail-open).
