@@ -652,6 +652,20 @@ document.getElementById('stopbtn').onclick=()=>{
 </script></body></html>"""
 
 
+_RUN_MODES = ("plan", "observe", "act")  # 이 밖의 값은 거부(모르는 모드가 쓰기로 새지 않게)
+
+
+def _is_link_local(url: str) -> bool:
+    """링크로컬(169.254/16, fe80::) — 클라우드 메타데이터(169.254.169.254) 포함."""
+    import ipaddress
+    from urllib.parse import urlparse as _up
+    host = (_up(url).hostname or "").strip("[]")
+    try:
+        return ipaddress.ip_address(host).is_link_local
+    except ValueError:
+        return False  # 호스트명은 판별 불가 — 여기선 IP 리터럴만 막는다
+
+
 class _Cancelled(Exception):
     """사용자가 실행 중지를 눌렀을 때 파이프라인을 협조적으로 끊는 신호."""
 
@@ -964,18 +978,28 @@ class MakerWebHandler(BaseHTTPRequestHandler):
         return out
 
     def _doctor(self) -> dict:
-        # maker doctor 실행 결과를 그대로 캡처(느림, 버튼).
-        import io
-        import contextlib
-        from .doctor import run_doctor
-        buf = io.StringIO()
+        # maker doctor를 하위 프로세스로 실행해 출력을 캡처(느림, 버튼).
+        # redirect_stdout은 전역 sys.stdout을 바꿔, 스레딩 서버에선 doctor가 도는
+        # 1~2분 동안 다른 요청 스레드의 print가 이 버퍼로 빨려 들어간다. 프로세스
+        # 분리가 유일하게 안전하고, CLI가 실제로 찍는 출력과도 정확히 같다.
+        import os
+        import subprocess
+        import sys
         cfg_path = getattr(self, "config_path", None)
+        cmd = [sys.executable, "-m", "xgen_maker", "doctor"]
+        if cfg_path:
+            cmd += ["--config", str(cfg_path)]
+        env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
         try:
-            with contextlib.redirect_stdout(buf):
-                ok = run_doctor(cfg_path)
-        except Exception as e:  # noqa: BLE001 — 진단 자체가 죽어도 화면엔 사유를 보여준다
-            return {"ok": False, "output": buf.getvalue() + f"\n[진단 중단] {e}"}
-        return {"ok": ok, "output": buf.getvalue()}
+            res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                                 errors="replace", timeout=300, env=env,
+                                 cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "output": "[진단 시간초과] 5분 안에 끝나지 않음"}
+        except OSError as e:
+            return {"ok": False, "output": f"[진단 실행불가] {e}"}
+        out = (res.stdout or "") + (("\n" + res.stderr) if res.stderr.strip() else "")
+        return {"ok": res.returncode == 0, "output": out or "(출력 없음)"}
 
     def _ui_dirs(self):
         from pathlib import Path
@@ -1046,6 +1070,11 @@ class MakerWebHandler(BaseHTTPRequestHandler):
             return {"ok": False, "error": "URL을 입력하세요"}
         if not url.startswith(("http://", "https://")):
             return {"ok": False, "error": "http(s):// URL만 허용"}
+        # 임의 URL 캡처는 이 기능의 목적(로컬 스택 주소가 제각각)이라 allowlist를 못 건다.
+        # 다만 링크로컬/클라우드 메타데이터는 화면검증에 쓸 일이 없고, 무인증 포트에
+        # 닿은 사람에게 자격증명을 스크린샷으로 넘겨줄 수 있어 막는다.
+        if _is_link_local(url):
+            return {"ok": False, "error": "링크로컬/메타데이터 주소는 캡처 불가"}
         if not http_reachable(url, timeout=6):
             return {"ok": False, "error": f"{url} 도달 불가(스택/주소 확인)"}
         baseline_dir, snap_dir = self._ui_dirs()
@@ -1322,6 +1351,11 @@ class MakerWebHandler(BaseHTTPRequestHandler):
         mode = params.get("mode", ["plan"])[0]
         if not query:
             self.send_error(400)
+            return
+        # 모드 화이트리스트 — 없으면 'plan' 정확일치만 읽기전용이고 오타·미지의 값이
+        # 전부 allow_write=True로 새어 실제 레포에 브랜치·커밋이 나간다(fail-open).
+        if mode not in _RUN_MODES:
+            self.send_error(400, "unknown mode")
             return
         # 모드별 config 복제
         cfg = MakerConfig(**{f.name: getattr(self.config, f.name)

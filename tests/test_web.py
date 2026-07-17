@@ -304,6 +304,41 @@ class TestWebServer(unittest.TestCase):
         self.assertNotEqual(s1, s2)
         self.assertEqual(s1, web.MakerWebHandler._ui_slug("http://h/a/b"))  # 결정론
 
+    def test_run_mode_whitelist_fails_closed(self):
+        # 4회차 검수 버그: 'plan' 정확일치만 읽기전용이라 오타·미지의 모드가 전부
+        # allow_write=True로 새어 실제 레포에 브랜치·커밋이 나갔다(fail-open).
+        for bad in ("plna", "ACT", "xyz", "observe2"):
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                self._get(f"/api/run?q=test&mode={bad}", timeout=10)
+            self.assertEqual(ctx.exception.code, 400, f"mode={bad!r}는 거부돼야 함")
+        # 빈 mode는 parse_qs가 키째 버려 기본값 plan(읽기전용)으로 간다 — fail-safe
+        from urllib.parse import parse_qs
+        self.assertNotIn("mode", parse_qs("q=test&mode="))
+
+    def test_snapshot_blocks_link_local_metadata(self):
+        # 4회차 검수: 무인증 포트에 닿은 사람이 서버로 하여금 메타데이터를 열어
+        # 스크린샷으로 자격증명을 넘겨받을 수 있었다
+        from xgen_maker.web import _is_link_local
+        self.assertTrue(_is_link_local("http://169.254.169.254/latest/meta-data/"))
+        self.assertTrue(_is_link_local("http://[fe80::1]/"))
+        self.assertFalse(_is_link_local("http://localhost:3100/"))  # 정상 용도는 막지 않음
+        h = web.MakerWebHandler.__new__(web.MakerWebHandler)
+        h.config = web.MakerWebHandler.config
+        r = h._ui_snap({"url": ["http://169.254.169.254/"]})
+        self.assertFalse(r["ok"])
+        self.assertIn("링크로컬", r["error"])
+
+    def test_doctor_runs_in_subprocess_not_global_stdout(self):
+        # 4회차 검수: contextlib.redirect_stdout은 전역 sys.stdout을 바꿔, doctor가 도는
+        # 1~2분 동안 다른 요청 스레드의 print가 이 버퍼로 빨려들어갔다(스레딩 서버).
+        from pathlib import Path
+        src = Path(web.__file__).read_text(encoding="utf-8")
+        block = src[src.index("def _doctor"):]
+        block = block[:block.index("\n    def ")]
+        # 호출부만 본다(설명 주석에 이름이 나오는 건 무방)
+        self.assertNotIn("redirect_stdout(", block, "doctor는 전역 stdout을 가로채면 안 됨")
+        self.assertIn("subprocess.run", block)
+
     def test_ui_baseline_legacy_fallback(self):
         # 재검수에서 나온 버그: 슬러그에 해시를 붙이자 이미 저장된 기준선이 조용히 고아가 됐다.
         # 읽을 땐 옛 형식도 인정해야 한다(안 그러면 갤러리엔 보이는데 "기준 없음"이라 뜸).
