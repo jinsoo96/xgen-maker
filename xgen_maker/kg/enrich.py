@@ -83,7 +83,8 @@ def _code_head(node: dict, repos: dict[str, str], lines: int = 50) -> str:
     if not file_path.is_file():
         return ""
     try:
-        return "\n".join(file_path.read_text(encoding="utf-8", errors="ignore")
+        # utf-8-sig — BOM이 첫 줄 선두에 섞여 요약 품질을 떨어뜨리지 않게
+        return "\n".join(file_path.read_text(encoding="utf-8-sig", errors="ignore")
                          .splitlines()[:lines])
     except OSError:
         return ""

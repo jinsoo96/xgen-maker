@@ -53,13 +53,19 @@ def _resolve_import(module: str, repo_root: Path, known_files: set[str]) -> str 
 
 def extract_python_file(graph: Graph, repo: str, repo_root: Path, rel: str,
                         known_files: set[str]) -> None:
-    source = (repo_root / rel).read_text(encoding="utf-8", errors="ignore")
+    # utf-8-sig — BOM이 붙은 파일(Windows 저장본)을 utf-8로 읽으면 선두에 U+FEFF가
+    # 남아 ast.parse가 SyntaxError를 낸다. 그러면 아래에서 파일이 통째로 누락된다.
+    source = (repo_root / rel).read_text(encoding="utf-8-sig", errors="ignore")
+    file_id = f"{repo}:{rel}"
+    file_meta = {"lang": "python"}
     try:
         tree = ast.parse(source)
     except SyntaxError:
+        # 파싱 못 해도 '파일이 존재한다'는 사실은 그래프에 남긴다. 통째로 빼면
+        # 이 파일을 import하는 쪽의 엣지가 갈 곳을 잃고(끊긴 엣지), 검색에서도 사라진다.
+        file_meta["parse_error"] = True
+        graph.add_node(file_id, "file", Path(rel).name, repo, rel, **file_meta)
         return
-    file_id = f"{repo}:{rel}"
-    file_meta = {"lang": "python"}
     module_doc = ast.get_docstring(tree)
     if module_doc:
         file_meta["doc"] = module_doc.strip()[:200]

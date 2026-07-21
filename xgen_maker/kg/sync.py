@@ -72,12 +72,50 @@ def sync_source(graph: Graph, source: dict) -> dict:
             "files": relevant[:20], "head": (new_sha or "")[:12]}
 
 
+def repair_dangling(graph: Graph, sources: list[dict]) -> dict:
+    """끊긴 엣지 자가복구 — 가리키는 파일이 실재하면 재추출, 아니면 엣지를 버린다.
+
+    증분 sync는 '변경된 파일'만 다시 읽는다. 그래서 한 번 노드가 빠진 파일은
+    그 파일이 다시 바뀌기 전까지 영영 복구되지 않고 끊긴 엣지로 남는다
+    (예: BOM 때문에 파싱이 실패해 통째로 누락됐던 파일).
+    """
+    roots = {s["repo"]: s["root"] for s in sources if s.get("repo") and s.get("root")}
+    ids = set(graph.nodes)
+    missing = {e["dst"] for e in graph.edges if e["dst"] not in ids}
+    missing |= {e["src"] for e in graph.edges if e["src"] not in ids}
+    if not missing:
+        return {"repaired": 0, "dropped": 0}
+    by_repo: dict = {}
+    for node_id in missing:
+        repo, _, rel = node_id.partition(":")
+        if rel and "#" not in rel and repo in roots:
+            by_repo.setdefault(repo, []).append(rel)
+    repaired = 0
+    for repo, rels in by_repo.items():
+        root = Path(roots[repo])
+        real = [r for r in rels if (root / r).is_file()]
+        if real:
+            refresh_files(graph, repo, root, real)
+            repaired += sum(1 for r in real if f"{repo}:{r}" in graph.nodes)
+    ids = set(graph.nodes)
+    before = len(graph.edges)
+    graph.edges = [e for e in graph.edges if e["src"] in ids and e["dst"] in ids]
+    graph._edge_seen = {(e["src"], e["dst"], e["kind"]) for e in graph.edges}
+    return {"repaired": repaired, "dropped": before - len(graph.edges)}
+
+
 def sync_all(graph: Graph) -> list[dict]:
     sources = graph.meta.get("sources", [])
     if not sources:
         return [{"action": "full_rebuild_needed",
                  "reason": "meta.sources 없음 — 구버전 그래프, kg build+merge 재실행 필요"}]
-    return [sync_source(graph, source) for source in sources]
+    results = [sync_source(graph, source) for source in sources]
+    fix = repair_dangling(graph, sources)
+    if fix["repaired"] or fix["dropped"]:
+        results.append({"repo": "(무결성 복구)", "changed": fix["repaired"],
+                        "action": f"끊긴 엣지 정리 — 파일 재추출 {fix['repaired']}개, "
+                                  f"엣지 제거 {fix['dropped']}개"})
+    return results
 
 
 # ---- git 훅 (UA --auto-update 대응, opt-in) ----

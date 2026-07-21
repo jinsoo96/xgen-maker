@@ -68,7 +68,8 @@ def _leading_doc(source: str) -> str:
 
 def extract_ts_file(graph: Graph, repo: str, repo_root: Path, rel: str,
                     known_files: set[str], resolver=None) -> None:
-    source = (repo_root / rel).read_text(encoding="utf-8", errors="ignore")
+    # utf-8-sig — BOM 잔재(U+FEFF)가 선두 주석/export 매칭을 어긋나게 하지 않도록
+    source = (repo_root / rel).read_text(encoding="utf-8-sig", errors="ignore")
     file_id = f"{repo}:{rel}"
     meta = {"lang": "typescript"}
     doc = _leading_doc(source)
