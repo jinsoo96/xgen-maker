@@ -88,6 +88,12 @@ _PAGE = """<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
  #gcrumb{display:flex;align-items:center;gap:6px;margin:6px 0 2px;font-size:13px}
  #gcrumb .cb{color:var(--primary);text-decoration:none;font-weight:600} #gcrumb .cb:hover{text-decoration:underline}
  #gcrumb .cbs{color:var(--muted)} #gcrumb .cbc{color:var(--text);font-weight:600}
+ .setgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;margin-top:8px}
+ .setrow{display:flex;align-items:center;gap:10px;padding:9px 11px;border:1px solid var(--border);border-radius:9px;background:var(--bg2)}
+ .setlbl{flex:1;font-size:12px;color:var(--text2)}
+ .setrow input,.setrow select{padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg3);color:var(--text);font-size:12px}
+ .tgl{padding:5px 12px;border:1px solid var(--border);border-radius:14px;background:var(--bg3);color:var(--muted);font-size:12px;font-weight:600;cursor:pointer}
+ .tgl.on{background:var(--primary);border-color:var(--primary);color:#fff}
  .gsearch{display:flex;gap:8px;margin:8px 0 12px} .gsearch input{flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg3);color:var(--text)}
  .gsearch button{padding:8px 16px;border:0;border-radius:8px;background:var(--primary);color:#fff;font-weight:600;cursor:pointer}
  #gwrap{position:relative;height:600px;border:1px solid var(--border);border-radius:12px;background:var(--bg2);overflow:hidden}
@@ -151,6 +157,7 @@ _PAGE = """<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
  <button id="sync" title="지식그래프를 최신 코드로 갱신(변경분만)">⟳ Sync</button></header>
 <nav>
  <button class="on" data-t="run">실행</button>
+ <button data-t="pipeline">파이프라인</button>
  <button data-t="graph">지식그래프</button>
  <button data-t="history">작업 이력</button>
  <button data-t="learn">학습</button>
@@ -174,6 +181,7 @@ _PAGE = """<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
   </aside>
  </div>
 </div>
+<div class="tab" id="tab-pipeline"><div class="muted">불러오는 중…</div></div>
 <div class="tab" id="tab-graph"><div class="muted">불러오는 중…</div></div>
 <div class="tab" id="tab-history"><div class="muted">불러오는 중…</div></div>
 <div class="tab" id="tab-learn"><div class="muted">불러오는 중…</div></div>
@@ -331,6 +339,41 @@ function loadNodeCode(n,gcode){
 }
 function render(t){
  const el=document.getElementById('tab-'+t);
+ if(t==='pipeline') jget('/api/pipeline').then(d=>{
+  const SI={ok:'✓',pass:'✓',start:'◐',fail:'✗',skipped:'—',empty:'—',observe:'◇',act:'◆',blocked:'✗',warn:'!'};
+  let h='<h3>파이프라인 <span class=muted>(설계된 전 단계 · 무엇이 돌고 무엇이 꺼져 있는지)</span></h3>';
+  h+='<div class=muted style="margin-bottom:10px">'+(d.last_query?('최근 실제 작업: <b style="color:var(--text)">'+esc(d.last_query).slice(0,60)+'</b> 기준 결과를 각 단계에 표시'):'아직 코드를 만진 실행이 없어 단계 결과는 비어 있습니다(설정만 표시)')+'</div>';
+  h+='<table><tr><th>단계</th><th>하는 일</th><th>최근 결과</th><th>제어 설정</th></tr>'+
+   d.stages.map(s=>{
+    const off=(s.gate!=null&&(s.gate_value===false||s.gate_value===''||s.gate_value==null));
+    const mark=s.last?`<span class="badge ${cls(s.last)}">${SI[s.last]||''} ${esc(s.last)}</span>`:'<span class=muted>-</span>';
+    return `<tr${off?' style="opacity:.62"':''}><td><b>${esc(s.label)}</b><br><span class=muted style="font-size:11px">${esc(s.step)}</span></td>`+
+     `<td class=muted style="font-size:12px">${esc(s.desc)}</td><td>${mark}</td>`+
+     `<td class=muted style="font-size:11px">${s.gate?esc(s.gate)+' = <b>'+esc(String(s.gate_value))+'</b>':'-'}</td></tr>`;
+   }).join('')+'</table>';
+  h+='<h4 style="margin-top:18px">설정 — 눌러서 바꾸기 <span class=muted>(이 서버 세션에만 적용 · config 파일은 그대로)</span></h4><div id=setgrid class=setgrid></div>';
+  el.innerHTML=h;
+  const sg=document.getElementById('setgrid');
+  const render_settings=(cur)=>{
+   sg.innerHTML=Object.keys(d.settable).map(k=>{
+    const meta=d.settable[k], v=cur[k], t=meta.type;
+    let ctrl;
+    if(t==='bool') ctrl=`<button class="tgl ${v?'on':''}" data-k="${k}" data-v="${v?'0':'1'}">${v?'켜짐':'꺼짐'}</button>`;
+    else if(t.startsWith('choice:')) ctrl=`<select data-k="${k}">`+t.split(':')[1].split(',').map(o=>`<option${o===v?' selected':''}>${o}</option>`).join('')+'</select>';
+    else ctrl=`<input data-k="${k}" value="${esc(String(v==null?'':v))}" size=14>`;
+    return `<div class=setrow><span class=setlbl>${esc(meta.label)}<br><span class=muted style="font-size:10px">${k}</span></span>${ctrl}</div>`;
+   }).join('')+'<div id=setout class=muted style="font-size:12px;grid-column:1/-1"></div>';
+   const save=(k,val)=>{const o=document.getElementById('setout');o.textContent='적용 중…';
+    jget('/api/setting?key='+encodeURIComponent(k)+'&value='+encodeURIComponent(val)).then(r=>{
+     if(r.ok){cur[k]=r.value;o.innerHTML='<span style="color:var(--success)">✓ '+esc(k)+' = '+esc(String(r.value))+'</span> — '+esc(r.note);render_settings(cur);loaded['pipeline']=0;}
+     else o.innerHTML='<span style="color:var(--danger)">✗ '+esc(r.error)+'</span>';
+    }).catch(e=>{o.textContent='실패: '+(e.message||e);});};
+   sg.querySelectorAll('.tgl').forEach(b=>b.onclick=()=>save(b.dataset.k,b.dataset.v));
+   sg.querySelectorAll('select[data-k]').forEach(s=>s.onchange=()=>save(s.dataset.k,s.value));
+   sg.querySelectorAll('input[data-k]').forEach(i=>i.onchange=()=>save(i.dataset.k,i.value));
+  };
+  render_settings(Object.assign({},d.settings));
+  }).catch(tabErr(el));
  if(t==='graph') jget('/api/graph').then(d=>{
   let h='<h3>코드 지식그래프 <span class=muted>(레포 간 → 레포 내부 → 코드, 눌러서 파고들기)</span></h3>';
   h+='<div id=gcrumb></div>';
@@ -1024,6 +1067,101 @@ class MakerWebHandler(BaseHTTPRequestHandler):
                 "summary": meta.get("summary", ""), "summary_src": meta.get("summary_src", ""),
                 "note": meta.get("note", "")}
 
+    # 설계된 파이프라인 전 단계 — (journal step, 라벨, 설명, 이 단계를 좌우하는 설정키)
+    # "전체가 다 도는가"를 눈으로 확인할 수 있게 카탈로그를 코드에 명시한다.
+    PIPELINE = [
+        ("intent", "의도 분류", "쿼리를 bug/feature/refactor/question으로 판정", None),
+        ("kg_search", "지식그래프 착지", "고칠 코드 위치를 그래프에서 검색", None),
+        ("query_expand", "키워드 확장", "한글 쿼리를 코드 심볼로 확장(LLM 필요)", "llm_enabled"),
+        ("impact", "영향 분석", "이 코드를 쓰는 곳(회귀 위험) 역방향 추적", None),
+        ("chain", "워크플로우 체인", "착지점과 이어진 코드 정방향 확장", None),
+        ("legacy_check", "레거시 확인", "실제 소스를 읽어 에이전트에 발췌 제공", None),
+        ("learnings", "과거 학습", "같은 실수 반복 방지 메모 주입", None),
+        ("fetch_latest", "최신 코드 동기화", "작업 전 origin/target fetch + KG 갱신", "fetch_latest"),
+        ("worktree", "worktree 격리", "임시 worktree에서 작업(동시 실행 충돌 방지)", "isolate_worktree"),
+        ("authorize", "인가 검사", "act 전 대상 프로젝트 멤버십 확인", None),
+        ("branch", "브랜치 생성", "보호 브랜치 가드 + 네이밍 규칙", None),
+        ("implement", "구현(에이전트)", "코딩 에이전트가 실제로 코드를 고침", None),
+        ("checks", "검증(테스트)", "py_compile + pytest + node test 자동 실행", None),
+        ("judge", "품질 게이트", "점수 판정(LLM 있으면 AI, 없으면 규칙)", "theta"),
+        ("iteration", "수렴 반복", "실패하면 되먹여 재시도(통과까지)", "max_iterations"),
+        ("verify", "로컬 스택 검증", "로컬 스택 기동해 동작 확인", "enable_verify"),
+        ("ui_verify", "화면 검증(Playwright)", "바뀐 화면 스냅샷 + 픽셀diff + 비전판정", "preview_base"),
+        ("deploy_test", "배포 렌더 검증", "helm 렌더 등 배포 산출물 확인", None),
+        ("release", "릴리즈 경로", "대상 env와 승격 경로 계산", None),
+        ("commit", "커밋", "작업 브랜치에 커밋(로컬)", "allow_write"),
+        ("push", "푸시", "원격에 브랜치 push", "mode"),
+        ("mr_create", "MR 생성", "GitLab MR 실제 생성", "mode"),
+        ("mr_ready", "MR 준비", "MR 초안 작성(여기까지가 MAKER 몫)", None),
+        ("kg_refresh", "그래프 갱신", "변경분을 지식그래프에 반영", None),
+        ("cost", "비용 집계", "에이전트 토큰/비용 기록", None),
+    ]
+    # 런타임에 바꿔도 되는 설정(화이트리스트). 배포 live는 env 인터록이 따로 있어 제외.
+    SETTABLE = {
+        "target_branch": ("대상 브랜치", "str"),
+        "mode": ("모드", "choice:observe,act"),
+        "fetch_latest": ("작업 전 최신 동기화", "bool"),
+        "isolate_worktree": ("worktree 격리", "bool"),
+        "enable_verify": ("로컬 스택 검증", "bool"),
+        "strict_regression": ("회귀 미검증 차단", "bool"),
+        "llm_enabled": ("LLM 사용", "bool"),
+        "max_iterations": ("수렴 최대 반복", "int:1:10"),
+        "theta": ("품질 임계값", "float:0:1"),
+        "preview_base": ("화면검증 프리뷰 주소", "str"),
+    }
+
+    def _pipeline_view(self) -> dict:
+        from .loop.history import read_sessions, read_session_detail
+        cfg = self.config
+        # 최근 '실제로 코드를 만진' 세션의 단계별 결과를 붙여 보여준다
+        last, steps = None, {}
+        for s in read_sessions(cfg.worklogs_dir, 12):
+            d = read_session_detail(cfg.worklogs_dir, s["session"])
+            if d and any(st["step"] in ("implement", "branch") for st in d["steps"]):
+                last = d
+                for st in d["steps"]:
+                    steps.setdefault(st["step"], st["status"])
+                break
+        stages = []
+        for step, label, desc, gate in self.PIPELINE:
+            gate_val = getattr(cfg, gate, None) if gate else None
+            stages.append({"step": step, "label": label, "desc": desc,
+                           "gate": gate, "gate_value": gate_val,
+                           "last": steps.get(step, "")})
+        settings = {k: getattr(cfg, k, None) for k in self.SETTABLE}
+        return {"stages": stages, "settings": settings,
+                "settable": {k: {"label": v[0], "type": v[1]} for k, v in self.SETTABLE.items()},
+                "last_session": last["session"] if last else "",
+                "last_query": last["query"] if last else ""}
+
+    def _set_setting(self, qs: dict) -> dict:
+        key = qs.get("key", [""])[0]
+        raw = qs.get("value", [""])[0]
+        if key not in self.SETTABLE:
+            return {"ok": False, "error": f"변경 불가 설정: {key}"}
+        kind = self.SETTABLE[key][1]
+        try:
+            if kind == "bool":
+                val = raw.lower() in ("1", "true", "on", "yes")
+            elif kind.startswith("int:"):
+                lo, hi = (int(x) for x in kind.split(":")[1:])
+                val = max(lo, min(hi, int(raw)))
+            elif kind.startswith("float:"):
+                lo, hi = (float(x) for x in kind.split(":")[1:])
+                val = max(lo, min(hi, float(raw)))
+            elif kind.startswith("choice:"):
+                allowed = kind.split(":", 1)[1].split(",")
+                if raw not in allowed:
+                    return {"ok": False, "error": f"허용값: {allowed}"}
+                val = raw
+            else:
+                val = raw.strip()
+        except ValueError:
+            return {"ok": False, "error": "값 형식 오류"}
+        setattr(self.config, key, val)
+        # 런타임 변경임을 명시 — config 파일은 그대로다(재시작하면 되돌아간다)
+        return {"ok": True, "key": key, "value": val, "note": "이 서버 세션에만 적용(파일 미변경)"}
+
     def _auth_info(self) -> dict:
         # 저장된 로그인 설정(네트워크 호출 없음, 즉시).
         from .auth import load_auth, AUTH_FILE
@@ -1280,6 +1418,10 @@ class MakerWebHandler(BaseHTTPRequestHandler):
             self._json(self._ui_snap(parse_qs(parsed.query)))
         elif parsed.path == "/api/ui-image":
             self._serve_image(parse_qs(parsed.query).get("f", [""])[0])
+        elif parsed.path == "/api/pipeline":
+            self._json(self._pipeline_view())
+        elif parsed.path == "/api/setting":
+            self._json(self._set_setting(parse_qs(parsed.query)))
         elif parsed.path == "/api/auth":
             self._json(self._auth_info())
         elif parsed.path == "/api/auth-check":
