@@ -306,6 +306,73 @@ class TestWebServer(unittest.TestCase):
         self.assertNotEqual(s1, s2)
         self.assertEqual(s1, web.MakerWebHandler._ui_slug("http://h/a/b"))  # 결정론
 
+    def test_node_code_directory_is_not_a_sync_problem(self):
+        # 6회차 검수 버그: 디렉토리를 가리키는 컨테이너 노드(repo/feature — 실그래프 152개)에
+        # "Sync 필요"라고 거짓 안내해, 멀쩡한 그래프를 다시 돌리게 만들었다.
+        # 진짜 누락 파일(101개)만 Sync 안내여야 한다.
+        from pathlib import Path as _P
+        from xgen_maker.kg.graph import Graph as _G
+        from xgen_maker.config import MakerConfig as _C
+        with tempfile.TemporaryDirectory() as t:
+            root = _P(t) / "demo"; (root / "pkg").mkdir(parents=True)
+            (root / "real.py").write_text("x = 1" + chr(10), encoding="utf-8")
+            g = _G()
+            g.add_node("demo", "repo", "demo", "demo", str(root))       # 절대경로 + 디렉토리
+            g.add_node("demo:pkg", "feature", "pkg", "demo", "pkg")     # 상대경로 + 디렉토리
+            g.add_node("demo:real.py", "file", "real.py", "demo", "real.py")
+            g.add_node("demo:gone.py", "file", "gone.py", "demo", "gone.py")  # 진짜 없음
+            kg = _P(t) / "kg.json"; g.save(kg)
+            h = web.MakerWebHandler.__new__(web.MakerWebHandler)
+            h.config = _C(repos={"demo": str(root)}, kg_path=str(kg),
+                          worklogs_dir=str(_P(t) / "wl"), llm_enabled=False)
+            h.graph = g
+            for nid in ("demo", "demo:pkg"):
+                r = h._node_code(nid)
+                self.assertFalse(r["ok"])
+                self.assertIn("디렉토리", r["error"], nid)
+                self.assertNotIn("Sync", r["error"], f"{nid}: 거짓 Sync 안내")
+            gone = h._node_code("demo:gone.py")
+            self.assertIn("Sync", gone["error"])      # 진짜 누락은 Sync 안내 유지
+            self.assertTrue(h._node_code("demo:real.py")["ok"])
+
+    def test_node_code_absolute_path_cannot_escape_repo(self):
+        # Path의 '절대경로가 root를 덮어쓰는' 성질에 기대면 조용히 root 밖을 읽는다
+        from pathlib import Path as _P
+        from xgen_maker.kg.graph import Graph as _G
+        from xgen_maker.config import MakerConfig as _C
+        with tempfile.TemporaryDirectory() as t:
+            root = _P(t) / "demo"; root.mkdir()
+            outside = _P(t) / "outside"; outside.mkdir()
+            (outside / "secret.py").write_text("KEY = 1" + chr(10), encoding="utf-8")
+            g = _G()
+            g.add_node("demo:esc", "file", "secret.py", "demo", str(outside / "secret.py"))
+            kg = _P(t) / "kg.json"; g.save(kg)
+            h = web.MakerWebHandler.__new__(web.MakerWebHandler)
+            h.config = _C(repos={"demo": str(root)}, kg_path=str(kg),
+                          worklogs_dir=str(_P(t) / "wl"), llm_enabled=False)
+            h.graph = g
+            r = h._node_code("demo:esc")
+            self.assertFalse(r["ok"])
+            self.assertIn("이탈", r["error"])
+
+    def test_repo_drilldown_excludes_its_own_container(self):
+        # 레포 내부 뷰에 그 레포 자신(kind=repo)이 섞이면, 클릭 시 같은 레포로 다시
+        # 드릴다운돼 제자리를 맴돈다
+        from pathlib import Path as _P
+        from xgen_maker.kg.graph import Graph as _G
+        from xgen_maker.config import MakerConfig as _C
+        with tempfile.TemporaryDirectory() as t:
+            g = _G()
+            g.add_node("demo", "repo", "demo", "demo", "/x/demo")
+            g.add_node("demo:a.py", "file", "a.py", "demo", "a.py")
+            kg = _P(t) / "kg.json"; g.save(kg)
+            h = web.MakerWebHandler.__new__(web.MakerWebHandler)
+            h.config = _C(repos={"demo": "/x/demo"}, kg_path=str(kg),
+                          worklogs_dir=str(_P(t) / "wl"), llm_enabled=False)
+            h.graph = g
+            sg = h._repo_subgraph("demo", 50)
+            self.assertEqual([n["id"] for n in sg["nodes"]], ["demo:a.py"])
+
     def test_graph_reads_survive_concurrent_mutation(self):
         # 5회차 검수 버그: 기존 코드는 sync 중 순회 크래시를 재시도로 막고 있었는데
         # 내가 새로 넣은 그래프 함수들엔 그 가드가 없어, Sync 중 그래프 탭이 500이 났다.

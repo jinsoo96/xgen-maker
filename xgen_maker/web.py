@@ -655,6 +655,12 @@ document.getElementById('stopbtn').onclick=()=>{
 _RUN_MODES = ("plan", "observe", "act")  # 이 밖의 값은 거부(모르는 모드가 쓰기로 새지 않게)
 
 
+def kind_label(node: dict) -> str:
+    """노드 종류를 사람 말로(오류 메시지용)."""
+    return {"repo": "레포 루트", "feature": "기능 묶음", "domain": "도메인"}.get(
+        node.get("kind", ""), node.get("kind", "") or "컨테이너")
+
+
 def _is_link_local(url: str) -> bool:
     """링크로컬(169.254/16, fe80::) — 클라우드 메타데이터(169.254.169.254) 포함.
 
@@ -881,7 +887,10 @@ class MakerWebHandler(BaseHTTPRequestHandler):
         adj = self._adjacency()
 
         def read():
-            inside = [nid for nid, n in list(g.nodes.items()) if n["repo"] == repo]
+            # kind=repo(그 레포 자신)은 제외 — 이미 그 안에 들어와 있는데 컨테이너가
+            # 같이 뜨면 클릭 시 같은 레포로 다시 드릴다운돼 제자리를 맴돈다.
+            inside = [nid for nid, n in list(g.nodes.items())
+                      if n["repo"] == repo and n.get("kind") != "repo"]
             if not inside:
                 return {"nodes": [], "edges": [], "reason": f"'{repo}' 레포 노드 없음"}
             inside.sort(key=lambda nid: -len(adj.get(nid, ())))
@@ -966,10 +975,19 @@ class MakerWebHandler(BaseHTTPRequestHandler):
         if not rel:
             return {"ok": False, "error": "이 노드엔 파일 경로가 없습니다"}
         root = Path(repo_path).resolve()
-        full = (root / rel).resolve()
+        # repo/feature 노드의 path는 절대경로(레포 루트)다. Path의 '절대경로가 root를
+        # 통째로 덮어쓰는' 성질에 기대면 조용히 root 밖을 가리킬 수 있으니 명시 처리한다.
+        rel_p = Path(rel)
+        full = rel_p.resolve() if rel_p.is_absolute() else (root / rel_p).resolve()
         # is_relative_to — startswith는 이름이 겹치는 형제 디렉토리(…/<repo>-backup)를 통과시킨다
         if not full.is_relative_to(root):
             return {"ok": False, "error": "경로 이탈 차단"}
+        if full.is_dir():
+            # 디렉토리(레포/피처 같은 컨테이너 노드) — 파일이 아닐 뿐 그래프는 정상이다.
+            # 여기서 'Sync 필요'라고 하면 멀쩡한 그래프를 다시 돌리게 만드는 거짓 안내다.
+            return {"ok": False,
+                    "error": f"이 노드는 파일이 아니라 디렉토리입니다({kind_label(n)}) — "
+                             "안쪽 파일 노드를 선택하세요"}
         if not full.is_file():
             return {"ok": False, "error": "파일 없음 — 그래프가 최신 코드와 어긋남(Sync 필요)"}
         try:
