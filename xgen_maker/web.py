@@ -449,7 +449,7 @@ function render(t){
   h+='<div class=muted style="margin-bottom:10px">실행 중 실시간 검증은 <b>실행</b> 탭 오른쪽 진행 패널에서 단계별로 보입니다. 여기는 지난 검증 이력 — 줄을 누르면 오른쪽에 단계별 상세.</div>';
   if(!d.runs.length){h+='<div class=muted>아직 검증 이력이 없습니다. observe/act 모드로 실제 코드를 고치면 각 반복의 검증 결과가 여기 쌓입니다(plan 모드는 코드 미접촉이라 제외).</div>';el.innerHTML=h;return;}
   h+='<div class="histcols"><div class="histlist"><table><tr><th>쿼리</th><th>반복</th><th>sandbox</th><th>checks</th><th>judge</th></tr>'+
-   d.runs.map(r=>`<tr class="hrow" data-sid="${esc(r.session)}"><td>${esc(r.query).slice(0,30)}</td><td>${r.iterations}</td><td><span class="badge ${cls(r.sandbox)}">${esc(r.sandbox)}</span></td><td><span class="badge ${cls(r.checks_status)}">${esc(r.checks_status)}</span></td><td><span class="badge ${cls(r.judge)}">${esc(r.judge)}</span></td></tr>`).join('')+'</table></div>'+
+   d.runs.map(r=>`<tr class="hrow" data-sid="${esc(r.session)}"><td>${esc(r.query).slice(0,30)}</td><td>${r.iterations}</td><td><span class="badge ${cls(r.sandbox)}">${esc(r.sandbox)}</span></td><td><span class="badge ${cls(r.checks_status)}">${esc(r.checks_status)}</span></td><td><span class="badge ${cls(r.judge)}">${esc(r.judge)}</span>${r.judge_source?` <span class=muted style="font-size:11px">${r.judge_source==='heuristic'?'규칙판정':'AI판정'}${r.judge_score!=null?' '+r.judge_score:''}</span>`:''}</td></tr>`).join('')+'</table></div>'+
    '<aside id="testdetail"><div class=muted>왼쪽 검증 줄을 누르면 그 세션의 단계별 상세가 여기 뜹니다.</div></aside></div>';
   el.innerHTML=h;
   const td=document.getElementById('testdetail');

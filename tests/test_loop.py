@@ -162,6 +162,48 @@ class TestJournalAndVerify(unittest.TestCase):
         self.assertEqual(suggest_profiles(["svc-frontend", "svc-core"], None),
                          ["svc-core", "svc-frontend"])  # identity
 
+class TestDependentsReachAgent(unittest.TestCase):
+    """9회차 검수(로직 추적): 회귀는 '나를 쓰는 쪽'에서 나는데, 에이전트 프롬프트엔
+    정방향 체인만 들어가 의존자를 몰랐다. impact(역방향)를 프롬프트에 넣는다."""
+
+    def test_chain_is_forward_impact_is_reverse(self):
+        # 두 검색의 방향이 실제로 다르다는 사실을 고정(뒤바뀌면 회귀방지가 무력화)
+        import tempfile
+        from pathlib import Path
+        from xgen_maker.kg.build import build_repo
+        from xgen_maker.kg.search import retrieve_chain, impact
+        with tempfile.TemporaryDirectory() as t:
+            repo = Path(t) / "demo"
+            (repo / "service").mkdir(parents=True)
+            (repo / "service" / "pay.py").write_text(
+                '"""결제."""\ndef charge(user, amount):\n    return amount\n', encoding="utf-8")
+            (repo / "service" / "report.py").write_text(
+                '"""리포트."""\nfrom service.pay import charge\n'
+                'def monthly(u):\n    return charge(u, 100)\n', encoding="utf-8")
+            g = build_repo("demo", repo)
+            seed = "demo:service/pay.py#charge"
+            chain = [c["name"] for c in retrieve_chain(g, "charge 결제", k=6, hops=2)["chain"]]
+            deps = [n["path"] for n in impact(g, seed, depth=3)]
+            self.assertNotIn("service/report.py", " ".join(chain),
+                             "chain은 정방향이라 의존자를 못 찾는다(설계 사실)")
+            self.assertIn("service/report.py", deps,
+                          "impact는 역방향이라 의존자를 찾아야 한다")
+
+    def test_prompt_includes_dependents_block(self):
+        from xgen_maker.loop.implement import build_prompt
+        landing = [{"kind": "function", "name": "charge", "repo": "demo",
+                    "path": "service/pay.py", "line": 2}]
+        deps = [{"kind": "file", "name": "report.py", "repo": "demo",
+                 "path": "service/report.py", "distance": 2}]
+        p = build_prompt("charge 고쳐줘", "refactor", landing, "", dependents=deps)
+        self.assertIn("이 코드를 쓰는 곳", p)
+        self.assertIn("service/report.py", p)
+        # repo 컨테이너 노드는 노이즈라 제외
+        deps2 = deps + [{"kind": "repo", "name": "demo", "repo": "demo", "path": "/x"}]
+        self.assertNotIn("[repo]", build_prompt("q", "refactor", landing, "", dependents=deps2))
+        # 의존자가 없으면 블록 자체가 안 나온다
+        self.assertNotIn("이 코드를 쓰는 곳", build_prompt("q", "refactor", landing, ""))
+
 
 if __name__ == "__main__":
     unittest.main()

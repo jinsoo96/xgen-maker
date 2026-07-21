@@ -48,7 +48,8 @@ RULES = """[규칙 — 반드시 준수]
 
 
 def build_prompt(query: str, intent: str, landing: list[dict], legacy_notes: str,
-                 chain: list[dict] | None = None) -> str:
+                 chain: list[dict] | None = None,
+                 dependents: list[dict] | None = None) -> str:
     landing_lines = "\n".join(
         f"- [{n['kind']}] {n['name']} — {n['repo']}:{n['path']}:{n.get('line', 0)}"
         for n in landing[:8])
@@ -61,9 +62,20 @@ def build_prompt(query: str, intent: str, landing: list[dict], legacy_notes: str
         if chain_lines:
             chain_block = ("\n[연결된 워크플로우 체인 — 착지점과 import/call/endpoint로 이어진 곳. "
                            "같이 봐야 회귀를 막는다]\n" + chain_lines + "\n")
+    # 의존자(나를 쓰는 쪽) — 회귀는 여기서 난다. chain은 정방향(내가 쓰는 쪽)이라
+    # 시그니처를 바꿔도 '누가 깨지는지'를 못 알려준다. 역방향을 따로 넣어야 한다.
+    dep_block = ""
+    if dependents:
+        dep_lines = "\n".join(
+            f"- [{d['kind']}] {d['name']} — {d['repo']}:{d.get('path', '')}"
+            f"{':' + str(d['line']) if d.get('line') else ''} (거리 {d.get('distance', '?')})"
+            for d in dependents[:12] if d.get("kind") != "repo")
+        if dep_lines:
+            dep_block = ("\n[이 코드를 쓰는 곳 — 시그니처·동작을 바꾸면 여기가 깨진다. "
+                         "바꿔야 하면 호출부까지 같이 고쳐라]\n" + dep_lines + "\n")
     return (f"[요청]\n{query}\n\n[intent] {intent}\n\n"
             f"[지식그래프 착지점 — 여기부터 조사]\n{landing_lines}\n"
-            f"{chain_block}\n[레거시 확인 메모]\n{legacy_notes or '(없음)'}\n\n{RULES}\n"
+            f"{chain_block}{dep_block}\n[레거시 확인 메모]\n{legacy_notes or '(없음)'}\n\n{RULES}\n"
             f"위 요청을 이 저장소에서 구현하라.")
 
 

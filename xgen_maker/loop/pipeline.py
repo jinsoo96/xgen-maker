@@ -282,9 +282,11 @@ class MakerLoop:
         diff_base = fetch_sha or base_branch
 
         # ⑥~⑧ 수렴 루프 — 구현 → 샌드박스+checks → judge → 실패 시 되먹여 재시도(통과까지)
+        # impact_nodes(역방향 의존자)를 에이전트에게도 넘긴다 — 지금까지 MR 초안에만
+        # 쓰여, 정작 코드를 고치는 에이전트는 '누가 이걸 쓰는지' 모른 채 시그니처를 바꿨다.
         conv = converge(config, repo_path, repo, query, intent, landing, chain_nodes,
                         legacy_notes, diff_base, repo_git, journal, cost=cost,
-                        graph=self.graph)
+                        graph=self.graph, dependents=impact_nodes)
         report["iterations"] = conv["iterations"]
         report["converged"] = conv["converged"]
 

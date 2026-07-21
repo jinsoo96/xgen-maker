@@ -102,7 +102,8 @@ def _feedback(checks: dict, sandbox: dict, judge_result: dict | None,
 
 def converge(config, repo_path: Path, repo: str, query: str, intent: str,
              landing: list, chain: list, legacy_notes: str,
-             base_branch: str, repo_git, journal, cost=None, graph=None) -> dict:
+             base_branch: str, repo_git, journal, cost=None, graph=None,
+             dependents: list | None = None) -> dict:
     """수렴 루프 실행. 반환 {converged, iterations, checks, sandbox, judge, changed, diff}."""
     max_iterations = max(1, getattr(config, "max_iterations", 3))
     feedback = ""
@@ -112,7 +113,8 @@ def converge(config, repo_path: Path, repo: str, query: str, intent: str,
         # 실시간 스트리밍 — 가장 긴 구현 단계 진입을 즉시 알림
         journal.event("implement", "start", n=iteration,
                       phase="retry" if feedback else "first")
-        prompt = build_prompt(query, intent, landing, legacy_notes, chain=chain)
+        prompt = build_prompt(query, intent, landing, legacy_notes, chain=chain,
+                              dependents=dependents)
         if feedback:
             prompt += "\n\n" + feedback
         # 중지 요청을 에이전트 실행 '도중'에도 보게 넘긴다(단계 경계만 보면

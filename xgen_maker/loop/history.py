@@ -99,6 +99,11 @@ def read_test_runs(worklogs_dir: str | Path, limit: int = 40) -> list[dict]:
             "regression": last.get("regression") or "-",
             "summary": last.get("summary", "") or (verify.get("reason", "") if verify else ""),
             "judge": (judge.get("status") if judge else "-"),
+            # 엔진은 heuristic/llm을 정직하게 기록한다. 여기서 status만 뽑아버리면
+            # '작고 집중된 diff면 무조건 통과'하는 휴리스틱 점수가 실제 품질 판정과
+            # 똑같은 초록 배지로 보인다 → 근거(점수·출처)를 같이 올린다.
+            "judge_score": (judge.get("score") if judge else None),
+            "judge_source": (judge.get("source") if judge else ""),
         })
         if len(runs) >= limit:
             break
