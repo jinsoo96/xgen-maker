@@ -398,9 +398,12 @@ function render(t){
   el.innerHTML=h;}).catch(tabErr(el));
  if(t==='mrs') jget('/api/mrs').then(d=>{
   const row=m=>`<tr><td class=muted style="white-space:nowrap">${esc(m.updated||'')}</td><td>!${esc(m.iid)}</td><td><span class="badge ${cls(m.state)}">${esc(m.state)}</span></td><td class=muted style="font-size:12px">${esc(m.project||'')}</td><td>${esc(m.source)}→${esc(m.target)}</td><td>${esc(m.title).slice(0,44)}</td><td><a href="${esc(m.url)}" target=_blank>열기</a></td></tr>`;
+  const trow=m=>`<tr><td class=muted style="white-space:nowrap">${esc(m.updated||'')}</td><td>!${esc(m.iid)}</td><td><span class="badge ${cls(m.state)}">${esc(m.state)}</span></td><td>${esc(m.author||'')}</td><td class=muted style="font-size:12px">${esc(m.project||'')}</td><td>${esc(m.source)}→${esc(m.target)}</td><td>${esc(m.title).slice(0,40)}</td><td><a href="${esc(m.url)}" target=_blank>열기</a></td></tr>`;
   const head='<tr><th>날짜</th><th>#</th><th>상태</th><th>프로젝트</th><th>브랜치</th><th>제목</th><th></th></tr>';
+  const thead='<tr><th>날짜</th><th>#</th><th>상태</th><th>작성자</th><th>프로젝트</th><th>브랜치</th><th>제목</th><th></th></tr>';
   el.innerHTML='<h3>MAKER가 만든 MR <span class=muted>(로컬 작업 기록에 남은 브랜치와 일치하는 것만)</span></h3><table>'+head+(d.maker.map(row).join('')||'<tr><td colspan=7 class=muted>아직 없음 — MAKER가 act 모드로 실제 push+MR한 기록이 없습니다(지금까지는 분석·로컬 브랜치만).</td></tr>')+'</table>'+
-   '<h3>내 MR (전체) <span class=muted>(GitLab: 내가 만든 MR, 최신순)</span></h3><table>'+head+(d.mine.map(row).join('')||'<tr><td colspan=7 class=muted>없음(토큰/네트워크 확인)</td></tr>')+'</table>';}).catch(tabErr(el));
+   '<h3>내 MR <span class=muted>(GitLab: 내가 만든 MR, 최신순)</span></h3><table>'+head+(d.mine.map(row).join('')||'<tr><td colspan=7 class=muted>없음(토큰/네트워크 확인)</td></tr>')+'</table>'+
+   '<h3>팀 전체 MR <span class=muted>(누가 뭘 올렸나 — 내 것 외 포함)</span></h3><table>'+thead+((d.team||[]).map(trow).join('')||'<tr><td colspan=8 class=muted>없음(토큰 권한 범위 확인)</td></tr>')+'</table>';}).catch(tabErr(el));
  if(t==='branches'){
   // window.__repos가 /api/info 미도착으로 아직 없을 수 있음 → 딱 한 번만 채우고 재렌더.
   // (빈 배열은 '레포 없음'의 정상 상태이므로 무한 refetch하지 않는다)
@@ -703,9 +706,14 @@ class _SSEJournal:
         self.dir = real.dir
         self.slug = real.slug
 
+    def cancelled(self) -> bool:
+        # 오래 걸리는 단계(에이전트)가 실행 도중 폴링한다 — 단계 경계만으론
+        # 중지를 눌러도 에이전트가 타임아웃까지 레포를 계속 고친다.
+        return self._cancel is not None and self._cancel.is_set()
+
     def event(self, step, status, **data):
         # 협조적 취소 — 매 단계 경계에서 확인. 눌렸으면 파이프라인을 즉시 끊는다.
-        if self._cancel is not None and self._cancel.is_set():
+        if self.cancelled():
             raise _Cancelled()
         self._real.event(step, status, **data)
         detail = json.dumps({k: v for k, v in data.items()
@@ -1352,9 +1360,10 @@ class MakerWebHandler(BaseHTTPRequestHandler):
             entries.sort(key=lambda e: e.get("ts", ""), reverse=True)
             self._json({"learnings": entries[:40]})
         elif parsed.path == "/api/mrs":
-            from .loop.gitlab_observe import my_mrs, maker_mrs
+            from .loop.gitlab_observe import my_mrs, maker_mrs, team_mrs
             self._json({"mine": my_mrs(self.config, "all", 15),
-                        "maker": maker_mrs(self.config, 15)})
+                        "maker": maker_mrs(self.config, 15),
+                        "team": team_mrs(self.config, "all", 30)})
         elif parsed.path == "/api/status":
             from .loop import jenkins, argocd
             from .loop.release import ladder

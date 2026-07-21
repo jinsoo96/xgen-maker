@@ -5,9 +5,40 @@
 """
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
+import threading
+import time
 from pathlib import Path
+
+
+def _kill_tree(proc: subprocess.Popen) -> None:
+    """에이전트 프로세스를 자식까지 죽인다.
+
+    shell=True면 셸이 먼저 뜨고 그 아래에서 실제 에이전트가 돈다. 직접 자식만
+    죽이면 진짜 작업 프로세스가 고아로 남아 레포를 계속 고친다.
+    """
+    if proc.poll() is not None:
+        return
+    if os.name == "nt":
+        try:  # /T = 트리 전체, /F = 강제
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                           capture_output=True, timeout=15)
+            return
+        except (OSError, subprocess.SubprocessError):
+            pass
+    else:
+        try:
+            os.killpg(os.getpgid(proc.pid), 9)
+            return
+        except (OSError, AttributeError):
+            pass
+    try:
+        proc.kill()
+    except OSError:
+        pass
+
 
 RULES = """[규칙 — 반드시 준수]
 1. 기능(소스) 코드만 수정한다. docker/compose/CI/인프라 파일은 절대 만지지 않는다.
@@ -37,7 +68,8 @@ def build_prompt(query: str, intent: str, landing: list[dict], legacy_notes: str
 
 
 def run_agent(repo_path: str | Path, prompt: str, session_dir: Path,
-              agent_cmd: str | None = None, timeout: int = 1800) -> dict:
+              agent_cmd: str | None = None, timeout: int = 1800,
+              should_cancel=None) -> dict:
     prompt_path = session_dir / "agent-prompt.md"
     prompt_path.write_text(prompt, encoding="utf-8")
 
@@ -57,15 +89,42 @@ def run_agent(repo_path: str | Path, prompt: str, session_dir: Path,
             command = ["cmd", "/c", base, "--permission-mode", "acceptEdits", "-p"]
         stdin_payload = prompt
         shell = False
+    # subprocess.run은 블로킹이라 실행 중 중지 요청을 볼 수 없다. 그러면 사용자가
+    # 중지를 눌러도 에이전트가 타임아웃(기본 30분)까지 레포를 계속 고친다.
+    # → Popen + 폴링으로 중지를 감시하고, 요청 시 프로세스 트리를 죽인다.
     try:
-        result = subprocess.run(command, cwd=repo_path, shell=shell, capture_output=True,
-                                input=stdin_payload, text=True, encoding="utf-8",
-                                errors="replace", timeout=timeout)
-    except subprocess.TimeoutExpired:
-        return {"ok": False, "output": "", "error": f"에이전트 타임아웃({timeout}s)"}
+        proc = subprocess.Popen(command, cwd=repo_path, shell=shell,
+                                stdin=subprocess.PIPE if stdin_payload else subprocess.DEVNULL,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True, encoding="utf-8", errors="replace")
     except (OSError, FileNotFoundError) as error:
         return {"ok": False, "output": "", "error": f"에이전트 실행 실패: {error}"}
-    output = (result.stdout or "") + (result.stderr or "")
+
+    box: dict = {}
+
+    def pump():
+        try:
+            box["out"] = proc.communicate(input=stdin_payload)
+        except Exception as e:  # noqa: BLE001 — 종료 경합 시 파이프 오류는 무시
+            box["out"] = ("", str(e))
+
+    worker = threading.Thread(target=pump, daemon=True)
+    worker.start()
+    deadline = time.monotonic() + timeout
+    while worker.is_alive():
+        if should_cancel is not None and should_cancel():
+            _kill_tree(proc)
+            worker.join(timeout=5)
+            return {"ok": False, "output": "", "error": "중지됨(사용자 요청)",
+                    "cancelled": True}
+        if time.monotonic() > deadline:
+            _kill_tree(proc)
+            worker.join(timeout=5)
+            return {"ok": False, "output": "", "error": f"에이전트 타임아웃({timeout}s)"}
+        worker.join(timeout=0.25)
+    stdout, stderr = box.get("out", ("", ""))
+    output = (stdout or "") + (stderr or "")
     (session_dir / "agent-output.log").write_text(output, encoding="utf-8")
-    return {"ok": result.returncode == 0, "output": output[-4000:],
-            "error": None if result.returncode == 0 else f"exit={result.returncode}"}
+    code = proc.returncode
+    return {"ok": code == 0, "output": output[-4000:],
+            "error": None if code == 0 else f"exit={code}"}

@@ -30,6 +30,15 @@ class Journal:
         self.events: list[dict] = []
         self.event("session_start", "ok", query=query)
 
+    def cancelled(self) -> bool:
+        """사용자가 중지를 요청했는가. CLI 경로엔 중지 개념이 없어 항상 False.
+
+        오래 걸리는 단계(에이전트 실행 등)는 단계 경계뿐 아니라 실행 '도중'에도
+        이걸 폴링해야 한다. 안 그러면 중지를 눌러도 그 단계가 끝날 때까지(에이전트는
+        기본 30분) 계속 돌며 레포를 고친다.
+        """
+        return False
+
     def event(self, step: str, status: str, **data) -> None:
         record = {"ts": time.time(),
                   "iso": datetime.now(timezone.utc).isoformat(timespec="seconds"),

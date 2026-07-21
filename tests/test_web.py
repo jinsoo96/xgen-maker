@@ -704,6 +704,62 @@ class TestObserveLoopOverSSE(unittest.TestCase):
             self.assertEqual((runs[0]["checks_status"], runs[0]["judge"]), ("ok", "pass"))
 
 
+class TestStopActuallyKillsAgent(unittest.TestCase):
+    """중지가 '요청만' 하고 끝나지 않는지 — 실행 중인 코딩 에이전트를 실제로 죽이는지.
+
+    7회차 검수에서 실증된 버그: subprocess.run이 블로킹이라 중지를 눌러도 에이전트가
+    타임아웃(기본 30분)까지 레포를 계속 고쳤다. /api/stop은 ok:true를 반환해 거짓 안심을 줬다.
+    """
+    NL = chr(10)
+    # 느린 에이전트: 0.3초마다 파일을 쓴다(중지 후에도 쓰면 증거)
+    SLOW = ("import pathlib, time" + chr(10) +
+            "for i in range(20):" + chr(10) +
+            "    pathlib.Path('w%d.txt' % i).write_text('x', encoding='utf-8')" + chr(10) +
+            "    time.sleep(0.3)" + chr(10))
+
+    def test_cancel_kills_running_agent_process(self):
+        import threading
+        import time as _t
+        from xgen_maker.loop.implement import run_agent
+        with tempfile.TemporaryDirectory() as t:
+            work = Path(t) / "repo"; work.mkdir()
+            sess = Path(t) / "sess"; sess.mkdir()
+            stub = Path(t) / "slow.py"; stub.write_text(self.SLOW, encoding="utf-8")
+            flag = {"stop": False}
+            res = {}
+
+            def go():
+                res["r"] = run_agent(work, "prompt", sess,
+                                     '"' + sys.executable + '" "' + str(stub) + '"',
+                                     timeout=60, should_cancel=lambda: flag["stop"])
+            th = threading.Thread(target=go, daemon=True); th.start()
+            # 에이전트가 실제로 쓰기 시작할 때까지 대기
+            for _ in range(60):
+                if list(work.glob("w*.txt")):
+                    break
+                _t.sleep(0.1)
+            wrote_at_stop = len(list(work.glob("w*.txt")))
+            self.assertTrue(wrote_at_stop >= 1, "에이전트가 시작조차 안 됨")
+            flag["stop"] = True
+            th.join(timeout=20)
+            self.assertFalse(th.is_alive(), "중지 후에도 run_agent가 안 돌아옴")
+            after = len(list(work.glob("w*.txt")))
+            _t.sleep(1.2)  # 고아 프로세스가 살아있다면 이 사이에 더 썼을 것
+            final = len(list(work.glob("w*.txt")))
+            self.assertEqual(final, after,
+                             f"중지 후에도 에이전트가 계속 씀({after}→{final}) — 트리 kill 실패")
+            self.assertLess(final, 20, "에이전트가 끝까지 실행됨 — 중지가 안 걸림")
+            self.assertTrue(res["r"].get("cancelled"))
+            self.assertFalse(res["r"]["ok"])
+
+    def test_journal_has_cancelled_hook(self):
+        # CLI 경로(기본 Journal)는 중지 개념이 없어 항상 False여야 한다
+        from xgen_maker.loop.journal import Journal
+        with tempfile.TemporaryDirectory() as t:
+            j = Journal(t, "q", verbose=False)
+            self.assertFalse(j.cancelled())
+
+
 class TestJournalInjection(unittest.TestCase):
     """웹 동시성 근본해결 — 전역 몽키패치 대신 인스턴스별 journal 팩토리 주입."""
 

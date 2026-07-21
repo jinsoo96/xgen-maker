@@ -115,8 +115,11 @@ def converge(config, repo_path: Path, repo: str, query: str, intent: str,
         prompt = build_prompt(query, intent, landing, legacy_notes, chain=chain)
         if feedback:
             prompt += "\n\n" + feedback
+        # 중지 요청을 에이전트 실행 '도중'에도 보게 넘긴다(단계 경계만 보면
+        # 중지 눌러도 에이전트가 타임아웃까지 레포를 계속 고친다)
         agent_result = run_agent(repo_path, prompt, journal.dir,
-                                 config.agent_cmd, config.agent_timeout)
+                                 config.agent_cmd, config.agent_timeout,
+                                 should_cancel=getattr(journal, "cancelled", None))
         if cost is not None:
             cost.add_agent(prompt, agent_result.get("output", ""))
         if not agent_result["ok"]:

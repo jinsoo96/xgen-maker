@@ -78,17 +78,38 @@ def activity(config, repo: str, query: str = "", limit: int = 30) -> dict:
     return {"commits": commits[:limit], "query": q}
 
 
-def my_mrs(config, state: str = "all", limit: int = 15) -> list[dict]:
-    """본인(토큰 소유자) MR 이력."""
-    data = _api(config, f"/merge_requests?scope=created_by_me&state={state}"
-                        f"&per_page={limit}&order_by=updated_at")
+def _mr_rows(data) -> list[dict]:
     if not isinstance(data, list):
         return []
     return [{"iid": m["iid"], "state": m["state"], "title": m["title"],
              "source": m["source_branch"], "target": m["target_branch"],
              "url": m.get("web_url", ""), "updated": m.get("updated_at", "")[:10],
-             "project": m.get("references", {}).get("full", "")}
+             "project": m.get("references", {}).get("full", ""),
+             "author": (m.get("author") or {}).get("name", "")}
             for m in data]
+
+
+def my_mrs(config, state: str = "all", limit: int = 15) -> list[dict]:
+    """본인(토큰 소유자) MR 이력."""
+    return _mr_rows(_api(config, f"/merge_requests?scope=created_by_me&state={state}"
+                                 f"&per_page={limit}&order_by=updated_at"))
+
+
+def team_mrs(config, state: str = "all", limit: int = 30, repo: str | None = None) -> list[dict]:
+    """팀 전체 MR — 나뿐 아니라 누가 뭘 올렸는지. repo 지정 시 그 프로젝트만.
+
+    프로젝트 범위가 있으면 그걸 쓰고(권한 내 정확), 없으면 토큰이 볼 수 있는
+    전체에서 최신순으로 가져온다.
+    """
+    if repo:
+        enc = _project_enc(config, repo)
+        if enc is None:
+            return []
+        path = (f"/projects/{enc}/merge_requests?state={state}"
+                f"&per_page={limit}&order_by=updated_at")
+    else:
+        path = f"/merge_requests?scope=all&state={state}&per_page={limit}&order_by=updated_at"
+    return _mr_rows(_api(config, path))
 
 
 def maker_mrs(config, limit: int = 15) -> list[dict]:
