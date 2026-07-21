@@ -235,8 +235,15 @@ document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
  if(location.hash.slice(1)!==b.dataset.t)history.replaceState(null,'','#'+b.dataset.t);  // 탭 딥링크(북마크·공유)
  if(b.dataset.t!=='run' && !loaded[b.dataset.t]){loaded[b.dataset.t]=1; render(b.dataset.t);}
 });
-// 새로고침/링크로 들어와도 해시의 탭을 연다
-(function(){const h=location.hash.slice(1);const tb=h&&document.querySelector('nav button[data-t="'+h+'"]');if(tb)tb.click();})();
+// 해시 → 탭. 최초 로드뿐 아니라 hashchange도 들어야 한다(같은 문서 내 해시 이동은
+// 스크립트를 재실행하지 않으므로, 안 들으면 링크·뒤로가기로 탭이 안 바뀐다).
+function openTabFromHash(){
+ const h=location.hash.slice(1);
+ const tb=h&&document.querySelector('nav button[data-t="'+h+'"]');
+ if(tb&&!tb.classList.contains('on'))tb.click();
+}
+window.addEventListener('hashchange',openTabFromHash);
+openTabFromHash();
 function jget(url){return fetch(url).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json();});}
 function tabErr(el){return e=>{el.innerHTML='<div class=muted>불러오기 실패: '+esc(e&&e.message||e)+' — 서버/설정 확인</div>';};}
 const KCOLOR={repo:'#e0894a',function:'#3aa8c9',class:'#d99a63',file:'#7aa0b4',route:'#8bd5a0',service:'#c98bd5',env:'#d5c98b',package:'#b0b0c0'};
@@ -376,6 +383,7 @@ function render(t){
   }).catch(tabErr(el));
  if(t==='graph') jget('/api/graph').then(d=>{
   let h='<h3>코드 지식그래프 <span class=muted>(레포 간 → 레포 내부 → 코드, 눌러서 파고들기)</span></h3>';
+  h+='<div id=ghealth class=muted style="font-size:12px;margin-bottom:6px">건강도 확인 중…</div>';
   h+='<div id=gcrumb></div>';
   h+='<div class=gsearch><input id=gq placeholder="코드를 바로 검색 (예: config, router, 로그인 처리)" autocomplete=off><select id=gn title="표시 노드 수"><option value=80>80</option><option value=160 selected>160</option><option value=320>320</option></select><button id=gbtn>검색</button></div>';
   h+='<div id=gwrap><svg id=gsvg></svg><div id=gtip></div><div id=gedit></div></div>';
@@ -425,6 +433,18 @@ function render(t){
   gn.onchange=()=>{const c=crumb.querySelector('.cbc')?.textContent||'';
    if(c.startsWith('검색: '))search(); else if(c&&c!=='전체 레포')showRepo(c);};
   showRepos();  // 탭 열면 레포 간 그래프부터
+  // 건강도 — '항시 최신인가 / 제대로 구축됐나'를 주장 대신 숫자로
+  jget('/api/graph-health').then(hh=>{
+   const gh=document.getElementById('ghealth');if(!gh)return;
+   const stale=hh.stale_repos, acc=hh.accuracy||{};
+   const badge=(ok,txt)=>`<span class="badge ${ok?'ok':'fail'}">${txt}</span>`;
+   let s=badge(stale===0,stale===0?'최신':stale+'개 레포 뒤짐')+' ';
+   s+=badge(hh.dangling===0,'끊긴 엣지 '+hh.dangling)+' ';
+   if(acc.pct!=null)s+=badge(acc.pct>=90,'심볼 정확도 '+acc.pct+'%')+' ';
+   s+=`<span class=muted>표본 ${acc.checked||0}개 · 고아 ${hh.orphans} · ${(hh.nodes||0).toLocaleString()}노드/${(hh.edges||0).toLocaleString()}엣지</span>`;
+   if(stale)s+=`<br><span class=muted>뒤진 레포: ${hh.freshness.filter(f=>f.stale).map(f=>esc(f.repo)).join(', ')} — ⟳ 지금 동기화 누르면 맞춰집니다</span>`;
+   gh.innerHTML=s;
+  }).catch(()=>{const gh=document.getElementById('ghealth');if(gh)gh.textContent='';});
   }).catch(tabErr(el));
  if(t==='history') jget('/api/history').then(d=>{
   el.innerHTML='<h3>작업 이력 <span class=muted>(줄을 누르면 단계별 진행·요약·되돌리기)</span></h3>'+
@@ -1110,6 +1130,66 @@ class MakerWebHandler(BaseHTTPRequestHandler):
         "preview_base": ("화면검증 프리뷰 주소", "str"),
     }
 
+    def _graph_health(self) -> dict:
+        """그래프가 '최신인지·제대로 구축됐는지'를 숫자로. 주장 대신 측정을 UI에 올린다."""
+        import random
+        from pathlib import Path
+        from .kg.build import git_head
+
+        def read():
+            g = self.graph
+            meta = g.meta or {}
+            heads = meta.get("repo_heads", {}) or {}
+            # 1) 신선도 — 기록된 HEAD vs 현재 git HEAD
+            fresh = []
+            for s in meta.get("sources", []):
+                repo, root = s.get("repo"), s.get("root")
+                if not repo or not root:
+                    continue
+                rec = (heads.get(repo) or "")[:12]
+                cur = (git_head(root) or "")[:12]
+                fresh.append({"repo": repo, "recorded": rec, "current": cur,
+                              "stale": bool(cur and rec != cur), "no_head": not rec})
+            # 2) 무결성
+            ids = set(g.nodes)
+            dangling = sum(1 for e in g.edges if e["src"] not in ids or e["dst"] not in ids)
+            linked = set()
+            for e in g.edges:
+                linked.add(e["src"]); linked.add(e["dst"])
+            # 3) 정확도 표본 — 심볼이 정말 그 파일 그 라인에 있나(빠르게 60개)
+            syms = [n for n in g.nodes.values()
+                    if n["kind"] in ("function", "class") and n.get("path") and n.get("line")]
+            rnd = random.Random(7)
+            sample = rnd.sample(syms, min(60, len(syms))) if syms else []
+            exact = checked = 0
+            for n in sample:
+                root = self.config.repos.get(n["repo"])
+                if not root:
+                    continue
+                f = Path(root) / n["path"]
+                if not f.is_file():
+                    continue
+                try:
+                    lines = f.read_text(encoding="utf-8-sig", errors="replace").splitlines()
+                except OSError:
+                    continue
+                checked += 1
+                ln, name = n["line"], n["name"].split(".")[-1]
+                if 1 <= ln <= len(lines) and name in lines[ln - 1]:
+                    exact += 1
+            return {
+                "nodes": len(g.nodes), "edges": len(g.edges),
+                "freshness": fresh,
+                "stale_repos": sum(1 for f in fresh if f["stale"]),
+                "dangling": dangling, "orphans": len(ids - linked),
+                "accuracy": {"checked": checked, "exact": exact,
+                             "pct": round(exact / checked * 100, 1) if checked else None},
+            }
+        return self._graph_read(read, {"nodes": 0, "edges": 0, "freshness": [],
+                                       "stale_repos": 0, "dangling": 0, "orphans": 0,
+                                       "accuracy": {"checked": 0, "exact": 0, "pct": None},
+                                       "reason": "그래프 동기화 중 — 잠시 후 다시"})
+
     def _pipeline_view(self) -> dict:
         from .loop.history import read_sessions, read_session_detail
         cfg = self.config
@@ -1418,6 +1498,8 @@ class MakerWebHandler(BaseHTTPRequestHandler):
             self._json(self._ui_snap(parse_qs(parsed.query)))
         elif parsed.path == "/api/ui-image":
             self._serve_image(parse_qs(parsed.query).get("f", [""])[0])
+        elif parsed.path == "/api/graph-health":
+            self._json(self._graph_health())
         elif parsed.path == "/api/pipeline":
             self._json(self._pipeline_view())
         elif parsed.path == "/api/setting":
