@@ -111,8 +111,10 @@ class TestWebServer(unittest.TestCase):
     def test_badges_always_have_pill_background(self):
         # 미정의 클래스(outcome 등)도 중립 배경 — 투명 배지 방지
         _, body = self._get("/")
-        self.assertIn(".badge{padding:2px 8px", body)
+        self.assertIn(".badge{display:inline-block;padding:2px 8px", body)
         self.assertIn("background:var(--neutral-bg)", body)
+        # 한글 라벨이 '답변 완/료'로 줄바꿈되지 않아야 한다
+        self.assertIn("white-space:nowrap", body)
         self.assertIn(".badge.ok", body)
         self.assertIn(".badge.fail", body)
 
@@ -329,10 +331,10 @@ class TestWebServer(unittest.TestCase):
             for nid in ("demo", "demo:pkg"):
                 r = h._node_code(nid)
                 self.assertFalse(r["ok"])
-                self.assertIn("디렉토리", r["error"], nid)
-                self.assertNotIn("Sync", r["error"], f"{nid}: 거짓 Sync 안내")
+                self.assertIn("폴더", r["error"], nid)
+                self.assertNotIn("동기화", r["error"], f"{nid}: 거짓 동기화 안내")
             gone = h._node_code("demo:gone.py")
-            self.assertIn("Sync", gone["error"])      # 진짜 누락은 Sync 안내 유지
+            self.assertIn("동기화", gone["error"])      # 진짜 누락은 Sync 안내 유지
             self.assertTrue(h._node_code("demo:real.py")["ok"])
 
     def test_node_code_absolute_path_cannot_escape_repo(self):
@@ -353,7 +355,7 @@ class TestWebServer(unittest.TestCase):
             h.graph = g
             r = h._node_code("demo:esc")
             self.assertFalse(r["ok"])
-            self.assertIn("이탈", r["error"])
+            self.assertIn("허용되지 않은 경로", r["error"])
 
     def test_repo_drilldown_excludes_its_own_container(self):
         # 레포 내부 뷰에 그 레포 자신(kind=repo)이 섞이면, 클릭 시 같은 레포로 다시
@@ -528,7 +530,7 @@ class TestWebServer(unittest.TestCase):
         h.config = web.MakerWebHandler.config
         r = h._ui_snap({"url": ["http://169.254.169.254/"]})
         self.assertFalse(r["ok"])
-        self.assertIn("링크로컬", r["error"])
+        self.assertIn("캡처할 수 없습니다", r["error"])
 
     def test_doctor_runs_in_subprocess_not_global_stdout(self):
         # 4회차 검수: contextlib.redirect_stdout은 전역 sys.stdout을 바꿔, doctor가 도는
