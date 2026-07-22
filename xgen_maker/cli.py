@@ -789,10 +789,10 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--config", default=None)
     p.add_argument("--kg", default=None)
     p.add_argument("--mode", choices=["plan", "observe", "act"], default=None,
-                   help="갈수록 더 많이 합니다(누적). "
-                        "plan=고칠 자리를 찾기까지(코드 무접촉) · "
-                        "observe=plan + 브랜치·수정·검증·커밋(내 PC에만) · "
-                        "act=observe + 원격 푸시·MR 생성(인가 검사 통과 필요). "
+                   help="아래로 갈수록 더 많이 합니다(누적). "
+                        "plan=사전 분석(코드 무접촉) · "
+                        "observe=개발 — 브랜치·수정·검증·커밋(내 PC에만) · "
+                        "act=브랜치 푸시·MR 생성(인가 검사 통과 필요). "
                         "미지정 시 설정값")
     p.set_defaults(func=cmd_run)
 

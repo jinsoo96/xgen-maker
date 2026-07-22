@@ -231,10 +231,10 @@ _PAGE = """<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
 <div id="lightbox"><div class="lbbar"><b id="lbcap"></b><a id="lbopen" href="#" target="_blank">새 탭에서 원본</a><span class="muted">아무 곳이나 누르면 닫힘 · Esc</span></div><img id="lbimg" alt=""></div>
 <div id="modehint" class="muted"></div>
 <form id="f"><input type="text" id="q" placeholder="예: 로그인 오류를 수정해줘 / 결제 API에 입력 검증을 추가해줘" autofocus>
- <select id="m" title="위에서 아래로 갈수록 더 많이 합니다(누적)">
-  <option value="plan">① 찾기만 — 코드 안 건드림</option>
-  <option value="observe">② 고치기 — 내 PC까지</option>
-  <option value="act">③ 고치고 올리기 — MR까지</option>
+ <select id="m" title="아래로 갈수록 더 많이 합니다(누적)">
+  <option value="plan">사전 분석</option>
+  <option value="observe">개발</option>
+  <option value="act">브랜치 푸시·MR 생성</option>
  </select>
  <button class="act" id="go">실행</button><button type="button" id="stopbtn" class="danger" style="display:none">■ 중지</button></form>
 <script>
@@ -713,9 +713,9 @@ const GLABEL={}; GATES_ALL.concat(GATES_PLAN).forEach(([keys,label])=>
  keys.split(' ').forEach(kk=>{GLABEL[kk]=label;}));
 function gatesFor(mode){return mode==='plan'?GATES_PLAN:GATES_ALL;}
 const MODEDESC={
- plan:'고칠 자리를 찾아 알려주기까지. 코드·브랜치를 만들지 않습니다.',
- observe:'①에 더해 — 최신 코드에서 브랜치를 따고, 에이전트가 고치고, 테스트로 검증하고, 커밋합니다. 내 PC에만 남고 원격에는 아무것도 올리지 않습니다.',
- act:'②에 더해 — 브랜치를 원격에 올리고 병합 요청(MR)을 만듭니다. 머지와 배포는 사람이 합니다.'};
+ plan:'고칠 자리를 찾아 알려줍니다. 코드와 브랜치를 만들지 않습니다.',
+ observe:'분석에 더해 브랜치를 따고, 코드를 고치고, 테스트로 검증하고 커밋합니다. 내 PC에만 남습니다.',
+ act:'개발에 더해 브랜치를 원격에 올리고 병합 요청을 만듭니다. 머지와 배포는 사람이 합니다.'};
 function showModeHint(){
  const m=document.getElementById('m'), h=document.getElementById('modehint');
  if(m&&h)h.textContent=MODEDESC[m.value]||'';
