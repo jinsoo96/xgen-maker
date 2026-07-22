@@ -73,7 +73,7 @@ class TestPipelineE2E(unittest.TestCase):
         loop = MakerLoop(self.config)
         report = loop.run("greet 함수가 이름 처리에서 에러 나는 버그 고쳐줘")
 
-        self.assertEqual(report["outcome"], "mr_prepared")
+        self.assertEqual(report["outcome"], "committed_local")
         self.assertTrue(report["branch"].startswith("fix/"))
         self.assertEqual(self._current_branch(), report["branch"])
 

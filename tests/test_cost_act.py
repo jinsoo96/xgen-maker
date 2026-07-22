@@ -77,7 +77,7 @@ class TestActMrRegression(unittest.TestCase):
              patch("xgen_maker.loop.authz.authorize", ok_authz), \
              patch("xgen_maker.loop.pipeline.create_gitlab_mr", fake_mr):
             report = MakerLoop(self.config).run("greet 함수 이름처리 버그 고쳐줘")
-        self.assertEqual(report["outcome"], "mr_prepared")
+        self.assertEqual(report["outcome"], "mr_created")
         self.assertEqual(len(pushes), 1)
         self.assertTrue(pushes[0].startswith(("fix/", "feature/")))
         self.assertEqual(mrs[0][0], "demo")

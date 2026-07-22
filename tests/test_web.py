@@ -842,7 +842,7 @@ class TestObserveLoopOverSSE(unittest.TestCase):
                 web.MakerWebHandler.config, web.MakerWebHandler.graph = prev_cfg, prev_graph
 
             self.assertIsNotNone(report, f"result 미수신 — steps={steps}")
-            self.assertEqual(report["outcome"], "mr_prepared", f"steps={steps}")
+            self.assertEqual(report["outcome"], "committed_local", f"steps={steps}")
             self.assertTrue(report["branch"].startswith("fix/"))
             self.assertTrue(landing, "우측 패널용 landing payload가 흘러야 함")
             for want in ("kg_search/start", "implement/ok", "checks/ok",
@@ -857,7 +857,7 @@ class TestObserveLoopOverSSE(unittest.TestCase):
             from xgen_maker.loop.history import read_sessions, read_session_detail, read_test_runs
             from xgen_maker.loop.rollback import action_from_session
             ss = read_sessions(cfg.worklogs_dir, 5)
-            self.assertEqual(ss[0]["outcome"], "mr_prepared")
+            self.assertEqual(ss[0]["outcome"], "committed_local")
             self.assertTrue(read_session_detail(cfg.worklogs_dir, ss[0]["session"])["steps"])
             self.assertTrue(action_from_session(cfg.worklogs_dir, ss[0]["session"]))
             runs = read_test_runs(cfg.worklogs_dir, 5)

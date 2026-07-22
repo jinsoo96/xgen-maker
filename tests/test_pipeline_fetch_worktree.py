@@ -83,7 +83,7 @@ class TestFetchLatestRelanding(unittest.TestCase):
             clone = _make_origin_and_clone(base)
             report = MakerLoop(self._cfg(base, clone)).run("greet 함수 이름처리 버그 고쳐줘")
             # fetch_latest 성공 + refresh + 재착지 블록이 크래시 없이 실행되고 수렴까지
-            self.assertEqual(report["outcome"], "mr_prepared")
+            self.assertEqual(report["outcome"], "committed_local")
             self.assertTrue(report["converged"])
             # journal에 fetch_latest ok 이벤트 + relanded 플래그(tmpdir 삭제 전 읽기)
             journal = Path(report["session_dir"]) / "journal.jsonl"

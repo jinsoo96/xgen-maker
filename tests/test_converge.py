@@ -97,7 +97,7 @@ class TestConvergenceLoop(unittest.TestCase):
         report = MakerLoop(self.config).run("greet 함수의 이름 처리 버그 고쳐줘")
         # 1회차 구문오류(py_compile은 항상 실행) → retry → 2회차 수정 → 수렴.
         # 자가수정이 실제로 동작해야 하므로 mr_prepared를 단정(회귀 마스킹 방지).
-        self.assertEqual(report["outcome"], "mr_prepared",
+        self.assertEqual(report["outcome"], "committed_local",
                          f"self-heal이 수렴에 실패: {report.get('outcome')} / {report.get('failed')}")
         self.assertTrue(report["converged"])
         self.assertGreaterEqual(report["iterations"], 2)

@@ -124,6 +124,7 @@ _PAGE = """<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
  #gcode tr.gcf{background:var(--primary-subtle)} #gcode tr.gcf .gcn{color:var(--primary);font-weight:700}
  #glegend{display:flex;flex-wrap:wrap;gap:12px;margin-top:8px;font-size:12px;color:var(--text2)} #glegend .lg{display:inline-flex;align-items:center;gap:5px}
  #glegend .lg i{width:11px;height:11px;border-radius:50%;display:inline-block}
+ #modehint{font-size:12px;padding:2px 2px 7px;line-height:1.5}
  .sessbar{display:flex;gap:10px;align-items:center;margin-bottom:10px}
  .sessbar input{flex:1;max-width:420px;padding:7px 11px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);color:var(--text)}
  .sessdel{padding:1px 8px;font-size:11px;line-height:1.7;opacity:.5;white-space:nowrap} .sessdel:hover{opacity:1;color:var(--danger);border-color:var(--danger)}
@@ -165,7 +166,7 @@ _PAGE = """<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
  /* 한글 라벨은 영문 코드보다 길다 — 줄바꿈되면 '답변 완/료'처럼 깨진다 */
  .badge{display:inline-block;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:500;background:var(--neutral-bg);color:var(--text2);white-space:nowrap}
  th{white-space:nowrap}
- .badge.ok,.merged,.fix,.Synced,.badge.mr_prepared,.badge.answered{background:var(--ok-bg);color:var(--ok-fg)}
+ .badge.ok,.merged,.fix,.Synced,.badge.mr_prepared,.badge.committed_local,.badge.mr_created,.badge.answered{background:var(--ok-bg);color:var(--ok-fg)}
  .badge.fail,.pitfall,.badge.checks_failed,.badge.judge_failed,.badge.unauthorized,.badge.push_failed{background:var(--err-bg);color:var(--err-fg)}
  .opened,.convention,.badge.planned{background:var(--info-bg);color:var(--info-fg)}
  .closed,.note,.badge.muted{background:var(--neutral-bg);color:var(--text2)}
@@ -218,8 +219,13 @@ _PAGE = """<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
 <div class="tab" id="tab-login"><div class="muted">불러오고 있습니다</div></div>
 <div class="tab" id="tab-diag"><div class="muted">불러오고 있습니다</div></div>
 <div id="lightbox"><div class="lbbar"><b id="lbcap"></b><a id="lbopen" href="#" target="_blank">새 탭에서 원본</a><span class="muted">아무 곳이나 누르면 닫힘 · Esc</span></div><img id="lbimg" alt=""></div>
+<div id="modehint" class="muted"></div>
 <form id="f"><input type="text" id="q" placeholder="예: 로그인 오류를 수정해줘 / 결제 API에 입력 검증을 추가해줘" autofocus>
- <select id="m"><option value="plan">분석만</option><option value="observe">브랜치 생성</option><option value="act">푸시 + MR 생성</option></select>
+ <select id="m" title="위에서 아래로 갈수록 더 많이 합니다(누적)">
+  <option value="plan">① 찾기만 — 코드 안 건드림</option>
+  <option value="observe">② 고치기 — 내 PC까지</option>
+  <option value="act">③ 고치고 올리기 — MR까지</option>
+ </select>
  <button class="act" id="go">실행</button><button type="button" id="stopbtn" class="danger" style="display:none">■ 중지</button></form>
 <script>
 const log=document.getElementById('log'), q=document.getElementById('q'), go=document.getElementById('go'), stopbtn=document.getElementById('stopbtn');
@@ -230,7 +236,8 @@ const cls=s=>String(s==null?'':s).replace(/[^a-zA-Z0-9_-]/g,'');
 const OUTCOME={answered:'답변 완료',no_landing:'관련 코드 못 찾음',planned:'분석 완료',
  branch_failed:'브랜치 생성 실패',implement_failed:'수정 실패',checks_failed:'검증 실패',
  judge_failed:'품질 기준 미달',push_failed:'푸시 실패',unauthorized:'권한 없음',
- mr_prepared:'MR 준비 완료',stopped:'중지됨'};
+ mr_prepared:'수정 완료(로컬)',committed_local:'수정 완료 — 내 PC에만',
+ mr_created:'MR 생성됨',stopped:'중지됨'};
 const outcomeLabel=s=>OUTCOME[s]||(s==null||s===''?'-':String(s));
 function line(cls,txt,mark){const d=document.createElement('div');d.className='ev '+cls;
  if(mark){const s=document.createElement('span');s.className='mk';s.textContent=mark;d.appendChild(s);}
@@ -666,6 +673,16 @@ const GATES_PLAN=[['intent','의도 분류'],['kg_search','관련 코드 찾기'
 const GLABEL={}; GATES_ALL.concat(GATES_PLAN).forEach(([keys,label])=>
  keys.split(' ').forEach(kk=>{GLABEL[kk]=label;}));
 function gatesFor(mode){return mode==='plan'?GATES_PLAN:GATES_ALL;}
+const MODEDESC={
+ plan:'고칠 자리를 찾아 알려주기까지. 코드·브랜치를 만들지 않습니다.',
+ observe:'①에 더해 — 최신 코드에서 브랜치를 따고, 에이전트가 고치고, 테스트로 검증하고, 커밋합니다. 내 PC에만 남고 원격에는 아무것도 올리지 않습니다.',
+ act:'②에 더해 — 브랜치를 원격에 올리고 병합 요청(MR)을 만듭니다. 머지와 배포는 사람이 합니다.'};
+function showModeHint(){
+ const m=document.getElementById('m'), h=document.getElementById('modehint');
+ if(m&&h)h.textContent=MODEDESC[m.value]||'';
+}
+document.getElementById('m').addEventListener('change',showModeHint);
+showModeHint();
 function runstate(on,txt){const r=document.getElementById('runstate');r.classList.toggle('on',on);if(txt)document.getElementById('runstate-t').textContent=txt;}
 function resetPanel(mode){
  document.getElementById('gates').innerHTML=gatesFor(mode).map(g=>`<div class="g" data-s="${g[0]}"><span class=dot>○</span>${g[1]}</div>`).join('');

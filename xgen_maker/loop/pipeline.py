@@ -561,6 +561,9 @@ class MakerLoop:
                           path=str(worktree_path))
         report["cost"] = cost.summary()
         journal.event("cost", "ok", **cost.summary())
-        journal.close("mr_prepared")
-        report["outcome"] = "mr_prepared"
+        # 결과를 한 이름으로 뭉치면 "MR 준비 완료"가 로컬 커밋에도 붙어, 원격에 올라간
+        # 줄로 읽힌다. 실제로 어디까지 갔는지로 나눈다.
+        outcome = "mr_created" if report.get("mr", {}).get("ok") else "committed_local"
+        journal.close(outcome)
+        report["outcome"] = outcome
         return report
