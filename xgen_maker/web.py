@@ -1923,11 +1923,8 @@ class MakerWebHandler(BaseHTTPRequestHandler):
         cfg = MakerConfig(**{f.name: getattr(self.config, f.name)
                              for f in self.config.__dataclass_fields__.values()})  # type: ignore[attr-defined]
         cfg.verbose = False
-        if mode == "plan":
-            cfg.allow_write = False
-        else:
-            cfg.allow_write = True
-            cfg.mode = mode
+        cfg.mode = mode                      # 설정 파일 값이 남아 사유가 어긋나지 않게
+        cfg.allow_write = mode != "plan"
         self._response_started = True  # 이후 예외는 do_GET에서 2차 응답 금지
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")

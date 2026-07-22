@@ -330,6 +330,7 @@ class MakerLoop:
                 repo_path = worktree_path  # 이후 구현·검증은 격리 사본에서
                 journal.event("worktree", "ok", path=str(worktree_path))
             else:
+                journal.event("worktree", "skipped", reason="isolate_worktree=False")
                 repo_git.create_branch(branch, base_ref=base_ref)  # 최신 base에서 분기
             relanded_ok = False
             if base_ref and changed_since:
@@ -439,7 +440,9 @@ class MakerLoop:
                       **verify_report)
 
         # ⑦-3 UI/UX 검증 — 영향 라우트 스냅샷 + 픽셀diff + 비전판정 (Visual Feedback Loop)
-        if config.enable_ui_verify:
+        if not config.enable_ui_verify:
+            journal.event("ui_verify", "skipped", reason="enable_ui_verify=False")
+        else:
             from .ui_verify import ui_verify
             ui_report = ui_verify(config, self.graph, changed, repo, journal.dir)
             journal.event("ui_verify", "skipped" if ui_report.get("skipped")
@@ -459,7 +462,9 @@ class MakerLoop:
         # ⑦-4 배포 렌더 검증 (T1, 상사님 tmp 방식) — "코드 통과 + 배포 통과 → 자신 있게 MR"
         deploy_test = {"name": "deploy_render", "status": "skipped",
                        "reason": "enable_deploy_test=False"}
-        if config.enable_deploy_test:
+        if not config.enable_deploy_test:
+            journal.event("deploy_test", "skipped", reason="enable_deploy_test=False")
+        else:
             from .deploy import deploy_render_test
             from ..kg.extract_infra import deploy_targets
             targets = deploy_targets(self.graph, repo, config.deploy_app_map)
@@ -505,7 +510,11 @@ class MakerLoop:
         journal.event("commit", "ok", sha=commit[:12], files=len(changed))
         report["mr_draft"] = str(draft)
 
-        if config.mode == "act":
+        if config.mode != "act":
+            reason = f"{config.mode} 모드 — 원격에 올리지 않습니다(MR 초안까지)"
+            journal.event("push", "skipped", reason=reason)
+            journal.event("mr_create", "skipped", reason=reason)
+        else:
             try:
                 repo_git.push(branch, token=config.gitlab_token)
                 journal.event("push", "ok", branch=branch)
