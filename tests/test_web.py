@@ -681,6 +681,69 @@ class TestObserveLoopOverSSE(unittest.TestCase):
     def _git(self, root, *a):
         subprocess.run(["git", *a], cwd=root, capture_output=True, check=True)
 
+    def test_runtime_setting_actually_changes_execution(self):
+        # 설정 UI가 '표시만' 바뀌는 게 아니라 실제 실행에 반영되는지.
+        # _sse_run은 요청마다 config를 복제하므로, 복제 시점에 런타임 변경분이 실려야 한다.
+        import threading
+        import urllib.parse
+        from http.server import ThreadingHTTPServer
+        from pathlib import Path as _P
+        from xgen_maker.kg.build import build_repo
+
+        with tempfile.TemporaryDirectory() as t:
+            base = _P(t)
+            repo = base / "demo"; repo.mkdir()
+            self._git(repo, "init", "-b", "develop")
+            self._git(repo, "config", "user.email", "t@t")
+            self._git(repo, "config", "user.name", "t")
+            (repo / "app.py").write_text("def greet(n):" + self.NL +
+                                         "    return 'hi'" + self.NL, encoding="utf-8")
+            self._git(repo, "add", "-A"); self._git(repo, "commit", "-m", "init")
+            self._git(repo, "branch", "stg")  # 분기 대상이 될 다른 브랜치
+            stub = base / "stub.py"; stub.write_text(self.STUB, encoding="utf-8")
+            g = build_repo("demo", repo); kg = base / "kg.json"; g.save(kg)
+            cfg = MakerConfig(repos={"demo": str(repo)}, kg_path=str(kg),
+                              worklogs_dir=str(base / "wl"), mode="observe",
+                              allow_write=True, llm_enabled=False, verbose=False,
+                              max_iterations=3, fetch_latest=False, gitlab_projects={},
+                              target_branch="develop",
+                              agent_cmd='"' + sys.executable + '" "' + str(stub) + '"')
+            prev_cfg, prev_graph = web.MakerWebHandler.config, web.MakerWebHandler.graph
+            web.MakerWebHandler.config = cfg
+            web.MakerWebHandler.graph = Graph.load(kg)
+            srv = ThreadingHTTPServer(("127.0.0.1", 0), web.MakerWebHandler)
+            port = srv.server_address[1]
+            threading.Thread(target=srv.serve_forever, daemon=True).start()
+            try:
+                # UI에서 대상 브랜치를 stg로 변경
+                with urllib.request.urlopen(
+                        f"http://127.0.0.1:{port}/api/setting?key=target_branch&value=stg",
+                        timeout=15) as r:
+                    self.assertTrue(json.loads(r.read())["ok"])
+                q = urllib.parse.quote("greet 고쳐줘")
+                report = None
+                with urllib.request.urlopen(
+                        f"http://127.0.0.1:{port}/api/run?q={q}&mode=observe",
+                        timeout=240) as resp:
+                    for raw in resp:
+                        ln = raw.decode("utf-8").strip()
+                        if ln.startswith("data: "):
+                            e = json.loads(ln[6:])
+                            if e.get("type") == "result":
+                                report = e["report"]
+            finally:
+                srv.shutdown()
+                web.MakerWebHandler.config, web.MakerWebHandler.graph = prev_cfg, prev_graph
+
+            self.assertIsNotNone(report)
+            br = report["branch"]
+            # 실제로 stg에서 분기됐는가(설정이 실행에 먹었다는 증거)
+            mb = subprocess.run(["git", "merge-base", br, "stg"], cwd=repo,
+                                capture_output=True, text=True, encoding="utf-8").stdout.strip()
+            stg = subprocess.run(["git", "rev-parse", "stg"], cwd=repo,
+                                 capture_output=True, text=True, encoding="utf-8").stdout.strip()
+            self.assertEqual(mb, stg, "target_branch 변경이 실행에 반영되지 않음")
+
     def test_observe_loop_converges_and_commits(self):
         import threading
         import urllib.parse
