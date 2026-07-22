@@ -135,6 +135,9 @@ _PAGE = """<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
  #glegend{display:flex;flex-wrap:wrap;gap:12px;margin-top:8px;font-size:12px;color:var(--text2)} #glegend .lg{display:inline-flex;align-items:center;gap:5px}
  #glegend .lg i{width:11px;height:11px;border-radius:50%;display:inline-block}
  #modehint{font-size:12px;padding:2px 2px 7px;line-height:1.5}
+ .brgrp{margin:10px 0 16px} .brgrp table{margin-top:4px}
+ .brdel{padding:1px 8px;font-size:11px;line-height:1.7;opacity:.55;white-space:nowrap}
+ .brdel:hover{opacity:1;color:var(--danger);border-color:var(--danger)}
  .sessbar{display:flex;gap:10px;align-items:center;margin-bottom:10px}
  .sessbar input{flex:1;max-width:420px;padding:7px 11px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);color:var(--text)}
  .sessdel{padding:1px 8px;font-size:11px;line-height:1.7;opacity:.5;white-space:nowrap} .sessdel:hover{opacity:1;color:var(--danger);border-color:var(--danger)}
@@ -221,8 +224,8 @@ _PAGE = """<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
 <div class="tab" id="tab-graph"><div class="muted">불러오고 있습니다</div></div>
 <div class="tab" id="tab-history"><div class="muted">불러오고 있습니다</div></div>
 <div class="tab" id="tab-learn"><div class="muted">불러오고 있습니다</div></div>
-<div class="tab" id="tab-mrs"><div class="muted">불러오고 있습니다</div></div>
-<div class="tab" id="tab-branches"><div class="muted">불러오고 있습니다</div></div>
+<div class="tab" id="tab-mrs"><div class="muted">GitLab에서 병합 요청을 가져오고 있습니다</div></div>
+<div class="tab" id="tab-branches"><div class="muted">GitLab에서 브랜치를 가져오고 있습니다</div></div>
 <div class="tab" id="tab-tests"><div class="muted">불러오고 있습니다</div></div>
 <div class="tab" id="tab-ui"><div class="muted">불러오고 있습니다</div></div>
 <div class="tab" id="tab-deploy"><div class="muted">불러오고 있습니다</div></div>
@@ -446,7 +449,11 @@ function loadNodeCode(n,gcode){
   // 줄번호 포함 코드
   const rows=r.code.split('\\n').map((ln,i)=>{const no=r.first_line+i,hit=r.focus_line&&no===r.focus_line;
    return `<tr${hit?' class=gcf':''}><td class=gcn>${no}</td><td class=gcl>${esc(ln)||' '}</td></tr>`;}).join('');
-  gcode.innerHTML=`<div class=gch><b>${esc(r.name)}</b> <span class=muted>${esc(klabel(r.kind))} · ${esc(r.repo)}:${esc(r.path)}:${r.focus_line||r.first_line} · 총 ${r.total_lines}줄</span><button class=gcwork data-nm="${esc(r.name)}" data-pt="${esc(r.repo)}:${esc(r.path)}">▶ 이 코드로 작업</button><span class=gcx>✕</span></div>${meta}<div class=gcw><table class=gct>${rows}</table></div>`;
+  const cut=r.truncated?` <span style="color:var(--warning)">· 너무 커서 ${r.shown_lines}줄까지만 표시</span>`:'';
+  gcode.innerHTML=`<div class=gch><b>${esc(r.name)}</b> <span class=muted>${esc(klabel(r.kind))} · ${esc(r.repo)}:${esc(r.path)}:${r.focus_line||r.first_line} · 총 ${r.total_lines}줄${cut}</span><button class=gcwork data-nm="${esc(r.name)}" data-pt="${esc(r.repo)}:${esc(r.path)}">▶ 이 코드로 작업</button><span class=gcx>✕</span></div>${meta}<div class=gcw><table class=gct>${rows}</table></div>`;
+  // 파일 전체를 싣되, 착지한 줄이 보이도록 그 자리로 옮겨 준다(맨 위에 두면 못 찾는다)
+  const focus=gcode.querySelector('tr.gcf');
+  if(focus)focus.scrollIntoView({block:'center'});
   gcode.querySelector('.gcx').onclick=()=>{gcode.style.display='none';};
   gcode.querySelector('.gcwork').onclick=(ev)=>{const b=ev.currentTarget;
    document.querySelector('nav button[data-t=run]').click();
@@ -582,8 +589,11 @@ function render(t){
   const names=(window.__repos||[]);
   const sel='<label>레포 <select id="brepo">'+(names.length?names.map(n=>`<option>${esc(n)}</option>`).join(''):'<option value="">(연결된 저장소 없음)</option>')+'</select></label>';
   el.innerHTML='<h3>브랜치 · 릴리즈 <span class=muted>작업 브랜치와 배포 경로를 확인합니다</span></h3>'+sel+'<div id="bbody" class=muted style="margin-top:12px">불러오고 있습니다</div>'+
+   '<h4 style="margin-top:18px">내 PC의 브랜치 <span class=muted>여기서 정리합니다 — 원격은 건드리지 않습니다</span></h4>'+
+   '<div id="localbr" class=muted style="font-size:12px">불러오고 있습니다</div>'+
    '<h4 style="margin-top:16px">활동 검색 <span class=muted>커밋 메시지나 작성자로 찾습니다</span></h4>'+
    '<div class=gsearch><input id=actq placeholder="예: governance, 로그인, 작성자 이름" autocomplete=off><button id=actbtn>검색</button></div><div id="actbody" class=muted style="font-size:12px">검색어를 입력하거나, 비워 두고 검색하면 최근 커밋을 표시합니다.</div>';
+  renderLocalBranches();
   const load=()=>{const repo=document.getElementById('brepo').value; const bb=document.getElementById('bbody');
    if(!repo){bb.innerHTML='<div class=muted>저장소 연결 설정이 필요합니다.</div>';return;}
    bb.textContent='불러오고 있습니다';
@@ -771,6 +781,48 @@ function jumpToRepoGraph(repo){
  go();
 }
 const SICON={ok:'✓',start:'◐',fail:'✗',skipped:'—'};
+// 내 PC의 브랜치 — 정리는 여기서. 무엇을 지워도 되는지 기록으로 판단한다.
+function renderLocalBranches(){
+ const box=document.getElementById('localbr'); if(!box)return;
+ jget('/api/local-branches').then(d=>{
+  const rows=d.branches||[];
+  if(!rows.length){box.innerHTML='<span class=muted>로컬 브랜치가 없습니다.</span>';return;}
+  const byRepo={}; rows.forEach(b=>{(byRepo[b.repo]=byRepo[b.repo]||[]).push(b);});
+  let h='';
+  Object.keys(byRepo).sort().forEach(repo=>{
+   const list=byRepo[repo];
+   h+='<div class=brgrp><b>'+esc(repo)+'</b> <span class=muted>'+list.length+'개</span><table>';
+   list.forEach(b=>{
+    const tags=[];
+    if(b.current)tags.push('<span class="badge neutral">지금 사용 중</span>');
+    if(b.protected)tags.push('<span class="badge neutral">보호</span>');
+    if(b.by_maker)tags.push('<span class="badge ok">MAKER 생성</span>');
+    if(b.merged)tags.push('<span class="badge ok">병합됨</span>');
+    const lock=b.current||b.protected;
+    h+='<tr><td>'+esc(b.name)+'</td><td class=muted>'+esc(b.when||'')+'</td><td>'+tags.join(' ')+'</td>'
+     +'<td>'+(lock?'<span class=muted style="font-size:11px">지울 수 없음</span>'
+        :'<button class="brdel ghost" data-repo="'+esc(b.repo)+'" data-name="'+esc(b.name)+'">지우기</button>')+'</td></tr>';
+   });
+   h+='</table></div>';
+  });
+  box.innerHTML=h;
+  box.querySelectorAll('.brdel').forEach(btn=>btn.onclick=()=>deleteBranch(btn.dataset.repo,btn.dataset.name));
+ }).catch(e=>{box.innerHTML='<span class=muted>브랜치를 불러오지 못했습니다: '+esc(e.message||e)+'</span>';});
+}
+function deleteBranch(repo,name){
+ jget('/api/branch-delete?repo='+encodeURIComponent(repo)+'&name='+encodeURIComponent(name)).then(p=>{
+  if(!p.ok){alert(p.error||'지울 수 없습니다');return;}
+  let warn='';
+  if(!p.by_maker)warn+='\\n\\n주의: MAKER가 만든 브랜치가 아닙니다. 직접 만드신 작업일 수 있습니다.';
+  if(!p.merged)warn+='\\n주의: 아직 병합되지 않았습니다. 이 브랜치에만 있는 커밋은 사라집니다.';
+  if(!confirm('['+repo+'] '+name+'\\n로컬에서만 지웁니다(원격은 그대로).'+warn+'\\n\\n계속할까요?'))return;
+  jget('/api/branch-delete?confirm=1&repo='+encodeURIComponent(repo)+'&name='+encodeURIComponent(name)).then(r=>{
+   if(!r.ok){alert(r.error||'삭제 실패');return;}
+   line('info','브랜치 삭제: ['+repo+'] '+name+' — '+(r.note||''),'·');
+   renderLocalBranches();
+  }).catch(e=>alert('삭제 실패: '+(e.message||e)));
+ }).catch(e=>alert('확인 실패: '+(e.message||e)));
+}
 // 세션 목록 — 찾기·이어하기·지우기. 세션이 쌓이면 목록만으로는 원하는 걸 못 찾는다.
 function renderSessions(el,q){
  jget('/api/history?limit=200'+(q?'&q='+encodeURIComponent(q):'')).then(d=>{
@@ -1313,29 +1365,28 @@ class MakerWebHandler(BaseHTTPRequestHandler):
             return {"ok": False,
                     "error": ("파일을 찾을 수 없습니다 — 동기화가 필요합니다" if not source_ref
                               else f"이 파일은 {source_ref}에만 있습니다 — 아직 받지 않았습니다")}
-        line = n.get("line") or 1
+        # 파일 전체를 준다. 보는 쪽에 스크롤이 있으므로 잘라 보낼 이유가 없고,
+        # 60줄만 보여주면 3천 줄짜리 파일에서 "코드를 봤다"고 할 수 없다.
+        # 브라우저가 감당 못 할 만큼 큰 파일만 자르고, 자를 때는 잘렸다고 말한다.
         kind = n.get("kind", "")
-        start = max(0, line - 1)
-        if kind in ("function", "class") and start < len(lines):
-            base = len(lines[start]) - len(lines[start].lstrip())
-            end = start + 1
-            while end < len(lines) and end < start + 80:
-                s = lines[end]
-                if s.strip() and (len(s) - len(s.lstrip())) <= base and \
-                        not s.lstrip().startswith(("@", ")", "]", "}")):
+        code = "\n".join(lines)
+        budget = self.config.code_view_budget_chars
+        truncated = len(code) > budget
+        if truncated:
+            kept: list[str] = []
+            used = 0
+            for text in lines:
+                if used + len(text) + 1 > budget:
                     break
-                end += 1
-            snippet, first = lines[start:end], start + 1
-        elif n.get("line"):
-            # 줄을 아는 노드(엔드포인트·라우트)는 그 자리로 데려간다. 파일 앞머리를
-            # 보여주면 "여기가 그 코드"라고 해놓고 엉뚱한 곳을 띄우는 셈이다.
-            head = max(0, start - 8)
-            snippet, first = lines[head:start + 40], head + 1
+                kept.append(text)
+                used += len(text) + 1
+            code, shown = "\n".join(kept), len(kept)
         else:
-            snippet, first = lines[:60], 1
+            shown = len(lines)
         meta = n.get("meta", {})
-        return {"ok": True, "code": "\n".join(snippet)[:9000], "first_line": first,
+        return {"ok": True, "code": code, "first_line": 1,
                 "focus_line": n.get("line") or 0,
+                "shown_lines": shown, "truncated": truncated,
                 "path": rel, "repo": n["repo"], "lang": full.suffix.lstrip("."),
                 "name": n["name"], "kind": kind, "total_lines": len(lines),
                 "summary": meta.get("summary", ""), "summary_src": meta.get("summary_src", ""),
@@ -1852,6 +1903,22 @@ class MakerWebHandler(BaseHTTPRequestHandler):
                 sessions = [s for s in sessions
                             if needle in (s.get("query", "") + " " + s.get("branch", "")).lower()]
             self._json({"sessions": sessions})
+        elif parsed.path == "/api/local-branches":
+            from .loop.branches import list_local
+            self._json({"branches": list_local(self.config)})
+        elif parsed.path == "/api/branch-delete":
+            # 지우면 되돌릴 수 없다. confirm=1 없이는 무엇을 지우는지만 알려준다.
+            from .loop.branches import list_local, delete_local
+            qs = parse_qs(parsed.query)
+            repo, name = qs.get("repo", [""])[0], qs.get("name", [""])[0]
+            row = next((b for b in list_local(self.config)
+                        if b["repo"] == repo and b["name"] == name), None)
+            if row is None:
+                self._json({"ok": False, "error": "그런 브랜치가 없습니다"})
+            elif qs.get("confirm", ["0"])[0] != "1":
+                self._json({"ok": True, "preview": True, **row})
+            else:
+                self._json(delete_local(self.config, repo, name))
         elif parsed.path == "/api/session-delete":
             # 지우는 건 되돌릴 수 없다. confirm=1 없으면 무엇이 지워지는지만 알려준다.
             from .loop.history import read_session_detail, session_path, delete_session

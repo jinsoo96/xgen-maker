@@ -40,6 +40,9 @@ class MakerConfig:
     # 착지 코드 인용 — 개수가 아니라 분량으로 자른다(진짜 제약은 프롬프트 크기다)
     legacy_budget_chars: int = 12000
     legacy_context_lines: int = 6                          # 착지 줄 위로 몇 줄부터 보여줄지
+    # 코드 뷰는 파일 전체를 보낸다(화면에 스크롤이 있다). 이 값은 브라우저를
+    # 지키기 위한 상한일 뿐이며, 넘으면 잘렸다고 화면에 알린다.
+    code_view_budget_chars: int = 400000
     agent_cmd: str | None = None                           # "{prompt_path}" 치환, None=claude CLI
     agent_timeout: int = 1800
     llm_enabled: bool = True

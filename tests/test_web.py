@@ -1185,3 +1185,147 @@ class TestSyncProgressAndCancel(unittest.TestCase):
         # 선언이 사용보다 앞서야 한다(const/function 순서가 뒤집히면 스크립트가 죽는다)
         self.assertLess(page.index("function startSync"),
                         page.rindex("syncBtn.onclick=startSync"))
+
+
+class TestRenderedPageIsValidJs(unittest.TestCase):
+    """_PAGE는 파이썬 문자열이다 — JS를 넣을 때 이스케이프가 한 겹 더 필요하다.
+
+    회귀: JS에 개행을 넣으려고 '\n'을 쓰면 파이썬이 먼저 진짜 개행으로 바꿔버려,
+    문자열 리터럴이 줄 중간에서 끊기고 스크립트 전체가 죽는다. 두 번 밟았다.
+    (파일에는 '\\n'으로 써야 브라우저가 개행 이스케이프로 읽는다)
+    """
+
+    def _script(self) -> str:
+        import re
+        return "\n".join(re.findall(r"<script>(.*?)</script>", web._PAGE, re.S))
+
+    def test_rendered_script_parses(self):
+        """node가 있으면 실제로 파싱해 본다 — 문법 오류를 배포 전에 잡는다."""
+        import shutil
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node 없음")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "page.js"
+            path.write_text(self._script(), encoding="utf-8")
+            result = subprocess.run([node, "--check", str(path)],
+                                    capture_output=True, text=True, timeout=60)
+            self.assertEqual(result.returncode, 0, result.stderr[:400])
+
+
+class TestBranchManagement(unittest.TestCase):
+    """브랜치 정리 — 사람 작업을 날리면 되돌릴 방법이 없다."""
+
+    def _repo(self, root: Path) -> None:
+        run = lambda *a: subprocess.run(["git", "-C", str(root), *a], check=True,
+                                        capture_output=True)
+        root.mkdir(parents=True)
+        run("init", "-q")
+        run("config", "user.email", "t@t")
+        run("config", "user.name", "t")
+        (root / "a.py").write_text("x = 1\n", encoding="utf-8")
+        run("add", "-A")
+        run("commit", "-qm", "base")
+        run("branch", "-M", "develop")
+        run("branch", "feature/by-maker")
+        run("branch", "feature/by-human")
+
+    def _config(self, base: Path, root: Path):
+        cfg = MakerConfig()
+        cfg.repos = {"r": str(root)}
+        cfg.worklogs_dir = str(base / "wl")
+        cfg.target_branch = "develop"
+        (base / "wl" / "s1").mkdir(parents=True)
+        (base / "wl" / "s1" / "journal.jsonl").write_text(
+            json.dumps({"step": "branch", "branch": "feature/by-maker", "repo": "r"}),
+            encoding="utf-8")
+        return cfg
+
+    def test_maker_branches_identified_from_records(self):
+        """이름으로 추측하지 않는다 — 세션 기록이 근거다."""
+        from xgen_maker.loop.branches import list_local
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "r"
+            self._repo(root)
+            rows = {b["name"]: b for b in list_local(self._config(base, root))}
+            self.assertTrue(rows["feature/by-maker"]["by_maker"])
+            self.assertFalse(rows["feature/by-human"]["by_maker"])
+            self.assertTrue(rows["develop"]["protected"])
+            self.assertTrue(rows["develop"]["current"])
+
+    def test_protected_branch_is_refused(self):
+        from xgen_maker.loop.branches import delete_local
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "r"
+            self._repo(root)
+            r = delete_local(self._config(base, root), "r", "develop")
+            self.assertFalse(r["ok"])
+            self.assertIn("보호", r["error"])
+
+    def test_checked_out_branch_is_refused(self):
+        """지금 쓰고 있는 브랜치를 지우면 작업 상태가 깨진다."""
+        from xgen_maker.loop.branches import delete_local
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "r"
+            self._repo(root)
+            subprocess.run(["git", "-C", str(root), "checkout", "-q", "feature/by-human"],
+                           check=True, capture_output=True)
+            r = delete_local(self._config(base, root), "r", "feature/by-human")
+            self.assertFalse(r["ok"])
+            self.assertIn("체크아웃", r["error"])
+
+    def test_delete_removes_only_that_branch(self):
+        from xgen_maker.loop.branches import delete_local, list_local
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "r"
+            self._repo(root)
+            cfg = self._config(base, root)
+            r = delete_local(cfg, "r", "feature/by-maker")
+            self.assertTrue(r["ok"])
+            self.assertIn("원격", r["note"])          # 로컬만 지웠다고 밝힌다
+            names = {b["name"] for b in list_local(cfg)}
+            self.assertNotIn("feature/by-maker", names)
+            self.assertIn("feature/by-human", names)
+            self.assertIn("develop", names)
+
+
+class TestCodeViewShowsWholeFile(unittest.TestCase):
+    """카드에 스크롤이 있는데 앞부분만 보내면 코드를 봤다고 할 수 없다."""
+
+    def test_full_file_is_returned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "r"
+            (root / "src").mkdir(parents=True)
+            body = "\n".join(f"line {i}" for i in range(1, 501))
+            (root / "src" / "big.py").write_text(body, encoding="utf-8")
+            graph = Graph()
+            graph.add_node("r:src/big.py", "file", "big.py", "r", "src/big.py")
+            h = web.MakerWebHandler.__new__(web.MakerWebHandler)
+            h.config = MakerConfig(repos={"r": str(root)})
+            h.graph = graph
+            r = h._node_code("r:src/big.py")
+            self.assertTrue(r["ok"])
+            self.assertEqual(r["total_lines"], 500)
+            self.assertEqual(r["shown_lines"], 500)     # 앞 60줄이 아니라 전부
+            self.assertFalse(r["truncated"])
+
+    def test_oversized_file_says_it_was_cut(self):
+        """자를 때는 조용히 자르지 않는다 — 잘렸다고 말한다."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "r"
+            (root / "src").mkdir(parents=True)
+            (root / "src" / "huge.py").write_text("x" * 200 + "\n" * 50, encoding="utf-8")
+            graph = Graph()
+            graph.add_node("r:src/huge.py", "file", "huge.py", "r", "src/huge.py")
+            h = web.MakerWebHandler.__new__(web.MakerWebHandler)
+            cfg = MakerConfig(repos={"r": str(root)})
+            cfg.code_view_budget_chars = 50
+            h.config = cfg
+            h.graph = graph
+            r = h._node_code("r:src/huge.py")
+            self.assertTrue(r["truncated"])
+            self.assertLess(r["shown_lines"], r["total_lines"])
