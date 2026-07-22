@@ -58,8 +58,8 @@ _PAGE = """<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
  header{padding:12px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:16px}
  header b{font-size:16px;font-weight:700;background:var(--grad-text);-webkit-background-clip:text;background-clip:text;color:transparent}
  header .info{color:var(--text2);font-size:12px} header .mode{margin-left:auto;font-size:12px;color:var(--muted)}
- #sync,#newsess{padding:6px 12px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);border-radius:var(--radius);cursor:pointer;font-size:12px;transition:all var(--t-fast)}
- #sync:hover,#newsess:hover{border-color:var(--primary);color:var(--primary)} #sync:disabled{opacity:.5} #sync.spin{color:var(--primary)}
+ #sync,#newsess,#pastsess{padding:6px 12px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);border-radius:var(--radius);cursor:pointer;font-size:12px;transition:all var(--t-fast)}
+ #sync:hover,#newsess:hover,#pastsess:hover{border-color:var(--primary);color:var(--primary)} #sync:disabled{opacity:.5} #sync.spin{color:var(--primary)}
  nav{display:flex;gap:4px;padding:0 20px;border-bottom:1px solid var(--border);background:var(--bg2)}
  nav button{padding:10px 16px;background:none;border:none;border-bottom:2px solid transparent;color:var(--text2);cursor:pointer;font-size:13px;transition:color var(--t-fast)}
  nav button:hover{color:var(--text)} nav button.on{color:var(--text);border-bottom-color:var(--primary)}
@@ -154,6 +154,7 @@ _PAGE = """<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
 <header><b>⚒ XGEN MAKER</b>
  <span class="mode" id="mode"></span>
  <button id="newsess" title="로그·패널 초기화하고 새 대화 시작">＋ 새 세션</button>
+ <button id="pastsess" title="지난 작업 세션 목록 — 단계별 로그·이어서 실행·되돌리기">🕘 이전 세션</button>
  <button id="sync" title="지식그래프를 최신 코드로 갱신(변경분만)">⟳ Sync</button></header>
 <nav>
  <button class="on" data-t="run">실행</button>
@@ -206,6 +207,15 @@ function line(cls,txt,mark){const d=document.createElement('div');d.className='e
 function refreshInfo(){fetch('/api/info').then(r=>r.json()).then(d=>{if(!d||d.repo_names===undefined)return;window.__repos=d.repo_names||[];document.getElementById('mode').textContent=(d.nodes||0).toLocaleString()+' 노드 · '+(d.repos||0)+' 레포';}).catch(()=>{});}
 refreshInfo();
 // Sync 버튼 — 그래프 최신화(변경분만)
+// 이전 세션 — 헤더에서 바로 작업 이력으로(＋새 세션만 있고 돌아갈 길이 없어 안 보였다)
+document.getElementById('pastsess').onclick=()=>{
+ document.querySelector('nav button[data-t=history]').click();
+};
+// 지난 세션 개수를 버튼에 표시해 '있다는 것' 자체가 보이게
+jget('/api/history').then(d=>{
+ const n=(d.sessions||[]).length, b=document.getElementById('pastsess');
+ if(n&&b)b.textContent='🕘 이전 세션 '+n;
+}).catch(()=>{});
 // 새 세션 — 진행 중 실행 중단 + 로그·패널 초기화
 document.getElementById('newsess').onclick=()=>{
  if(window.__es){try{window.__es.close()}catch(_){}window.__es=null;}
@@ -1106,7 +1116,10 @@ class MakerWebHandler(BaseHTTPRequestHandler):
         ("judge", "품질 게이트", "점수 판정(LLM 있으면 AI, 없으면 규칙)", "theta"),
         ("iteration", "수렴 반복", "실패하면 되먹여 재시도(통과까지)", "max_iterations"),
         ("verify", "로컬 스택 검증", "로컬 스택 기동해 동작 확인", "enable_verify"),
-        ("ui_verify", "화면 검증(Playwright)", "바뀐 화면 스냅샷 + 픽셀diff + 비전판정", "preview_base"),
+        # 게이트는 코드와 정확히 일치해야 한다 — pipeline은 config.enable_ui_verify로
+        # 분기하고 preview_base는 그 안에서 쓰는 전제조건이다(둘을 혼동하면 UI가 거짓말).
+        ("ui_verify", "화면 검증(Playwright)", "바뀐 화면 스냅샷 + 픽셀diff + 비전판정 "
+                                            "(preview_base 주소 필요)", "enable_ui_verify"),
         ("deploy_test", "배포 렌더 검증", "helm 렌더 등 배포 산출물 확인", None),
         ("release", "릴리즈 경로", "대상 env와 승격 경로 계산", None),
         ("commit", "커밋", "작업 브랜치에 커밋(로컬)", "allow_write"),
@@ -1123,6 +1136,8 @@ class MakerWebHandler(BaseHTTPRequestHandler):
         "fetch_latest": ("작업 전 최신 동기화", "bool"),
         "isolate_worktree": ("worktree 격리", "bool"),
         "enable_verify": ("로컬 스택 검증", "bool"),
+        "enable_ui_verify": ("화면 검증(Playwright)", "bool"),
+        "ui_converge": ("화면 문제를 재시도 신호로", "bool"),
         "strict_regression": ("회귀 미검증 차단", "bool"),
         "llm_enabled": ("LLM 사용", "bool"),
         "max_iterations": ("수렴 최대 반복", "int:1:10"),

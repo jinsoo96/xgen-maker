@@ -457,6 +457,55 @@ class TestWebServer(unittest.TestCase):
             socket.getaddrinfo = orig
         self.assertFalse(_is_link_local("http://localhost:3100/"))
 
+    def test_pipeline_catalog_matches_real_code(self):
+        # 10회차 검수 버그: 파이프라인 탭이 ui_verify의 게이트를 preview_base라고 표시했는데
+        # 실제 코드는 config.enable_ui_verify로 분기한다 → UI가 거짓 정보를 보여줬다.
+        # 카탈로그가 코드에서 드리프트하면 즉시 잡히게 고정한다.
+        from pathlib import Path as _P
+        from xgen_maker.config import MakerConfig as _C
+        fields = set(_C.__dataclass_fields__)
+        pipe_src = _P(web.__file__).parent.joinpath("loop", "pipeline.py").read_text(
+            encoding="utf-8")
+        conv_src = _P(web.__file__).parent.joinpath("loop", "converge.py").read_text(
+            encoding="utf-8")
+        both = pipe_src + conv_src
+        for step, label, desc, gate in web.MakerWebHandler.PIPELINE:
+            # 게이트는 실제 config 필드여야 한다(오타·존재하지 않는 키 차단)
+            if gate:
+                self.assertIn(gate, fields, f"{step}의 게이트 '{gate}'는 config 필드가 아님")
+                # 코드는 config.X 와 getattr(config, "X", ...) 두 방식을 섞어 쓴다
+                self.assertTrue(f"config.{gate}" in both or f'"{gate}"' in both,
+                                f"{step}의 게이트 '{gate}'가 실제 코드에서 안 쓰임")
+            # 카탈로그의 단계는 실제로 journal에 기록되는 step이어야 한다
+            self.assertIn(f'"{step}"', both, f"카탈로그 단계 '{step}'가 코드에 없음")
+
+    def test_settable_keys_are_real_config_fields(self):
+        from xgen_maker.config import MakerConfig as _C
+        fields = set(_C.__dataclass_fields__)
+        for key in web.MakerWebHandler.SETTABLE:
+            self.assertIn(key, fields, f"변경 대상 '{key}'가 config에 없음")
+        # 위험 설정은 변경 대상에서 빠져 있어야 한다
+        for danger in ("allow_write", "deploy_mode", "gitlab_projects", "repos"):
+            self.assertNotIn(danger, web.MakerWebHandler.SETTABLE)
+
+    def test_setting_change_applies_and_validates(self):
+        h = web.MakerWebHandler.__new__(web.MakerWebHandler)
+        h.config = web.MakerWebHandler.config
+        old = h.config.target_branch
+        try:
+            self.assertTrue(h._set_setting({"key": ["target_branch"], "value": ["stg"]})["ok"])
+            self.assertEqual(h.config.target_branch, "stg")
+            # 범위 클램프
+            r = h._set_setting({"key": ["max_iterations"], "value": ["99"]})
+            self.assertEqual(r["value"], 10)
+            # choice 검증
+            self.assertFalse(h._set_setting({"key": ["mode"], "value": ["nope"]})["ok"])
+            # 화이트리스트 밖
+            self.assertFalse(h._set_setting({"key": ["allow_write"], "value": ["1"]})["ok"])
+        finally:
+            h.config.target_branch = old
+            h.config.max_iterations = 3
+
     def test_run_mode_whitelist_fails_closed(self):
         # 4회차 검수 버그: 'plan' 정확일치만 읽기전용이라 오타·미지의 모드가 전부
         # allow_write=True로 새어 실제 레포에 브랜치·커밋이 나갔다(fail-open).
