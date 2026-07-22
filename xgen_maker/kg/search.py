@@ -5,15 +5,59 @@ impact: 역방향 BFS — "이 노드가 바뀌면 누가 영향받나" (imports
 """
 from __future__ import annotations
 
+import re
 from difflib import SequenceMatcher
 
 from .graph import Graph
 
+_SPLIT = re.compile(r"[^a-z0-9가-힣]+")
+_CAMEL = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 
-def _score(node: dict, query: str, tokens: list[str]) -> float:
+
+def tokenize(text: str) -> set[str]:
+    """식별자를 사람이 읽는 단어로 쪼갠다.
+
+    `listApiCollections`·`main-tool-management-api-collections`·`user_id`는 통째로 두면
+    어떤 토큰과도 안 맞는다. 코드 이름은 원래 여러 단어를 붙여 만든 것이라, 그 규칙을
+    되돌려 놓아야 검색이 닿는다. (단어 사전이 아니라 문자열 규칙이다)
+    """
+    return {t for t in _SPLIT.split(_CAMEL.sub(" ", text).lower()) if len(t) >= 2}
+
+
+def _haystack(node: dict, cache: dict | None = None) -> tuple[set[str], str]:
+    """이 노드를 가리킬 수 있는 모든 말.
+
+    이름·경로뿐 아니라 저장소명과 **의미층(요약·문서)**까지 넣는다. enrich가 만들어 둔
+    요약에는 "프론트 feature 패키지…", "핸들러 …" 처럼 사람 말이 들어 있는데, 검색이
+    그걸 안 보면 그래프가 아는 것을 검색이 모르는 상태가 된다.
+
+    캐시는 노드 밖에 둔다 — 노드 dict에 넣으면 Graph.save가 그대로 직렬화하려다 깨진다.
+    """
+    if cache is not None:
+        cached = cache.get(node["id"])
+        if cached is not None:
+            return cached
+    meta = node.get("meta") or {}
+    words = tokenize(node["name"]) | tokenize(node["path"]) | tokenize(node["repo"])
+    words |= tokenize(node["kind"])
+    for key in ("summary", "doc", "package", "route_path", "module", "service"):
+        value = meta.get(key)
+        if isinstance(value, str) and value:
+            words |= tokenize(value)
+    # 단어 집합과 함께 이어붙인 문자열도 둔다. 한국어는 어간에 조사가 붙어("취소"→"취소를")
+    # 토큰이 정확히 같지 않고, 영어도 복수형("tool"→"tools")이 그렇다. 조사·어미 목록을
+    # 적는 대신 부분일치로 받는다.
+    result = (words, " ".join(sorted(words)))
+    if cache is not None:
+        cache[node["id"]] = result
+    return result
+
+
+def _score(node: dict, query: str, tokens: list[str], cache: dict | None = None) -> float:
     name = node["name"].lower()
     path = node["path"].lower()
     query_lower = query.lower()
+    words, blob = _haystack(node, cache)
     score = 0.0
     if name == query_lower:
         score += 100
@@ -22,6 +66,10 @@ def _score(node: dict, query: str, tokens: list[str]) -> float:
     for token in tokens:
         if token in name:
             score += 25
+        elif token in words:          # 이름에 없어도 경로·저장소·요약이 가리키면 인정
+            score += 18
+        elif len(token) >= 2 and token in blob:   # 조사·복수형이 붙은 형태("취소를", "tools")
+            score += 12
         if token in path:
             score += 15
     score += SequenceMatcher(None, name, query_lower).ratio() * 30
@@ -34,12 +82,13 @@ def _score(node: dict, query: str, tokens: list[str]) -> float:
 
 def search(graph: Graph, query: str, k: int = 10,
            kinds: tuple[str, ...] | None = None) -> list[dict]:
-    tokens = [token for token in query.lower().replace("/", " ").split() if len(token) >= 2]
+    tokens = sorted(tokenize(query))
+    cache = graph.__dict__.setdefault("_tok_cache", {})   # 그래프 밖 캐시(직렬화 대상 아님)
     scored = []
     for node in graph.nodes.values():
         if kinds and node["kind"] not in kinds:
             continue
-        score = _score(node, query, tokens)
+        score = _score(node, query, tokens, cache)
         if score > 20:
             scored.append((score, node))
     scored.sort(key=lambda pair: -pair[0])

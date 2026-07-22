@@ -183,6 +183,53 @@ class TestSearchImpact(unittest.TestCase):
         self.assertTrue(hits)
         self.assertTrue(any("get_user" in h["name"] for h in hits[:3]))
 
+    def test_named_repo_wins(self):
+        """저장소를 지목하면 그 저장소가 이긴다.
+
+        회귀: 같은 이름의 함수가 여러 저장소에 있을 때(health, login 같은 흔한 이름)
+        "게이트웨이의 health"라고 말해도 엉뚱한 저장소로 착지했다 — 점수에 repo가
+        아예 반영되지 않았다.
+        """
+        from xgen_maker.kg.graph import Graph
+        graph = Graph()
+        for repo in ("alpha-gateway", "beta-worker"):
+            graph.add_node(repo, "repo", repo, repo, f"/{repo}")
+            graph.add_node(f"{repo}:h.py#health", "function", "health", repo, "h.py", 1)
+        top = search(graph, "alpha-gateway health", k=1)[0]
+        self.assertEqual(top["repo"], "alpha-gateway")
+
+    def test_identifier_is_split_into_words(self):
+        """붙여 쓴 식별자를 단어로 되돌려야 검색이 닿는다(사전이 아니라 문자열 규칙)."""
+        from xgen_maker.kg.search import tokenize
+        self.assertIn("collections", tokenize("@xgen/main-tool-management-api-collections"))
+        self.assertIn("api", tokenize("listApiCollections"))
+        self.assertIn("user", tokenize("user_id"))
+
+    def test_search_uses_semantic_layer(self):
+        """enrich가 채운 요약을 검색이 봐야 한다 — 안 보면 그래프가 아는 걸 검색이 모른다."""
+        from xgen_maker.kg.graph import Graph
+        graph = Graph()
+        graph.add_node("r", "repo", "r", "r", "/r")
+        graph.add_node("r:a.py#f1", "function", "f1", "r", "a.py", 1,
+                       summary="결제 취소를 처리하는 핸들러")
+        graph.add_node("r:b.py#f2", "function", "f2", "r", "b.py", 1,
+                       summary="이미지 썸네일 생성")
+        top = search(graph, "결제 취소", k=1)
+        self.assertEqual(top[0]["id"], "r:a.py#f1")
+
+    def test_token_cache_does_not_leak_into_saved_graph(self):
+        """검색 캐시가 노드에 들어가면 저장이 깨진다(set은 JSON이 못 담는다)."""
+        from xgen_maker.kg.graph import Graph
+        with tempfile.TemporaryDirectory() as tmp:
+            graph = Graph()
+            graph.add_node("r", "repo", "r", "r", "/r")
+            graph.add_node("r:a.py#f", "function", "f", "r", "a.py", 1)
+            search(graph, "anything")
+            out = Path(tmp) / "g.json"
+            graph.save(out)                      # 예외 없이 저장돼야 한다
+            reloaded = Graph.load(out)
+            self.assertTrue(all("_tok" not in n for n in reloaded.nodes.values()))
+
     def test_impact_traverses_reverse(self):
         affected = impact(self.graph, "be:svc/util.py", depth=3)
         ids = {n["id"] for n in affected}

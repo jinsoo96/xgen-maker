@@ -87,6 +87,7 @@ _PAGE = """<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
  #runstate.on{display:flex} #runstate .spin{width:12px;height:12px;border:2px solid var(--border2);border-top-color:var(--primary);border-radius:50%;animation:spin .7s linear infinite}
  @keyframes spin{to{transform:rotate(360deg)}}
  #gates .g.fail{color:var(--danger)} #gates .g.fail .dot{color:var(--danger)}
+ #gates .g.skip{color:var(--muted);opacity:.6} #gates .g.skip .dot{color:var(--muted);animation:none}
  #landing .lz{padding:6px 8px;border-radius:8px;background:var(--bg3);border:1px solid var(--border);margin-bottom:6px}
  #landing .lz .nm{font-size:12px;font-weight:600;color:var(--text)} #landing .lz .pt{font-size:11px;color:var(--muted);font-family:Consolas,monospace;word-break:break-all}
  #landing .lz .kd{font-size:10px;color:var(--primary)} #landing .lz[data-id]{cursor:pointer} #landing .lz[data-id]:hover{border-color:var(--primary)}
@@ -656,13 +657,17 @@ function render(t){
   el.innerHTML=h;}).catch(tabErr(el));
 }
 // 우측 진행 패널 — 단계 게이트 + 찾은 코드 위치
-const GATES=[['intent','의도 분류'],['kg_search','관련 코드 찾기'],['fetch_latest','최신 코드 동기화'],
+// 모드마다 실제로 도는 단계가 다르다. 안 도는 단계를 걸어두면 영영 '진행 중'으로 남아
+// 멈춘 것처럼 보인다 — 분석만인데 '브랜치 생성'을 기다리게 하지 않는다.
+const GATES_ALL=[['intent','의도 분류'],['kg_search','관련 코드 찾기'],['fetch_latest','최신 코드 동기화'],
  ['branch','브랜치 생성'],['implement','구현(에이전트)'],['checks','검증(테스트·회귀)'],
  ['judge','품질 게이트'],['mr_ready','MR 준비']];
-const GLABEL=Object.fromEntries(GATES);
+const GATES_PLAN=[['intent','의도 분류'],['kg_search','관련 코드 찾기'],['plan_only','분석 정리']];
+const GLABEL=Object.fromEntries(GATES_ALL.concat(GATES_PLAN));
+function gatesFor(mode){return mode==='plan'?GATES_PLAN:GATES_ALL;}
 function runstate(on,txt){const r=document.getElementById('runstate');r.classList.toggle('on',on);if(txt)document.getElementById('runstate-t').textContent=txt;}
-function resetPanel(){
- document.getElementById('gates').innerHTML=GATES.map(g=>`<div class="g" data-s="${g[0]}"><span class=dot>○</span>${g[1]}</div>`).join('');
+function resetPanel(mode){
+ document.getElementById('gates').innerHTML=gatesFor(mode).map(g=>`<div class="g" data-s="${g[0]}"><span class=dot>○</span>${g[1]}</div>`).join('');
  document.getElementById('landing').innerHTML='<div class=muted style="font-size:12px">지식그래프 검색하고 있습니다</div>';
  document.getElementById('landn').textContent='';
  runstate(true,'시작…');
@@ -742,12 +747,16 @@ function doUndo(sid,remote,panel){
 document.getElementById('f').addEventListener('submit',e=>{
  e.preventDefault(); const query=q.value.trim(); if(!query)return;
  document.querySelector('nav button[data-t=run]').click();
- go.disabled=true; stopbtn.style.display='inline-block'; line('step',query,'▶'); q.value=''; resetPanel();
+ go.disabled=true; stopbtn.style.display='inline-block'; line('step',query,'▶'); q.value='';
+ const mode=document.getElementById('m').value; resetPanel(mode);
  window.__runid=null;
  if(window.__es){try{window.__es.close()}catch(_){}}
- const es=new EventSource('/api/run?q='+encodeURIComponent(query)+'&mode='+document.getElementById('m').value);
+ const es=new EventSource('/api/run?q='+encodeURIComponent(query)+'&mode='+mode);
  window.__es=es;
- const done=()=>{runstate(false); go.disabled=false; stopbtn.style.display='none'; es.close(); window.__es=null; window.__runid=null;};
+ const done=()=>{runstate(false); go.disabled=false; stopbtn.style.display='none';
+  // 끝났는데 ◐가 남아 있으면 계속 도는 것처럼 보인다. 안 돈 단계는 안 돌았다고 말한다.
+  document.querySelectorAll('#gates .g.active').forEach(el=>{el.className='g skip';el.querySelector('.dot').textContent='–';el.title='이 모드에서는 실행되지 않는 단계입니다';});
+  es.close(); window.__es=null; window.__runid=null;};
  es.onmessage=ev=>{
   const e=JSON.parse(ev.data);
   if(e.type==='run_id'){window.__runid=e.id;}
@@ -757,7 +766,7 @@ document.getElementById('f').addEventListener('submit',e=>{
    if(e.landing)showLanding(e.landing);}
   else if(e.type==='result'){const r=e.report; let html='<b>결과: '+esc(outcomeLabel(r.outcome))+'</b>';
    if(r.landing&&r.landing.length)showLanding(r.landing);
-   if(r.branch)html+='<br>브랜치: '+esc(r.branch); if(r.iterations)html+=' · 수렴 '+r.iterations+'회';
+   if(r.branch)html+='<br>'+(r.outcome==='plan_only'?'제안 브랜치명(아직 만들지 않음): ':'브랜치: ')+esc(r.branch); if(r.iterations)html+=' · 수렴 '+r.iterations+'회';
    if(r.mr_draft)html+='<br>MR초안: '+esc(r.mr_draft); if(r.mr&&r.mr.url)html+='<br>MR: <a href="'+esc(r.mr.url)+'" target=_blank>'+esc(r.mr.url)+'</a>';
    if(r.answer)html+='<br>'+esc(r.answer).replace(/\\n/g,'<br>');
    const d=document.createElement('div');d.className='result';d.innerHTML=html;log.appendChild(d);log.scrollTop=log.scrollHeight;

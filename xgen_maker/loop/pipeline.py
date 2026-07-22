@@ -22,6 +22,21 @@ from .mr import build_mr_draft, save_draft, create_gitlab_mr
 from .verify import verify
 
 
+def _merge_hits(*groups, k: int = 8) -> list[dict]:
+    """여러 검색 결과를 점수로 겨루게 해 합친다(같은 노드는 높은 점수 하나만).
+
+    번역한 쿼리가 항상 더 낫지도, 원문이 항상 더 낫지도 않다. 둘 다 후보로 놓고
+    점수로 정하는 편이, 한쪽을 통째로 버리는 것보다 덜 틀린다.
+    """
+    best: dict[str, dict] = {}
+    for group in groups:
+        for hit in group or ():
+            prev = best.get(hit["id"])
+            if prev is None or hit.get("score", 0) > prev.get("score", 0):
+                best[hit["id"]] = hit
+    return sorted(best.values(), key=lambda h: -h.get("score", 0))[:k]
+
+
 class MakerLoop:
     def __init__(self, config: MakerConfig, graph: Graph | None = None,
                  journal_factory=None):
@@ -145,17 +160,27 @@ class MakerLoop:
         # 검색·LLM확장이 수 초~십수 초 걸릴 수 있어, 진입 즉시 진행 신호를 흘려 '멈춤'처럼 안 보이게.
         journal.event("kg_search", "start")
         landing = search(self.graph, query, k=8)
-        if not landing and config.llm_enabled:
-            journal.event("query_expand", "start", note="한글 쿼리 → 코드 키워드 확장(LLM)")
+        # 코드 식별자는 ASCII다. 요청에 그 밖의 글자가 섞였다면 어휘가 서로 다른 것이고,
+        # 그때는 결과가 '있어도' 엉뚱할 수 있다 — 0건일 때만 번역하면 그 경우를 놓친다.
+        # 어느 말이 어느 코드어에 대응하는지는 사전으로 못 적는다(끝이 없다). 번역은 LLM에 맡기고,
+        # 원문 결과와 번역 결과를 합쳐 점수로 겨루게 한다.
+        if config.llm_enabled and not query.isascii():
+            journal.event("query_expand", "start", note="요청 어휘 → 코드 어휘 변환")
+            # max_tokens가 빠듯하면 JSON이 잘려 파싱이 조용히 실패한다. 그러면 착지가
+            # 원문 검색만으로 정해지는데, 로그에는 아무 말도 안 남아 원인을 못 찾는다.
             expanded = llm.json_chat(config.llm_base, config.llm_model, [
                 {"role": "system", "content":
                  'Extract English code-search keywords from the dev request. '
+                 'Include UI/component words when the request is about a screen. '
                  'Reply JSON only: {"keywords": ["...", "..."]}'},
-                {"role": "user", "content": query}], max_tokens=100, timeout=30)
+                {"role": "user", "content": query}], max_tokens=300, timeout=45)
             if expanded and expanded.get("keywords"):
                 keyword_query = " ".join(str(k) for k in expanded["keywords"][:8])
                 journal.event("query_expand", "ok", keywords=keyword_query)
-                landing = search(self.graph, keyword_query, k=8)
+                landing = _merge_hits(landing, search(self.graph, keyword_query, k=8), k=8)
+            else:
+                journal.event("query_expand", "fail",
+                              note="코드 어휘 변환 실패 — 원문 검색 결과만 사용합니다")
         journal.event("kg_search", "ok" if landing else "empty",
                       hits=[{"id": n["id"], "kind": n["kind"], "score": n["score"]}
                             for n in landing[:8]],

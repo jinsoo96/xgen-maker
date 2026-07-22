@@ -84,8 +84,13 @@ def undo(config, action: dict, delete_remote: bool = False) -> dict:
     except GitOpsError as e:
         return {"ok": False, "steps": [], "errors": [str(e)]}
     # 1) 현재 브랜치가 대상이면 base로 이동
+    #    미커밋 변경은 checkout을 따라 base로 넘어온다. 지우지는 않는다 — 사람이 직접 손댄
+    #    것일 수도 있어서다. 대신 반드시 알린다. 조용히 남기면 되돌린 줄 알고 넘어간다.
+    leftover: list[str] = []
     try:
         if git.current_branch() == branch:
+            leftover = [line[3:].strip()
+                        for line in git._run("status", "--porcelain").splitlines() if line.strip()]
             git.checkout(base)
             steps.append(f"checkout {base}")
     except GitOpsError as e:
@@ -110,5 +115,5 @@ def undo(config, action: dict, delete_remote: bool = False) -> dict:
             steps.append(f"원격 브랜치 삭제 {branch}")
         except GitOpsError as e:
             errors.append(f"원격 삭제: {e}")
-    return {"ok": not errors, "steps": steps, "errors": errors,
+    return {"ok": not errors, "steps": steps, "errors": errors, "leftover": leftover,
             "mr_note": f"MR {action['mr']}는 수동 close 필요" if action.get("mr") else ""}

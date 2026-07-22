@@ -379,6 +379,13 @@ def cmd_undo(args) -> None:
         print(f"  ✗ {e}")
     if result.get("mr_note"):
         print(f"  ! {result['mr_note']}")
+    if result.get("leftover"):
+        # 브랜치는 지웠지만 커밋 안 된 변경은 base로 따라온다. 말 안 하면
+        # "되돌렸다"는 말만 믿고 남은 변경을 모른 채 넘어간다.
+        print(f"  ! 커밋 안 된 변경 {len(result['leftover'])}개가 {action['base']}에 남았습니다"
+              " — 직접 확인하세요(사람이 손댄 것일 수 있어 지우지 않았습니다):")
+        for path in result["leftover"][:10]:
+            print(f"      {path}")
 
 
 def cmd_login(args) -> None:
