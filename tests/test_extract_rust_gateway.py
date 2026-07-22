@@ -121,7 +121,7 @@ class TestGatewayRoutingTable(unittest.TestCase):
 
         via = [e for e in merged.edges if e["kind"] == "routes_via" and e["src"] == "fe:call"]
         self.assertEqual(len(via), 1)
-        serves = [e for e in merged.edges if e["kind"] == "serves" and e["src"] == via[0]["dst"]]
+        serves = [e for e in merged.edges if e["kind"] == "handled_by" and e["src"] == via[0]["dst"]]
         self.assertEqual([e["dst"] for e in serves], ["backend-one"])
 
     def test_unknown_backend_is_not_linked(self):

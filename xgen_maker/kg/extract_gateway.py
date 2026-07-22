@@ -10,7 +10,7 @@
       modules: [admin, auth, ...]        # /api/admin/** → some-host
 
 이걸 `gateway_route` 노드로 만들고 두 방향으로 잇는다.
-  api_call ──routes_via──> gateway_route ──serves──> (호스트명과 같은 이름의 repo 노드)
+  api_call ──routes_via──> gateway_route ──handled_by──> (호스트명과 같은 이름의 repo 노드)
 
 호스트명↔레포명 매칭은 이름이 같을 때만 한다. 조직·서비스 이름을 소스에 박지 않기 위해
 매핑표를 두지 않고, 그래프에 이미 있는 repo 노드와 대조만 한다.
@@ -98,7 +98,7 @@ def link_gateway_routes(graph: Graph) -> dict:
     for route in routes:
         host = route["meta"].get("host", "")
         if host and host in repo_ids:              # 컨테이너명과 레포명이 같을 때만
-            graph.add_edge(route["id"], host, "serves")
+            graph.add_edge(route["id"], host, "handled_by")
             serves += 1
 
     ordered = sorted(routes, key=lambda n: len(n["meta"].get("prefix", "")), reverse=True)

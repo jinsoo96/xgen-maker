@@ -1005,6 +1005,30 @@ class TestGraphAutoReload(unittest.TestCase):
             finally:
                 handler.config, handler.graph, handler._kg_stamp = prev
 
+    def test_reloads_config_when_file_changes(self):
+        """저장소를 설정에 추가하면 재시작 없이 보여야 한다."""
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            kg = _make_kg(base)
+            cfg = base / "cfg.json"
+            cfg.write_text(f'{{"kg_path": "{kg.as_posix()}", "llm_enabled": false, '
+                           f'"repos": {{"one": "/a"}}}}', encoding="utf-8")
+            handler = web.MakerWebHandler
+            prev = (handler.config, handler.config_path, handler._cfg_stamp)
+            try:
+                handler.config = MakerConfig.from_file(cfg)
+                handler.config_path = str(cfg)
+                handler._cfg_stamp = None
+                handler._reload_config_if_changed()      # 첫 호출은 기준점만
+                self.assertEqual(set(handler.config.repos), {"one"})
+
+                cfg.write_text(f'{{"kg_path": "{kg.as_posix()}", "llm_enabled": false, '
+                               f'"repos": {{"one": "/a", "two": "/b"}}}}', encoding="utf-8")
+                handler._reload_config_if_changed()
+                self.assertEqual(set(handler.config.repos), {"one", "two"})
+            finally:
+                handler.config, handler.config_path, handler._cfg_stamp = prev
+
     def test_broken_file_keeps_previous_graph(self):
         """반쯤 쓰인/깨진 파일을 읽어도 멀쩡한 그래프를 버리지 않는다."""
         with tempfile.TemporaryDirectory() as tmp:

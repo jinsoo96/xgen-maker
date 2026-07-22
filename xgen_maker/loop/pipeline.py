@@ -42,10 +42,8 @@ class MakerLoop:
                  (f":{n['line']}" if n.get("line") else "")
                  for n in landing[:10]]
         answer = "지식그래프 검색 결과:\n" + ("\n".join(lines) if lines else "(일치 없음)")
-        # KG는 지도, 코드가 권위 — 착지 파일 실코드 발췌를 함께 첨부(그래프+실데이터 참조)
-        repo = landing[0]["repo"] if landing else ""
-        repo_path = Path(self.config.repos[repo]) if repo in self.config.repos else None
-        legacy = self._legacy_notes(landing, repo_path)
+        # KG는 지도, 코드가 권위 — 착지 코드 실발췌를 함께 첨부(그래프+실데이터 참조)
+        legacy = self._legacy_notes(landing)
         if legacy:
             answer += "\n\n실제 코드(권위):\n" + legacy
         journal.event("answer", "ok", hits=len(landing), code_cited=bool(legacy))
@@ -53,26 +51,44 @@ class MakerLoop:
         return {"outcome": "answered", "answer": answer,
                 "landing": landing[:10], "code_cited": bool(legacy)}
 
-    def _legacy_notes(self, landing: list[dict], repo_path: Path | None) -> str:
-        """④ 레거시 확인 — KG는 지도, 코드가 권위. 착지 파일 실코드 발췌."""
-        if repo_path is None:
-            return ""
+    def _legacy_notes(self, landing: list[dict], work_repo: str = "",
+                      work_path: Path | None = None) -> str:
+        """④ 레거시 확인 — KG는 지도, 코드가 권위. 착지한 그 자리의 실코드 발췌.
+
+        세 가지를 지킨다.
+        - 노드마다 자기 저장소 경로에서 읽는다. 첫 결과의 저장소로 전부 읽으면,
+          여러 저장소에 같은 상대경로가 있을 때(공통 헬퍼가 그렇다) 다른 저장소의
+          파일을 그 저장소 것이라며 인용하게 된다.
+        - 줄을 아는 노드는 그 줄 주변을 준다. 파일 앞머리는 대개 import 뭉치라,
+          "이게 근거"라며 관계없는 코드를 읽히는 셈이 된다.
+        - 지금 작업 중인 저장소만은 work_path에서 읽는다. 격리 worktree나 최신화된
+          사본이 진짜 대상이고, 원본 체크아웃은 그 시점 코드가 아닐 수 있다.
+        """
         notes: list[str] = []
-        seen: set[str] = set()
+        seen: set[tuple[str, str]] = set()
         for node in landing:
-            rel = node.get("path", "")
-            if not rel or rel in seen or node["kind"] == "repo":
+            rel, repo = node.get("path", ""), node.get("repo", "")
+            if not rel or node["kind"] == "repo" or (repo, rel) in seen:
                 continue
-            seen.add(rel)
-            file_path = repo_path / rel
+            root = (work_path if work_path is not None and repo == work_repo
+                    else self.config.repos.get(repo))
+            if not root:
+                continue
+            seen.add((repo, rel))
+            file_path = Path(root) / rel
             if not file_path.is_file():
                 continue
             try:
-                head = "\n".join(file_path.read_text(encoding="utf-8", errors="ignore")
-                                 .splitlines()[:40])
+                lines = file_path.read_text(encoding="utf-8", errors="ignore").splitlines()
             except OSError:
                 continue
-            notes.append(f"### {rel} (선두 40줄)\n```\n{head}\n```")
+            line = node.get("line") or 0
+            if line:
+                start = max(0, line - 6)
+                excerpt, label = lines[start:line + 34], f"{start + 1}–{min(len(lines), line + 34)}줄"
+            else:
+                excerpt, label = lines[:40], "선두 40줄"
+            notes.append(f"### {repo}:{rel} ({label})\n```\n" + "\n".join(excerpt) + "\n```")
             if len(notes) >= 3:
                 break
         return "\n\n".join(notes)
@@ -169,7 +185,7 @@ class MakerLoop:
                       relations=list(chain_result["by_relation"].keys()))
 
         # ④ 레거시 확인
-        legacy_notes = self._legacy_notes(landing, repo_path)
+        legacy_notes = self._legacy_notes(landing, repo, repo_path)
         journal.event("legacy_check", "ok" if legacy_notes else "skipped",
                       bytes=len(legacy_notes))
 
@@ -261,7 +277,7 @@ class MakerLoop:
                     impact_nodes = impact(self.graph, top["id"], depth=3)
                     chain_nodes = retrieve_chain(self.graph, query, k=6, hops=2)["chain"]
                     # 최신 코드(FETCH_HEAD 체크아웃)에서 다시 발췌 — "코드가 권위"
-                    legacy_notes = self._legacy_notes(landing, repo_path)
+                    legacy_notes = self._legacy_notes(landing, repo, repo_path)
                     if past:  # 학습 메모리 재주입(재발췌로 덮였으므로)
                         legacy_notes = (as_prompt_block(past) + "\n\n" + legacy_notes).strip()
                     relanded_ok = True

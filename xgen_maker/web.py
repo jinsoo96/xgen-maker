@@ -884,16 +884,45 @@ def _run_query(config: MakerConfig, graph: Graph, query: str, q: queue.Queue,
 
 class MakerWebHandler(BaseHTTPRequestHandler):
     config: MakerConfig = None  # type: ignore[assignment]
+    config_path: str | None = None
     graph: Graph = None  # type: ignore[assignment]
     _cancels: dict = {}  # run_id → threading.Event (실행 중지용)
     _adj: dict = None     # 인접 리스트 캐시(클래스 보관 — 핸들러는 요청마다 새 인스턴스)
     _adj_ver = None
     _adj_graph = None
     _kg_stamp = None      # 로드한 KG 파일의 (mtime, size)
+    _cfg_stamp = None
     _kg_lock = threading.Lock()
 
     def log_message(self, *a):  # 조용히
         pass
+
+    @classmethod
+    def _reload_config_if_changed(cls) -> None:
+        """설정 파일이 바뀌면 다시 읽는다 — 저장소를 추가하고 재시작을 기다리지 않게.
+
+        진행 중인 실행은 자기가 받은 설정 객체를 계속 쓴다(중간에 규칙이 바뀌지 않는다).
+        """
+        path = cls.config_path
+        if not path:
+            return
+        try:
+            st = os.stat(path)
+        except OSError:
+            return
+        stamp = (st.st_mtime_ns, st.st_size)
+        if stamp == cls._cfg_stamp:
+            return
+        with cls._kg_lock:
+            if stamp == cls._cfg_stamp:
+                return
+            first, cls._cfg_stamp = cls._cfg_stamp is None, stamp
+            if first:                            # 기동 로드는 serve()가 이미 했다
+                return
+            try:
+                cls.config = MakerConfig.from_file(path)
+            except (OSError, ValueError, json.JSONDecodeError):
+                pass                             # 편집 중인 파일 — 다음 요청에서 다시
 
     @classmethod
     def _reload_graph_if_changed(cls) -> None:
@@ -929,6 +958,7 @@ class MakerWebHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         # 어떤 핸들러가 예외를 던져도 스레드가 죽지 않게 500으로 감싼다(빈 응답/hang 방지)
         self._response_started = False
+        self._reload_config_if_changed()
         self._reload_graph_if_changed()
         try:
             self._route()
@@ -1854,11 +1884,12 @@ def serve(config_path: str | None, host: str = "127.0.0.1", port: int = 8760) ->
     MakerWebHandler.config = config
     MakerWebHandler.config_path = config_path
     MakerWebHandler.graph = graph
-    try:
-        st = os.stat(config.kg_path)
-        MakerWebHandler._kg_stamp = (st.st_mtime_ns, st.st_size)
-    except OSError:
-        pass
+    for attr, target in (("_kg_stamp", config.kg_path), ("_cfg_stamp", config_path)):
+        try:
+            st = os.stat(target)                       # 기동 시점을 기준으로 잡아둔다
+            setattr(MakerWebHandler, attr, (st.st_mtime_ns, st.st_size))
+        except (OSError, TypeError):
+            pass
     server = ThreadingHTTPServer((host, port), MakerWebHandler)
     print(f"⚒ XGEN MAKER 웹 UI → http://{host}:{port}")
     print(f"  KG {len(graph.nodes):,} 노드 로드됨. 브라우저에서 쿼리를 치세요. (Ctrl+C 종료)")
