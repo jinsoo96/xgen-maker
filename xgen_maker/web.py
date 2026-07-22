@@ -16,6 +16,10 @@ from .config import MakerConfig, resolve_default_repo
 from .kg.graph import Graph
 
 
+# 이벤트가 없는 동안 연결을 살려 두는 신호. SSE 주석이라 클라이언트는 무시한다.
+_SSE_KEEPALIVE = b": keepalive\n\n"
+
+
 def _sync_summary(result: dict, pulled: bool) -> dict:
     """최신화 결과를 화면이 쓰는 모양으로. 붙잡아 둔 저장소는 이유까지 넘긴다."""
     return {"ok": True, "pulled": pulled,
@@ -951,7 +955,13 @@ document.getElementById('f').addEventListener('submit',e=>{
   else if(e.type==='stopped'){line('fail',e.message||'중지됨','■'); done();}
   else if(e.type==='error'){line('fail',e.message,'✗'); done();}
  };
- es.onerror=()=>{done();};
+ // EventSource는 끊기면 스스로 다시 붙는다. 그런데 재연결은 새 GET이라 같은 작업이
+ // 처음부터 또 돌아간다(한 번 눌렀는데 세션이 6개 생겼다). 결과를 받기 전에 끊겼다면
+ // 다시 붙이지 않고 여기서 끝낸다 — 사용자가 다시 누를지는 사용자가 정한다.
+ es.onerror=()=>{
+  if(es.readyState!==EventSource.CLOSED)line('fail','연결이 끊겨 표시를 멈춥니다. 작업은 서버에서 계속될 수 있습니다 — 세션 목록에서 확인하세요.','✗');
+  done();
+ };
 });
 document.getElementById('stopbtn').onclick=()=>{
  if(!window.__runid){if(window.__es){window.__es.close();window.__es=null;}runstate(false);go.disabled=false;document.getElementById('stopbtn').style.display='none';return;}
@@ -2101,7 +2111,15 @@ class MakerWebHandler(BaseHTTPRequestHandler):
         threading.Thread(target=work, daemon=True).start()
         try:
             while True:
-                item = q.get()
+                try:
+                    # 오래 걸리는 단계(LLM 호출 등)에는 이벤트가 없다. 그동안 아무것도
+                    # 안 보내면 연결이 끊기고, EventSource가 자동 재연결하면서 같은
+                    # 작업을 처음부터 다시 돌린다(한 번 눌렀는데 세션이 6개 생겼다).
+                    item = q.get(timeout=10)
+                except queue.Empty:
+                    self.wfile.write(_SSE_KEEPALIVE)
+                    self.wfile.flush()
+                    continue
                 if item is None:
                     break
                 try:
@@ -2158,7 +2176,15 @@ class MakerWebHandler(BaseHTTPRequestHandler):
                          daemon=True).start()
         try:
             while True:
-                item = q.get()
+                try:
+                    # 오래 걸리는 단계(LLM 호출 등)에는 이벤트가 없다. 그동안 아무것도
+                    # 안 보내면 연결이 끊기고, EventSource가 자동 재연결하면서 같은
+                    # 작업을 처음부터 다시 돌린다(한 번 눌렀는데 세션이 6개 생겼다).
+                    item = q.get(timeout=10)
+                except queue.Empty:
+                    self.wfile.write(_SSE_KEEPALIVE)
+                    self.wfile.flush()
+                    continue
                 if item is None:
                     break
                 try:
