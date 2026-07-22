@@ -49,6 +49,11 @@ class MakerConfig:
         "XGEN_MAKER_GITLAB_URL", "https://gitlab.example.com"))  # 실 호스트는 .env로
     gitlab_projects: dict[str, str] = field(default_factory=dict)  # repo명 → "group/repo" (config로 주입)
     target_branch: str = "develop"
+    # 그래프를 어느 코드로 만들지. "auto" = origin/<target_branch>(워킹트리 무접촉),
+    # "" = 체크아웃된 파일 그대로, 그 밖은 그 ref를 그대로 쓴다.
+    # 기본이 auto인 이유: 사람은 자기 작업 브랜치를 체크아웃해 두는데 그건 통합
+    # 브랜치보다 한참 뒤처져 있어(실측 544커밋), 워킹트리만 보면 지도가 낡는다.
+    graph_ref: str = "auto"
     fetch_latest: bool = True                              # 작업 전 origin/target 최신 fetch + KG 갱신
     isolate_worktree: bool = False                         # tmp git worktree 격리(동시실행 충돌 방지)
     release_stages: list = field(default_factory=lambda: [  # develop→stg→main 릴리즈 사다리

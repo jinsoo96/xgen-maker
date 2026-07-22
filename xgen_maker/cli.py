@@ -70,20 +70,26 @@ def cmd_kg_rebuild(args) -> None:
         raise SystemExit("[kg rebuild] config.repos가 비어 있습니다")
     out = args.kg or config.kg_path
     scopes = getattr(config, "repo_scopes", None) or {}
+    from .kg.source import resolve_ref
+    want_ref = args.ref if args.ref is not None else getattr(config, "graph_ref", "auto")
     graphs, failed = [], []
     for name, root in config.repos.items():
         if not Path(root).is_dir():
             failed.append((name, f"경로 없음: {root}"))
             continue
         scope = scopes.get(name) or None
+        # 워킹트리는 사람이 체크아웃해 둔 작업 브랜치라 통합 브랜치보다 뒤처져 있다.
+        # 기본은 원격 통합 브랜치를 보되, 없으면 워킹트리로 돌아간다.
+        ref = (resolve_ref(root, config.target_branch) if want_ref == "auto"
+               else (want_ref or None))
         try:
-            g = build_repo(name, root, scope, max_files=args.max_files)
+            g = build_repo(name, root, scope, max_files=args.max_files, ref=ref)
         except Exception as exc:                                  # 한 레포 실패로 전체를 잃지 않는다
             failed.append((name, f"{type(exc).__name__}: {exc}"))
             continue
         graphs.append(g)
         print(f"[kg rebuild] {name}: {json.dumps(g.stats(), ensure_ascii=False)}"
-              f" scope={scope or '-'}")
+              f" scope={scope or '-'} · {g.meta.get('source', '')}")
     if not graphs:
         raise SystemExit("[kg rebuild] 빌드된 저장소가 없습니다 — 경로를 확인하세요")
 
@@ -388,6 +394,14 @@ def cmd_undo(args) -> None:
             print(f"      {path}")
 
 
+def cmd_coverage(args) -> None:
+    """설계한 파이프라인 단계가 실제로 도는지 기록으로 확인."""
+    from .coverage import scan, format_report
+    config = MakerConfig.from_file(args.config) if args.config else MakerConfig()
+    result = scan(config.worklogs_dir)
+    print(format_report(result))
+
+
 def cmd_login(args) -> None:
     from .auth import (Auth, save_auth, claude_cli_status, load_auth,
                        gitlab_login_password, gitlab_verify_token)
@@ -679,6 +693,8 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--config", default="maker.config.json")
     p.add_argument("--kg", default=None, help="출력 경로(기본: config.kg_path)")
     p.add_argument("--infra", default=None, help="인프라 저장소 경로(기본: config.infra_path)")
+    p.add_argument("--ref", default=None,
+                   help="그래프를 만들 기준(auto=원격 통합브랜치, 빈값=체크아웃된 파일)")
     p.add_argument("--max-files", type=int, default=20000)
     p.set_defaults(func=cmd_kg_rebuild)
 
@@ -825,6 +841,10 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--remote", action="store_true", help="원격 브랜치도 삭제")
     p.add_argument("--config", default=None)
     p.set_defaults(func=cmd_undo)
+
+    p = sub.add_parser("coverage", help="파이프라인 단계가 실제로 도는지 기록으로 확인")
+    p.add_argument("--config", default="maker.config.json")
+    p.set_defaults(func=cmd_coverage)
 
     p = sub.add_parser("doctor", help="자가검증 — MAKER 목적(R1~R20)이 실제로 되는지 점검")
     p.add_argument("--config", default=None)

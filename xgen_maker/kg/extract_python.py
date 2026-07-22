@@ -52,10 +52,12 @@ def _resolve_import(module: str, repo_root: Path, known_files: set[str]) -> str 
 
 
 def extract_python_file(graph: Graph, repo: str, repo_root: Path, rel: str,
-                        known_files: set[str]) -> None:
+                        known_files: set[str], src=None) -> None:
     # utf-8-sig — BOM이 붙은 파일(Windows 저장본)을 utf-8로 읽으면 선두에 U+FEFF가
     # 남아 ast.parse가 SyntaxError를 낸다. 그러면 아래에서 파일이 통째로 누락된다.
-    source = (repo_root / rel).read_text(encoding="utf-8-sig", errors="ignore")
+    # 원본은 워킹트리일 수도, 특정 커밋일 수도 있다(kg/source.py)
+    source = (src.read_text(rel) if src is not None
+              else (repo_root / rel).read_text(encoding="utf-8-sig", errors="ignore"))
     file_id = f"{repo}:{rel}"
     file_meta = {"lang": "python"}
     try:

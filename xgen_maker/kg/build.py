@@ -35,6 +35,23 @@ def git_head(repo_root: str | Path) -> str | None:
     return result.stdout.strip() if result.returncode == 0 else None
 
 
+def collect_from_ref(source, scope: str | None, max_files: int) -> list[str]:
+    """특정 커밋에 담긴 파일 목록. 워킹트리를 훑지 않는다."""
+    exts = PY_EXTS | TS_EXTS | RUST_EXTS
+    prefix = f"{scope.strip('/')}/" if scope else ""
+    out = []
+    for rel in source.list_files():
+        if prefix and not rel.startswith(prefix):
+            continue
+        if any(part in SKIP_DIRS or part.startswith(".") for part in rel.split("/")[:-1]):
+            continue
+        if Path(rel).suffix in exts:
+            out.append(rel)
+            if len(out) >= max_files:
+                break
+    return out
+
+
 def collect_files(repo_root: Path, scope: str | None = None,
                   max_files: int = 20000) -> list[str]:
     base = repo_root / scope if scope else repo_root
@@ -58,11 +75,20 @@ def collect_files(repo_root: Path, scope: str | None = None,
 
 
 def build_repo(repo: str, repo_root: str | Path, scope: str | None = None,
-               max_files: int = 20000) -> Graph:
+               max_files: int = 20000, ref: str | None = None) -> Graph:
+    """저장소 하나를 그래프로. ref를 주면 그 커밋 기준으로 읽는다(워킹트리 무접촉).
+
+    사람이 체크아웃해 둔 작업 브랜치는 통합 브랜치보다 한참 뒤처져 있기 마련이라,
+    워킹트리만 보면 그래프가 낡는다. ref를 주면 원본을 건드리지 않고 최신을 본다.
+    """
+    from .source import open_source
     repo_root = Path(repo_root)
     graph = Graph()
     started = time.time()
-    rel_files = collect_files(repo_root, scope, max_files)
+    src = open_source(repo_root, ref)
+    used_ref = getattr(src, "ref", "")
+    rel_files = (collect_from_ref(src, scope, max_files) if used_ref
+                 else collect_files(repo_root, scope, max_files))
     known = set(rel_files)
     graph.add_node(f"{repo}", "repo", repo, repo, str(repo_root))
 
@@ -76,12 +102,12 @@ def build_repo(repo: str, repo_root: str | Path, scope: str | None = None,
         suffix = Path(rel).suffix
         try:
             if suffix in PY_EXTS:
-                extract_python_file(graph, repo, repo_root, rel, known)
+                extract_python_file(graph, repo, repo_root, rel, known, src=src)
             elif suffix in TS_EXTS:
-                extract_ts_file(graph, repo, repo_root, rel, known, resolver=resolver)
+                extract_ts_file(graph, repo, repo_root, rel, known, resolver=resolver, src=src)
                 ts_files.append(rel)      # Next.js 라우트(page.tsx)는 TS 파일에서만 나온다
             elif suffix in RUST_EXTS:
-                extract_rust_file(graph, repo, repo_root, rel, known)
+                extract_rust_file(graph, repo, repo_root, rel, known, src=src)
         except (OSError, RecursionError):
             continue
         file_id = f"{repo}:{rel}"
@@ -94,6 +120,7 @@ def build_repo(repo: str, repo_root: str | Path, scope: str | None = None,
     if resolver is not None:
         _attach_feature_members(graph, repo, rel_files, resolver.workspaces)
     graph.meta = {"repo": repo, "root": str(repo_root), "scope": scope or "",
+                  "ref": used_ref, "source": src.describe(),
                   "files": len(rel_files), "routes": route_count,
                   "git_head": git_head(repo_root),
                   "build_seconds": round(time.time() - started, 2)}
@@ -162,7 +189,8 @@ def merge_and_link(graphs: list[Graph]) -> tuple[Graph, int]:
         "repos": [g.meta.get("repo", "?") for g in graphs],
         # 증분 sync의 기준점 — 소스 스펙(repo/root/scope)과 빌드 시점 HEAD 보존
         "sources": [{"repo": g.meta.get("repo", "?"), "root": g.meta.get("root", ""),
-                     "scope": g.meta.get("scope", "")} for g in graphs],
+                     "scope": g.meta.get("scope", ""), "ref": g.meta.get("ref", "")}
+                    for g in graphs],
         "repo_heads": {g.meta.get("repo", "?"): g.meta.get("git_head")
                        for g in graphs if g.meta.get("git_head")},
     }

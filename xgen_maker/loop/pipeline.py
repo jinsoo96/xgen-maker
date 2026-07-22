@@ -103,11 +103,24 @@ class MakerLoop:
                 continue
             seen.add((repo, rel))
             file_path = Path(root) / rel
-            if not file_path.is_file():
-                continue
-            try:
-                lines = file_path.read_text(encoding="utf-8", errors="ignore").splitlines()
-            except OSError:
+            lines = None
+            if file_path.is_file():
+                try:
+                    lines = file_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+                except OSError:
+                    lines = None
+            else:
+                # 그래프가 통합 브랜치 기준이면 사람의 체크아웃에 없는 파일이 나온다.
+                # 근거 없이 넘기면 에이전트가 그 코드를 못 보고 추측으로 고친다.
+                ref = next((s.get("ref") for s in self.graph.meta.get("sources", [])
+                            if s.get("repo") == repo), "")
+                if ref:
+                    from ..kg.source import GitRefSource
+                    try:
+                        lines = GitRefSource(root, ref).read_text(rel).splitlines()
+                    except OSError:
+                        lines = None
+            if lines is None:
                 continue
             line = node.get("line") or 0
             if line:
@@ -242,6 +255,11 @@ class MakerLoop:
         if past:
             legacy_notes = (as_prompt_block(past) + "\n\n" + legacy_notes).strip()
             journal.event("learnings", "ok", count=len(past), area=area)
+        else:
+            # 꺼내 쓸 교훈이 없는 것과 이 단계를 건너뛴 것은 다르다. 말하지 않으면
+            # 화면에서는 둘 다 '안 돎'으로 보인다.
+            journal.event("learnings", "skipped", area=area,
+                          reason="이 영역에 쌓인 교훈이 아직 없습니다")
 
         # 브랜치명: 착지점(예: ontology-graph-section) 기반으로 의미있게 (팀 규칙: js·251205 금지)
         from ..config import suggest_branch, branch_name_issue
@@ -257,7 +275,10 @@ class MakerLoop:
 
         # 인가 게이트 — act(실 push/MR)는 인가된 xgen 작업자만(대상 프로젝트 Developer+ 멤버십).
         # public 저장소라 코드는 누구나 받지만, 실 인프라 작업은 여기서 fail-fast 차단.
-        if config.mode == "act":
+        if config.mode != "act":
+            journal.event("authorize", "skipped",
+                          reason=f"{config.mode} 모드 — 원격에 쓰지 않아 인가 검사가 필요 없습니다")
+        else:
             from .authz import authorize
             authz = authorize(config, repo, repo_path=repo_path)
             journal.event("authorize", "ok" if authz["ok"] else "denied",
@@ -296,6 +317,8 @@ class MakerLoop:
                     changed_since = repo_git.diff_names(base_branch, "FETCH_HEAD")[:200]
                 except GitOpsError as fe:
                     journal.event("fetch_latest", "skipped", reason=str(fe)[:100])
+            else:
+                journal.event("fetch_latest", "skipped", reason="설정에서 꺼져 있습니다")
             worktree_path = None
             main_git = repo_git
             self._main_git = main_git
@@ -326,16 +349,23 @@ class MakerLoop:
                     if past:  # 학습 메모리 재주입(재발췌로 덮였으므로)
                         legacy_notes = (as_prompt_block(past) + "\n\n" + legacy_notes).strip()
                     relanded_ok = True
-                journal.event("fetch_latest", "ok", target=config.target_branch,
-                              sha=fetch_sha[:12], kg_refreshed=len(changed_since),
-                              relanded=relanded_ok)
+            if base_ref:
+                # 최신화는 '가져온 것이 있을 때'만 기록하면 안 된다. 이미 최신이어도 이 단계는
+                # 돈 것이고, 흔적이 없으면 화면에서 영영 진행 중으로 남아 멈춘 것처럼 보인다.
+                journal.event("fetch_latest", "ok" if changed_since else "already_latest",
+                              target=config.target_branch, sha=fetch_sha[:12],
+                              kg_refreshed=len(changed_since), relanded=relanded_ok)
         except GitOpsError as error:
             journal.event("branch", "fail", error=str(error))
             journal.close("branch_failed")
             report.update({"outcome": Outcome.BRANCH_FAILED.value,
                            "code": ErrorCode.GIT_DIRTY.value, "error": str(error)})
             return report
-        journal.event("branch", "ok", branch=branch, base=base_branch, repo=repo)
+        # base는 '어디서 분기했는가'다. 체크아웃돼 있던 브랜치 이름을 적으면, 최신
+        # target에서 딴 경우에도 사람의 작업 브랜치에서 딴 것처럼 읽힌다.
+        journal.event("branch", "ok", branch=branch, repo=repo,
+                      base=(f"{config.target_branch}(최신)" if base_ref else base_branch),
+                      checked_out=base_branch)
         report["branch"] = branch  # 재착지로 top이 바뀌어도 브랜치명은 최초 결정 유지
 
         # diff 기준은 '실제로 분기한 지점'(fetch한 최신 target sha). 진입 시 current_branch()는

@@ -1236,12 +1236,27 @@ class MakerWebHandler(BaseHTTPRequestHandler):
             return {"ok": False,
                     "error": f"이 항목은 파일이 아니라 폴더입니다({kind_label(n)}) — "
                              "안쪽 파일 노드를 선택하세요"}
-        if not full.is_file():
-            return {"ok": False, "error": "파일을 찾을 수 없습니다 — 동기화가 필요합니다"}
-        try:
-            lines = full.read_text(encoding="utf-8", errors="replace").splitlines()
-        except OSError as e:
-            return {"ok": False, "error": str(e)}
+        # 그래프는 통합 브랜치 기준으로 만들어질 수 있다. 그러면 여기 있는 파일이
+        # 사람의 체크아웃에는 없다 — 그건 "없는 파일"이 아니라 "아직 안 받은 파일"이다.
+        # 그래프를 만든 그 커밋에서 읽어 보여준다(워킹트리는 건드리지 않는다).
+        source_ref = next((s.get("ref") for s in self.graph.meta.get("sources", [])
+                           if s.get("repo") == n.get("repo")), "")
+        lines = None
+        if full.is_file():
+            try:
+                lines = full.read_text(encoding="utf-8", errors="replace").splitlines()
+            except OSError as e:
+                return {"ok": False, "error": str(e)}
+        elif source_ref:
+            from .kg.source import GitRefSource
+            try:
+                lines = GitRefSource(root, source_ref).read_text(rel).splitlines()
+            except OSError:
+                lines = None
+        if lines is None:
+            return {"ok": False,
+                    "error": ("파일을 찾을 수 없습니다 — 동기화가 필요합니다" if not source_ref
+                              else f"이 파일은 {source_ref}에만 있습니다 — 아직 받지 않았습니다")}
         line = n.get("line") or 1
         kind = n.get("kind", "")
         start = max(0, line - 1)

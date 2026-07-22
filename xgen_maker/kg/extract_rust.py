@@ -81,8 +81,10 @@ def _brace_depth(line: str) -> int:
 
 
 def extract_rust_file(graph: Graph, repo: str, repo_root: Path, rel: str,
-                      known_files: set[str]) -> None:
-    source = (repo_root / rel).read_text(encoding="utf-8-sig", errors="ignore")
+                      known_files: set[str], src=None) -> None:
+    # 원본은 워킹트리일 수도, 특정 커밋일 수도 있다(kg/source.py)
+    source = (src.read_text(rel) if src is not None
+              else (repo_root / rel).read_text(encoding="utf-8-sig", errors="ignore"))
     file_id = f"{repo}:{rel}"
     lines = source.splitlines()
     meta = {"lang": "rust"}

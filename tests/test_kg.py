@@ -282,3 +282,67 @@ class TestSearchImpact(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestGraphSource(unittest.TestCase):
+    """그래프를 어느 코드로 만드는가 — 워킹트리는 사람의 작업 브랜치라 뒤처져 있다."""
+
+    def _repo(self, root: Path) -> None:
+        import subprocess
+        root.mkdir(parents=True)
+        run = lambda *a: subprocess.run(["git", "-C", str(root), *a], check=True,
+                                        capture_output=True)
+        run("init", "-q")
+        run("config", "user.email", "t@t")
+        run("config", "user.name", "t")
+        (root / "base.py").write_text("def shared():\n    return 1\n", encoding="utf-8")
+        run("add", "-A")
+        run("commit", "-qm", "base")
+        run("branch", "-M", "develop")
+        # develop에만 있는 파일
+        (root / "only_on_develop.py").write_text("def newest():\n    return 2\n",
+                                                 encoding="utf-8")
+        run("add", "-A")
+        run("commit", "-qm", "develop only")
+        # 사람은 뒤처진 작업 브랜치를 체크아웃해 둔다
+        run("checkout", "-q", "-b", "my/work", "HEAD~1")
+
+    def test_ref_sees_files_the_worktree_does_not(self):
+        from xgen_maker.kg.source import open_source
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "r"
+            self._repo(root)
+            self.assertFalse((root / "only_on_develop.py").exists())
+
+            worktree = build_repo("r", root)
+            from_ref = build_repo("r", root, ref="develop")
+        names = lambda g: {n["name"] for n in g.nodes_by_kind("function")}
+        self.assertNotIn("newest", names(worktree))   # 체크아웃 기준이면 안 보인다
+        self.assertIn("newest", names(from_ref))      # 통합 브랜치 기준이면 보인다
+        self.assertIn("shared", names(from_ref))
+        self.assertEqual(from_ref.meta["ref"], "develop")
+
+    def test_reading_from_ref_never_touches_the_worktree(self):
+        """최신을 보겠다고 남의 체크아웃을 바꾸면 안 된다."""
+        import subprocess
+        from xgen_maker.kg.source import open_source
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "r"
+            self._repo(root)
+            before = subprocess.run(["git", "-C", str(root), "rev-parse", "--abbrev-ref", "HEAD"],
+                                    capture_output=True, text=True).stdout.strip()
+            build_repo("r", root, ref="develop")
+            after = subprocess.run(["git", "-C", str(root), "rev-parse", "--abbrev-ref", "HEAD"],
+                                   capture_output=True, text=True).stdout.strip()
+            self.assertEqual(before, after)
+            self.assertFalse((root / "only_on_develop.py").exists())
+
+    def test_unknown_ref_falls_back_to_worktree(self):
+        """받은 적 없는 ref를 주면 그래프를 비우지 말고 있는 것으로 만든다."""
+        from xgen_maker.kg.source import open_source, WorktreeSource
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "r"
+            self._repo(root)
+            self.assertIsInstance(open_source(root, "origin/nope"), WorktreeSource)
+            graph = build_repo("r", root, ref="origin/nope")
+            self.assertIn("shared", {n["name"] for n in graph.nodes_by_kind("function")})
