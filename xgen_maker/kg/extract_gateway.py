@@ -28,18 +28,61 @@ try:
 except ImportError:
     HAS_YAML = False
 
-# 환경별 변형(services.docker.yaml 등)보다 기본 파일을 우선한다
-_CANDIDATES = ("config/services.yaml", "config/services.yml",
-               "services.yaml", "services.yml")
+def _is_routing_table(data) -> bool:
+    """모듈→서비스 매핑처럼 생겼는가 — 파일 이름이 아니라 내용으로 판단한다."""
+    if not isinstance(data, dict) or not isinstance(data.get("services"), dict):
+        return False
+    return any(isinstance(spec, dict) and ("modules" in spec or "host" in spec)
+               for spec in data["services"].values())
+
+
+def _walk_yaml(root: Path, skip: set):
+    """yaml 파일을 훑되 무거운 디렉토리는 들어가지 않는다.
+
+    rglob은 가지치기를 못 해서 node_modules 안까지 전부 걷고 나서야 거른다
+    (프론트 저장소에서 33초). 들어가기 전에 잘라야 한다.
+    """
+    stack = [root]
+    while stack:
+        current = stack.pop()
+        try:
+            entries = sorted(current.iterdir())
+        except (PermissionError, OSError):
+            continue
+        for entry in entries:
+            if entry.is_dir():
+                if entry.name not in skip and not entry.name.startswith("."):
+                    stack.append(entry)
+            elif entry.suffix in (".yaml", ".yml"):
+                yield entry
 
 
 def find_services_file(repo_root: str | Path) -> Path | None:
+    """라우팅 표 파일을 찾는다.
+
+    파일 이름을 목록으로 박으면(services.yaml, config/services.yml …) 그 목록에 없는
+    이름으로 바뀌는 순간 조용히 못 찾는다. 이름 대신 구조로 판별한다.
+    환경별 변형(services.docker.yaml 등)이 여럿이면 경로가 짧고 이른 것을 고른다.
+    """
+    if not HAS_YAML:
+        return None
+    from .build import SKIP_DIRS
     root = Path(repo_root)
-    for rel in _CANDIDATES:
-        path = root / rel
-        if path.is_file():
-            return path
-    return None
+    found: list[Path] = []
+    for path in _walk_yaml(root, SKIP_DIRS):
+        try:
+            text = path.read_text(encoding="utf-8")
+            if "services:" not in text:      # 파싱 전 값싼 거르기(찾는 구조의 최상위 키)
+                continue
+            if _is_routing_table(yaml.safe_load(text)):
+                found.append(path)
+        except (OSError, yaml.YAMLError, UnicodeDecodeError):
+            continue
+    if not found:
+        return None
+    # 환경 변형은 기본 이름에 접미사가 붙어 길어진다(services.yaml → services.docker.yaml).
+    # 얕고 짧은 쪽이 기본형이다.
+    return min(found, key=lambda p: (len(p.relative_to(root).parts), len(p.name), str(p)))
 
 
 def _host_name(host: str) -> str:
@@ -59,7 +102,7 @@ def extract_gateway_routes(graph: Graph, repo: str, repo_root: str | Path) -> in
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError):
         return 0
-    if not isinstance(data, dict) or not isinstance(data.get("services"), dict):
+    if not _is_routing_table(data):
         return 0
 
     rel = path.relative_to(Path(repo_root)).as_posix()

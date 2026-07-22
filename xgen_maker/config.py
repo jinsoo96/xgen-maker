@@ -37,6 +37,9 @@ class MakerConfig:
     mode: str = "observe"                                  # observe=푸시/MR 미실행, act=푸시+MR
     allow_write: bool = False                              # False면 브랜치/구현도 계획만(dry)
     theta: float = 0.7                                     # judge 게이트 임계값
+    # 착지 코드 인용 — 개수가 아니라 분량으로 자른다(진짜 제약은 프롬프트 크기다)
+    legacy_budget_chars: int = 12000
+    legacy_context_lines: int = 6                          # 착지 줄 위로 몇 줄부터 보여줄지
     agent_cmd: str | None = None                           # "{prompt_path}" 치환, None=claude CLI
     agent_timeout: int = 1800
     llm_enabled: bool = True

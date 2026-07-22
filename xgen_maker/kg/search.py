@@ -5,94 +5,52 @@ impact: 역방향 BFS — "이 노드가 바뀌면 누가 영향받나" (imports
 """
 from __future__ import annotations
 
-import re
-from difflib import SequenceMatcher
-
 from .graph import Graph
-
-_SPLIT = re.compile(r"[^a-z0-9가-힣]+")
-_CAMEL = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+from .rank import Bm25Index, tokenize
 
 
-def tokenize(text: str) -> set[str]:
-    """식별자를 사람이 읽는 단어로 쪼갠다.
+def _index(graph: Graph) -> Bm25Index:
+    """그래프별 역색인. 노드 구성이 바뀌면 다시 만든다.
 
-    `listApiCollections`·`main-tool-management-api-collections`·`user_id`는 통째로 두면
-    어떤 토큰과도 안 맞는다. 코드 이름은 원래 여러 단어를 붙여 만든 것이라, 그 규칙을
-    되돌려 놓아야 검색이 닿는다. (단어 사전이 아니라 문자열 규칙이다)
+    색인은 그래프 객체 밖 속성에 둔다 — nodes 안에 넣으면 Graph.save가 통째로
+    직렬화하려다 깨진다.
     """
-    return {t for t in _SPLIT.split(_CAMEL.sub(" ", text).lower()) if len(t) >= 2}
-
-
-def _haystack(node: dict, cache: dict | None = None) -> tuple[set[str], str]:
-    """이 노드를 가리킬 수 있는 모든 말.
-
-    이름·경로뿐 아니라 저장소명과 **의미층(요약·문서)**까지 넣는다. enrich가 만들어 둔
-    요약에는 "프론트 feature 패키지…", "핸들러 …" 처럼 사람 말이 들어 있는데, 검색이
-    그걸 안 보면 그래프가 아는 것을 검색이 모르는 상태가 된다.
-
-    캐시는 노드 밖에 둔다 — 노드 dict에 넣으면 Graph.save가 그대로 직렬화하려다 깨진다.
-    """
-    if cache is not None:
-        cached = cache.get(node["id"])
-        if cached is not None:
-            return cached
-    meta = node.get("meta") or {}
-    words = tokenize(node["name"]) | tokenize(node["path"]) | tokenize(node["repo"])
-    words |= tokenize(node["kind"])
-    for key in ("summary", "doc", "package", "route_path", "module", "service"):
-        value = meta.get(key)
-        if isinstance(value, str) and value:
-            words |= tokenize(value)
-    # 단어 집합과 함께 이어붙인 문자열도 둔다. 한국어는 어간에 조사가 붙어("취소"→"취소를")
-    # 토큰이 정확히 같지 않고, 영어도 복수형("tool"→"tools")이 그렇다. 조사·어미 목록을
-    # 적는 대신 부분일치로 받는다.
-    result = (words, " ".join(sorted(words)))
-    if cache is not None:
-        cache[node["id"]] = result
-    return result
-
-
-def _score(node: dict, query: str, tokens: list[str], cache: dict | None = None) -> float:
-    name = node["name"].lower()
-    path = node["path"].lower()
-    query_lower = query.lower()
-    words, blob = _haystack(node, cache)
-    score = 0.0
-    if name == query_lower:
-        score += 100
-    elif query_lower in name:
-        score += 60
-    for token in tokens:
-        if token in name:
-            score += 25
-        elif token in words:          # 이름에 없어도 경로·저장소·요약이 가리키면 인정
-            score += 18
-        elif len(token) >= 2 and token in blob:   # 조사·복수형이 붙은 형태("취소를", "tools")
-            score += 12
-        if token in path:
-            score += 15
-    score += SequenceMatcher(None, name, query_lower).ratio() * 30
-    if node["kind"] in ("endpoint", "route"):
-        score += 5
-    if node["meta"].get("deprecated"):
-        score -= 60  # 사람이 deprecated 표시한 노드 — 착지 회피(R8 오버레이)
-    return score
+    version = len(graph.nodes)
+    cached = graph.__dict__.get("_bm25")
+    if cached is not None and graph.__dict__.get("_bm25_ver") == version:
+        return cached
+    index = Bm25Index(list(graph.nodes.values()))
+    graph.__dict__["_bm25"] = index
+    graph.__dict__["_bm25_ver"] = version
+    return index
 
 
 def search(graph: Graph, query: str, k: int = 10,
            kinds: tuple[str, ...] | None = None) -> list[dict]:
-    tokens = sorted(tokenize(query))
-    cache = graph.__dict__.setdefault("_tok_cache", {})   # 그래프 밖 캐시(직렬화 대상 아님)
-    scored = []
-    for node in graph.nodes.values():
-        if kinds and node["kind"] not in kinds:
+    """쿼리와 관련된 노드 상위 k개(BM25).
+
+    점수 임계값을 두지 않는다. "몇 점 이상"은 코퍼스마다 달라 임의로 자르면 작은
+    저장소에서 다 잘리거나 큰 저장소에서 쓰레기가 통과한다. 순위만 매기고 k로 자른다.
+    """
+    scores = _index(graph).search(query)
+    if not scores:
+        return []
+    # 사람이 식별자를 그대로 쳤다면 그 노드를 지목한 것이다. 그 신호를 점수에 상수로
+    # 섞으면 "얼마를 더할지"를 또 손으로 정하게 된다. 정렬 차원을 나눠 우선순위로 둔다.
+    needle = query.strip().lower()
+    results = []
+    for node_id, score in scores.items():
+        node = graph.nodes.get(node_id)
+        if node is None or (kinds and node["kind"] not in kinds):
             continue
-        score = _score(node, query, tokens, cache)
-        if score > 20:
-            scored.append((score, node))
-    scored.sort(key=lambda pair: -pair[0])
-    return [{"score": round(score, 1), **node} for score, node in scored[:k]]
+        if (node.get("meta") or {}).get("deprecated"):
+            continue          # 사람이 "쓰지 말라"고 표시한 코드로는 착지하지 않는다(R8)
+        name = node.get("name", "").lower()
+        exact = name == needle
+        partial = not exact and len(needle) > 2 and needle in name
+        results.append(((exact, partial, score), node))
+    results.sort(key=lambda pair: pair[0], reverse=True)
+    return [{"score": round(key[2], 1), **node} for key, node in results[:k]]
 
 
 def _dependents_index(graph: Graph) -> dict[str, set[str]]:

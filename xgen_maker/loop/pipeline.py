@@ -78,8 +78,14 @@ class MakerLoop:
           "이게 근거"라며 관계없는 코드를 읽히는 셈이 된다.
         - 지금 작업 중인 저장소만은 work_path에서 읽는다. 격리 worktree나 최신화된
           사본이 진짜 대상이고, 원본 체크아웃은 그 시점 코드가 아닐 수 있다.
+
+        "몇 개까지"를 세지 않는다. 착지 결과가 이미 상위 몇 개로 좁혀져 있고, 진짜 제약은
+        개수가 아니라 프롬프트가 감당할 분량이다. 관련도 높은 순으로 담다가 예산이 차면
+        멈춘다.
         """
+        budget = self.config.legacy_budget_chars
         notes: list[str] = []
+        used = 0
         seen: set[tuple[str, str]] = set()
         for node in landing:
             rel, repo = node.get("path", ""), node.get("repo", "")
@@ -99,13 +105,16 @@ class MakerLoop:
                 continue
             line = node.get("line") or 0
             if line:
-                start = max(0, line - 6)
-                excerpt, label = lines[start:line + 34], f"{start + 1}–{min(len(lines), line + 34)}줄"
+                start = max(0, line - self.config.legacy_context_lines)
+                end = line + self.config.legacy_context_lines * 5
+                excerpt, label = lines[start:end], f"{start + 1}–{min(len(lines), end)}줄"
             else:
-                excerpt, label = lines[:40], "선두 40줄"
-            notes.append(f"### {repo}:{rel} ({label})\n```\n" + "\n".join(excerpt) + "\n```")
-            if len(notes) >= 3:
+                excerpt, label = lines[:self.config.legacy_context_lines * 6], "선두"
+            note = f"### {repo}:{rel} ({label})\n```\n" + "\n".join(excerpt) + "\n```"
+            if notes and used + len(note) > budget:   # 첫 인용은 예산과 무관하게 넣는다
                 break
+            notes.append(note)
+            used += len(note)
         return "\n\n".join(notes)
 
     # ---- 메인 ----
@@ -175,7 +184,7 @@ class MakerLoop:
                  'Reply JSON only: {"keywords": ["...", "..."]}'},
                 {"role": "user", "content": query}], max_tokens=300, timeout=45)
             if expanded and expanded.get("keywords"):
-                keyword_query = " ".join(str(k) for k in expanded["keywords"][:8])
+                keyword_query = " ".join(str(k) for k in expanded["keywords"])
                 journal.event("query_expand", "ok", keywords=keyword_query)
                 landing = _merge_hits(landing, search(self.graph, keyword_query, k=8), k=8)
             else:

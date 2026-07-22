@@ -205,6 +205,41 @@ class TestSearchImpact(unittest.TestCase):
         self.assertIn("api", tokenize("listApiCollections"))
         self.assertIn("user", tokenize("user_id"))
 
+    def test_rare_word_beats_common_word(self):
+        """흔한 단어는 저절로 약해져야 한다.
+
+        회귀: 점수가 손으로 정한 상수의 합이라 "api"(수천 노드)와 "collections"(몇 개)를
+        같게 봤다. 그래서 "api 도구 목록" 같은 요청이 온갖 백엔드를 끌어왔다.
+        """
+        from xgen_maker.kg.graph import Graph
+        graph = Graph()
+        graph.add_node("r", "repo", "r", "r", "/r")
+        for i in range(40):                       # "api"는 흔하다
+            graph.add_node(f"r:api{i}.py#h", "function", f"api_handler_{i}", "r", f"api{i}.py", 1)
+        graph.add_node("r:x.py#c", "function", "api_collections_card", "r", "x.py", 1)
+        top = search(graph, "api collections", k=1)[0]
+        self.assertEqual(top["name"], "api_collections_card")
+
+    def test_no_score_threshold_hides_results(self):
+        """점수 임계값으로 자르지 않는다 — 코퍼스마다 점수 범위가 달라 임의로 자르면
+        작은 저장소에서 전부 사라진다."""
+        from xgen_maker.kg.graph import Graph
+        graph = Graph()
+        graph.add_node("r", "repo", "r", "r", "/r")
+        graph.add_node("r:a.py#f", "function", "widget", "r", "a.py", 1)
+        self.assertTrue(search(graph, "widget", k=5))
+
+    def test_exact_identifier_wins(self):
+        """식별자를 그대로 치면 그 노드가 1등이어야 한다."""
+        from xgen_maker.kg.graph import Graph
+        graph = Graph()
+        graph.add_node("r", "repo", "r", "r", "/r")
+        graph.add_node("r:a.py#g", "function", "get_user", "r", "a.py", 1)
+        graph.add_node("r:b.py#g2", "function", "get_user_sessions_by_id", "r", "b.py", 1)
+        graph.add_node("r:c.py#g3", "endpoint", "GET /user", "r", "c.py", 1,
+                       method="GET", route_path="/user")
+        self.assertEqual(search(graph, "get_user", k=1)[0]["name"], "get_user")
+
     def test_search_uses_semantic_layer(self):
         """enrich가 채운 요약을 검색이 봐야 한다 — 안 보면 그래프가 아는 걸 검색이 모른다."""
         from xgen_maker.kg.graph import Graph
