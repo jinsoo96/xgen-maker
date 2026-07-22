@@ -1,140 +1,221 @@
-# XGEN MAKER
+<div align="center">
 
-> **쿼리 하나로 코드베이스를 개발한다.** 자연어로 "이 버그 고쳐줘"라고 하면 —
-> 코드 지식그래프로 착지점을 찾고 · 항상 최신 브랜치에서 · 코딩 에이전트가 구현하고 ·
-> 샌드박스에서 테스트하며 **통과할 때까지 스스로 고치고**(수렴 루프) · **MR 준비**까지 자동으로 한다.
-> 배포는 사람이. 관측은 read-only.
+# ⚒ XGEN MAKER
 
-의존성 거의 0(Python 표준 라이브러리 중심). 로컬/온프레미스에서 도는 자가 호스팅 개발 자동화 도구.
+**Ship code from a single sentence — grounded in a knowledge graph of your codebase.**
 
-> ⚠️ **설정 없이는 아무것도 안 된다(의도된 것).** 실제 GitLab/LLM/도메인 정보는 전부 `.env`·`maker.config.json`에만 있고, 이 저장소엔 예시(placeholder)만 있다. 자기 자격/엔드포인트를 채우지 않으면 동작하지 않는다.
+Ask in plain language. MAKER finds *where* in your code to change, works on a fresh branch,
+lets a coding agent implement it, then **tests and fixes itself until it passes** — and stops at
+a merge request for a human to review.
 
----
+[![tests](https://img.shields.io/badge/tests-304%20passing-3aa8c9)](#testing)
+[![python](https://img.shields.io/badge/python-3.12%2B-3aa8c9)](#requirements)
+[![deps](https://img.shields.io/badge/dependencies-stdlib%20first-3aa8c9)](#requirements)
+[![license](https://img.shields.io/badge/license-private-8894a0)](#license)
 
-## 무엇을 하나
+[Korean / 한국어 →](README.ko.md)
 
-```
-쿼리 → intent 분류 → KG 착지(코드 어디를 고칠지) → 워크플로우 체인 확장
-    → 항상 최신 GitLab 코드로 브랜치 → 코딩 에이전트 구현
-    → [수렴 루프] 샌드박스+테스트+품질judge → 실패하면 되먹여 재시도 → 통과까지
-    → 배포 렌더 검증(helm) → MR 준비   ◀── 여기까지 자동
-사람: MR 리뷰·머지 → 빌드 → 배포 (MAKER는 관측만)
-```
-
-- **지식그래프 3평면**: 코드(AST·엔드포인트) + UI/UX(라우트·화면) + 인프라(배포 토폴로지). 항상 최신으로 증분 유지.
-- **수렴 루프**: 구현 → 검증 → 실패 시 자가수정 반복(엔진 샌드박스 격리).
-- **안전**: 보호 브랜치 불가침, 브랜치 네이밍 규칙, MR-only(배포 안 함), 롤백(`maker undo`), worktree 격리.
-- **관측**: 작업 이력·MR·Jenkins/ArgoCD 상태 read-only.
-- **표면 3종**: CLI · 웹 대시보드 · MCP(다른 에이전트가 호출). 셋 다 같은 엔진.
+</div>
 
 ---
 
-## 설치 & 로그인
+## Why
 
-```bash
-pip install -e .                 # → 어디서든 `maker` 명령
-cp .env.example .env             # .env에 자기 GitLab/LLM/도메인 값 채움 (자동 로드)
-cp maker.config.example.json maker.config.json   # 레포 경로·gitlab_projects 매핑 채움
+Coding agents are good at *writing* code and bad at *knowing where it goes*. On a multi-repo
+platform, "fix the login bug" means finding the right file across thousands, understanding who
+depends on it, not breaking them, and following the team's branch and review rules.
 
-maker login                      # Claude CLI 구독 로그인 감지 → 코딩+판단+요약 전부 이 로그인 (API 키 불필요)
-maker login --gitlab-user <이메일> --gitlab-password <비번>   # GitLab (2FA면 --gitlab-token <PAT>)
-maker whoami                     # Claude/GitLab 로그인 지속 상태
-maker doctor --config maker.config.json          # 자가검증 — 모든 능력이 실제로 되는지
+MAKER puts a **code knowledge graph** in front of the agent and a **convergence loop** behind it.
+
+```
+you: "the ontology graph doesn't refresh after rebuild — fix it"
+
+  ├─ classify intent            bug / feature / refactor / question
+  ├─ locate in knowledge graph  → repo:path:line  (98% symbol accuracy)
+  ├─ find dependents            who breaks if this changes
+  ├─ pull latest, branch        naming + protected-branch guards
+  ├─ agent implements           with graph context + real source excerpts
+  ├─ verify                     syntax · tests · sandbox isolation
+  ├─ judge                      quality gate, retries until it passes
+  └─ prepare merge request      ← stops here, on purpose
+
+you: review · merge · deploy
 ```
 
-자격은 3소스 우선순위: **실제 환경변수 → `.env` → `~/.xgen-maker/auth.json`**. 어느 것이든 있으면 재입력 불필요.
+**MAKER never deploys.** It prepares a merge request and observes. Humans merge and release.
 
 ---
 
-## 사용법
+## Features
 
-### 1) 지식그래프 만들기 (프로젝트당 1회 + 이후 자동 증분)
-```bash
-maker kg build --repo "core=/path/to/core" --repo "frontend=/path/to/frontend::apps/web/src" --out kg
-maker kg merge kg/*.repo.json --out kg/merged.json
-maker kg enrich --kg kg/merged.json              # 의미층 요약
-maker kg infra --path /path/to/infra-repo        # 인프라(배포 토폴로지) KG (선택)
-maker kg dashboard --kg kg/merged.json           # 브라우저로 그래프 탐색
-```
-
-### 2) 쿼리 실행 — 3가지 표면 중 하나
-```bash
-# 웹 대시보드 (브라우저에서 쿼리 + 실시간 로그 + 작업이력·MR·배포상태 탭)
-maker web --config maker.config.json --open
-
-# 대화형 터미널
-maker chat --config maker.config.json
-
-# 원샷 CLI (실시간 진행 로그)
-maker run "온톨로지 그래프 안 바뀌는 버그 고쳐줘" --config maker.config.json
-```
-
-실행 모드: `plan`(분석·MR초안만, 레포 미접촉) · `observe`(브랜치+커밋+MR초안, 푸시 안 함) · `act`(push + 실제 MR).
-
-### 3) 관측 (read-only)
-```bash
-maker history          # MAKER 자기 작업 이력
-maker mrs              # 내 MR / MAKER가 만든 MR
-maker branches --repo frontend    # 브랜치 개요
-maker status           # 릴리즈 사다리 + Jenkins + ArgoCD 상태
-maker learn --repo core           # 작업 학습 메모리(실수 방지)
-```
-
-### 4) 안전·검증
-```bash
-maker undo --config maker.config.json            # 마지막 브랜치·커밋 되돌림(--yes 실행, --remote 원격까지)
-maker sdk                                        # 의존 엔진 버전 드리프트 + 계약 자가검증
-maker deploy test --repo core                    # 배포 렌더 검증(helm, tmp 격리)
-maker engine register                            # 엔진 stage로 등록(R3)
-```
-
----
-
-## 핵심 개념
-
-| 개념 | 설명 |
+| | |
 |---|---|
-| **항상 최신** | 작업 전 `origin/develop` fetch → 최신에서 분기 → 변경분을 KG에 반영. `fetch_latest`(기본 on) |
-| **수렴 루프** | 구현 → 샌드박스+테스트+judge → 실패 시 에러 되먹여 재구현, `max_iterations`까지. xgen-sdk 엔진 샌드박스 임포트 |
-| **레거시 회귀 게이트** | `pytest -x -q` 전체 스위트 + node 역의존성(크로스패키지)로 기존 동작이 깨졌나 검증. 실패=차단·되먹임. 테스트 환경이 없어 못 돌리면 **`verified`가 아닌 `unverified`로 정직 표기**(MR에 명시). `strict_regression`=true면 미검증을 차단으로 승격 |
-| **검증 정직성** | 샌드박스 격리는 `[harness]` 있을 때만(없으면 로컬검증으로 degrade), 회귀는 테스트 환경 있을 때만 — MR 초안·진단 탭에 실제 검증 여부를 그대로 노출(“통과”≠“검증됨” 오해 방지) |
-| **릴리즈 사다리** | `develop → stg → main` (= dev/stg/prd). MR은 develop에, 승격은 순차, main 직접머지 금지 |
-| **경계** | 자동은 **MR 준비까지** · 배포·빌드·ArgoCD sync는 **사람 수동** · CI 상태는 **read-only 관측** |
-| **학습 메모리** | 실패/성공 교훈을 `learnings/`에 쌓아 다음 작업 프롬프트에 주입(실수 방지) |
-| **자가검증** | `maker doctor`(능력 실동작) + `maker sdk`(의존 엔진 계약·드리프트) |
+| 🕸 **Code knowledge graph** | AST-level nodes (files, classes, functions, endpoints, routes) with `contains` / `imports` / `calls` edges across repos. Incrementally kept fresh — no full rebuilds. |
+| 🎯 **Grounded landing** | Natural-language query → the exact `repo:path:line` to change, plus the code that *depends* on it so the agent doesn't break callers. |
+| 🔁 **Convergence loop** | Implement → sandbox + tests + regression → quality judge → feed failures back → retry until it passes or gives up honestly. |
+| 🛡 **Safety by construction** | Protected branches untouchable, branch-naming enforced, infrastructure files vetoed, merge-request-only, one-command undo. |
+| 📊 **Web dashboard** | Live streaming run log, drill-down graph viewer, session history with replay/undo, test records, visual regression, health metrics. |
+| 🖥 **Three surfaces** | CLI, web dashboard, and MCP server — all driving the same engine. |
 
 ---
 
-## 보안 (공개 저장소 안전 + 인가된 사용자만)
-
-**1) 코드에 자격·엔드포인트·조직 정보를 담지 않는다.** 전부 gitignore된 로컬 파일에만:
-
-- `.env` — 토큰·URL·계정·작업 커밋 저자 (커밋 금지, `.env.example`은 placeholder만)
-- `maker.config.json` — 레포 경로·프로젝트 매핑 (커밋 금지, `.example`만)
-- `~/.xgen-maker/auth.json` — 로그인 저장 (홈 디렉토리)
-- `worklogs/` · `learnings/` · `kg/` — 작업 기록·그래프·산출물 (로컬만)
-
-→ 저장소를 public으로 바꿔도 dev/stg 도메인·계정·MR·인프라 정보가 노출되지 않는다.
-
-**2) 실제 작업(act)은 인가된 사용자만.** 코드는 누구나 받을 수 있지만, 실 인프라
-push·MR은 **인가 게이트**를 통과해야 한다(작업 시작 전 fail-fast 차단):
-
-- 유효한 GitLab 토큰 + **대상 프로젝트 Developer+ 멤버십**을 요구 (실 GitLab이 권위).
-- `gitlab_url`이 미설정/예시(placeholder)면 act 자동 거부 — 실 대상이 아니면 동작 안 함.
-- 자격/엔드포인트를 모르고 멤버십도 없는 외부인은 코드를 받아도 실 작업을 할 수 없다.
-
-**3) 커밋 신원 분리.** 이 도구 자체 코드의 커밋 저자와, 도구가 대상 레포에 남기는
-작업 커밋 저자는 다르다. 작업 저자는 `XGEN_MAKER_GIT_AUTHOR_NAME/EMAIL`(`.env`)로만
-주입하며 코드에 하드코딩하지 않는다. `plan`/`observe` 모드는 로컬만 다루므로 게이트 없이 탐색 가능.
-
----
-
-## 개발
+## Quick start
 
 ```bash
-python -m unittest discover -s tests    # 테스트
-maker doctor --config maker.config.json # 전체 자가검증
+pip install -e .                                   # provides the `maker` command
+
+cp .env.example .env                               # fill in your own tokens
+cp maker.config.example.json maker.config.json     # map your repos
+
+maker login                                        # detects your Claude CLI session
+maker doctor --config maker.config.json            # verifies every capability for real
 ```
 
-의존 엔진(선택): `pip install -e .[harness]`(수렴 샌드박스·엔진 stage) · `.[infra]`(인프라 KG) · `.[ui]`(픽셀 diff).
-없어도 코어는 로컬 폴백으로 동작.
+> **Nothing works without configuration — by design.** This repository ships placeholders only.
+> Your hosts, tokens and repository paths live in `.env` and `maker.config.json`, both gitignored.
+
+### Build the graph
+
+```bash
+maker kg build --repo "core=/path/to/core" --repo "web=/path/to/web::apps/web/src" --out kg
+maker kg merge kg/*.repo.json --out kg/merged.json
+maker kg enrich --kg kg/merged.json        # optional: semantic summaries
+```
+
+### Run a query
+
+```bash
+maker run "fix the login redirect bug" --config maker.config.json           # analyze only
+maker run "fix the login redirect bug" --config maker.config.json --mode observe   # + branch & commit
+maker run "fix the login redirect bug" --config maker.config.json --mode act       # + push & MR
+```
+
+### Or open the dashboard
+
+```bash
+maker web --config maker.config.json        # http://127.0.0.1:8760
+```
+
+---
+
+## Modes
+
+Safety scales with intent. The default touches nothing.
+
+| Mode | Repository | Remote | Use for |
+|---|---|---|---|
+| `plan` *(default)* | untouched | — | exploring, answering questions |
+| `observe` | local branch + commit | — | reviewing a change before it leaves your machine |
+| `act` | local branch + commit | push + merge request | handing work to your team |
+
+Unknown mode values are **rejected**, never silently upgraded to write access.
+
+---
+
+## The dashboard
+
+```bash
+maker web --config maker.config.json
+```
+
+| Tab | What it gives you |
+|---|---|
+| **Run** | Live step-by-step stream, the code it landed on, stop button that actually kills the agent |
+| **Pipeline** | All 25 stages, what ran, and which setting gates each one — editable in place |
+| **Knowledge graph** | Repo-level map → drill into a repo → click a node for real source + AI summary. Annotate nodes; edits persist across rebuilds |
+| **History** | Every session with its step timeline, resume, and one-click undo |
+| **Tests** | Verification records per run — sandbox, checks, quality score with its basis |
+| **Visual check** | Screenshot a page, save a baseline, pixel-diff later changes |
+| **Health** | Graph freshness per repo, integrity, symbol accuracy — measured, not asserted |
+
+The dashboard has **no authentication**. It refuses to bind to a non-loopback address unless you
+explicitly opt in, because anyone who reaches the port acts with your stored credentials. Put it
+behind an authenticating proxy before exposing it.
+
+---
+
+## Keeping the graph fresh
+
+A stale graph sends the agent to the wrong file, so freshness is a first-class concern.
+
+```bash
+maker kg sync              # re-extract only what changed locally
+maker kg refresh           # fetch remotes, fast-forward when safe, then sync
+maker kg hook --install    # git hooks: refresh on commit / merge / checkout
+```
+
+`refresh` is deliberately conservative — it **fetches** (which never touches your working tree)
+and fast-forwards only when the tree is clean, an upstream exists, and the branch has not
+diverged. Otherwise it skips and tells you why. It never checks out, stashes, rebases, or forces.
+
+Schedule it daily and the graph stays current without anyone thinking about it.
+
+---
+
+## Architecture
+
+```
+                    ┌──────────── surfaces ────────────┐
+                    │   CLI      Web (SSE)      MCP    │
+                    └────────────────┬─────────────────┘
+                                     ▼
+                            MakerLoop (pipeline)
+                                     │
+  ┌──────────────┬──────────────┬────┴─────┬──────────────┬──────────────┐
+  ▼              ▼              ▼          ▼              ▼              ▼
+intent      knowledge       git ops    coding agent   verification   merge request
+classify      graph      branch/commit   (subprocess)  tests·sandbox     draft
+              │                                          ·judge
+              ▼
+   build · sync · refresh · overlay · search · impact
+```
+
+- `xgen_maker/kg/` — graph build, incremental sync, safe refresh, search, human overlay edits
+- `xgen_maker/loop/` — the pipeline: intent → landing → branch → implement → verify → judge → MR
+- `xgen_maker/web.py` — dashboard (stdlib `http.server`, server-sent events, single-file UI)
+- `xgen_maker/mcp_server.py` — expose the graph and planner to other agents
+- `scripts/` — operational helpers (scheduled refresh, tunnel routing)
+
+---
+
+## Requirements
+
+- **Python 3.12+**, `git`
+- **Stdlib-first.** The core graph, loop, and dashboard use no third-party runtime dependencies.
+  Optional extras unlock optional features: `Pillow` (pixel diff), Playwright via `npx`
+  (screenshots), an LLM provider (semantic summaries, quality judging, query expansion).
+- A coding agent CLI for the implement step — Claude CLI by default, or any command via
+  `agent_cmd`.
+
+---
+
+## Testing
+
+```bash
+python -m pytest -q
+```
+
+304 tests covering the graph extractors, incremental sync, safety guards, the convergence loop
+end-to-end over a real temporary repository, and the dashboard's endpoints. Regression tests are
+written against bugs that actually occurred — including the ones this project introduced and
+then fixed.
+
+---
+
+## Safety model
+
+MAKER is designed to be *boring* in production:
+
+- **Never deploys.** The pipeline stops at a merge request.
+- **Protected branches** cannot be created, committed to, or pushed.
+- **Infrastructure files** (Dockerfiles, CI descriptors, charts) are vetoed — source only.
+- **Authorization is checked before writing**, not after.
+- **Everything is journaled** per session and can be undone with one command.
+- **Failures are reported honestly** — a skipped test says skipped, an unverified regression says
+  unverified. Nothing green that isn't.
+
+---
+
+## License
+
+Private. All rights reserved.
