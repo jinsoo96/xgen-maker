@@ -168,14 +168,26 @@ def branch_name_issue(name: str) -> str | None:
     return None
 
 
-def suggest_branch(prefix: str, keywords: list[str]) -> str:
-    """키워드로 의미있는 브랜치 슬러그 생성 (한글/특수문자 정리)."""
+def suggest_branch(prefix: str, keywords: list[str], max_words: int = 4) -> str:
+    """브랜치 슬러그 생성. 이름은 무엇을 하는 작업인지 한눈에 읽혀야 한다.
+
+    키워드를 그대로 이어붙이면 `back-button-ontology-page-legacy-style-backbutton`
+    처럼 중복되고 장황해진다. 낱말 단위로 쪼개 중복을 없애고 앞쪽 몇 개만 남긴다.
+    """
     import re as _re
-    words = []
+    words: list[str] = []
     for kw in keywords:
-        w = _re.sub(r"[^a-zA-Z0-9]+", "-", str(kw).lower()).strip("-")
-        if w and not _MEANINGLESS_SLUG.match(w):
-            words.append(w)
+        for part in _re.split(r"[^a-zA-Z0-9]+", str(kw).lower()):
+            if not part or _MEANINGLESS_SLUG.match(part):
+                continue
+            # 붙여 쓴 형태(backbutton)가 이미 있는 낱말들의 연결이면 버린다
+            if part in words or any(w in part and w != part for w in words):
+                continue
+            words.append(part)
+            if len(words) >= max_words:
+                break
+        if len(words) >= max_words:
+            break
     slug = "-".join(words)[:50].strip("-") or "change"
     return prefix + slug
 

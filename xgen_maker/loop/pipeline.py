@@ -201,16 +201,22 @@ class MakerLoop:
             # 그 코드가 실제로 가질 법한 이름을 요구한다.
             expanded = llm.json_chat(config.llm_base, config.llm_model, [
                 {"role": "system", "content":
-                 'You search a code knowledge graph. Given a dev request, name the '
+                 'You search a code knowledge graph. Given a dev request: (1) name the '
                  'identifiers the target code most likely has — function, class, file, '
                  'or route names. Be specific: prefer "login_handler" over "auth", '
                  '"ToolCard" over "component". Omit generic words that would match '
-                 'unrelated code. Reply JSON only: {"keywords": ["...", "..."]}'},
+                 'unrelated code. (2) Write a git branch slug naming the WORK, not the '
+                 'code location: 2-4 lowercase words, hyphenated, no repetition, no '
+                 'prefix. e.g. "back-button-style", "health-version-field". '
+                 'Reply JSON only: {"keywords": ["...", "..."], "branch": "..."}'},
                 {"role": "user", "content": query}], max_tokens=300, timeout=45)
             if expanded and expanded.get("keywords"):
                 keyword_query = " ".join(str(k) for k in expanded["keywords"])
                 journal.event("query_expand", "ok", keywords=keyword_query)
-                report["keywords"] = keyword_query   # 브랜치 이름 후보로도 쓴다
+                report["keywords"] = keyword_query
+                # 브랜치 이름은 키워드를 이어붙이지 않는다 — 중복되고 길기만 하다.
+                # "무엇을 하는 작업인지"를 한 마디로 받아 쓴다.
+                report["branch_slug"] = str(expanded.get("branch") or "").strip()
                 landing = _prefer(search(self.graph, keyword_query, k=8), landing, k=8)
             else:
                 journal.event("query_expand", "fail",
@@ -269,9 +275,10 @@ class MakerLoop:
         from ..config import suggest_branch, branch_name_issue
         prefix = intent_info["branch_prefix"] or "fix/"
         branch = ""
-        # 코드 용어 변환은 LLM이 요청을 읽고 만든 것이라 가장 서술적이다.
-        # 그 다음이 요청의 영문 토큰, 마지막이 착지 이름.
-        for source in ((report.get("keywords") or "").split(),
+        # 작업을 한 마디로 요약한 슬러그가 있으면 그걸 쓴다. 없으면 코드 용어,
+        # 그것도 없으면 요청의 영문 토큰, 마지막이 착지 이름.
+        for source in ([report.get("branch_slug", "")],
+                       (report.get("keywords") or "").split(),
                        [w for w in query.split() if w.isascii()],
                        [top["name"], *(n["name"] for n in landing[1:3])]):
             if not source:
