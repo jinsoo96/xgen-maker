@@ -227,8 +227,30 @@ class TestWebServer(unittest.TestCase):
         status, body = self._get("/api/auth")
         self.assertEqual(status, 200)
         d = json.loads(body)
-        for k in ("provider", "gitlab_url", "gitlab_token_set", "auth_file_exists"):
+        for k in ("provider", "gitlab_host", "gitlab_token_set", "auth_file_exists"):
             self.assertIn(k, d)
+
+    def test_auth_info_is_masked(self):
+        # 대시보드가 공개 도메인(Cloudflare 터널)에 붙을 수 있다 — 식별정보를 원문으로
+        # 내보내면 안 된다. 토큰은 애초에 안 나가고, 주소·계정·경로는 마스킹.
+        _, body = self._get("/api/auth")
+        d = json.loads(body)
+        self.assertNotIn("gitlab_url", d, "전체 URL은 내보내지 않는다")
+        for k in ("gitlab_host", "gitlab_user"):
+            if d.get(k):
+                self.assertIn("•", d[k], f"{k}가 마스킹되지 않음: {d[k]}")
+        # 저장 위치는 파일명만(전체 경로엔 OS 사용자명이 드러남)
+        self.assertNotIn("\\", d["auth_file"])
+        self.assertNotIn("/", d["auth_file"])
+        # 토큰 원문은 어떤 필드로도 나가지 않는다
+        self.assertNotIn("token", json.dumps(
+            {k: v for k, v in d.items() if k != "gitlab_token_set"}).lower())
+
+    def test_lightbox_in_page(self):
+        # 축소된 캡처는 글씨가 안 읽힌다 — 눌러서 원본 크기로 볼 수 있어야
+        _, body = self._get("/")
+        for marker in ('id="lightbox"', "zoom-in", "lbimg", "새 탭에서 원본"):
+            self.assertIn(marker, body)
 
     def test_node_code_api(self):
         # 노드 → 실제 코드 블록 (임시 그래프의 함수 노드는 파일이 없으므로 에러 경로 확인)

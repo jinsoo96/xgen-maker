@@ -126,6 +126,12 @@ _PAGE = """<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
  button.ghost:hover{background:var(--primary);color:#fff}
  #uishots{display:flex;gap:12px;flex-wrap:wrap;margin-top:12px} #uishots figure{margin:0} #uishots img{max-width:320px;max-height:260px;border:1px solid var(--border);border-radius:8px;display:block} #uishots figcaption{font-size:12px;color:var(--muted);margin-top:4px}
  .gal{display:flex;gap:12px;flex-wrap:wrap;margin-top:8px} .gal figure{margin:0} .gal img{max-width:200px;max-height:150px;border:1px solid var(--border);border-radius:8px;display:block} .gal figcaption{font-size:11px;color:var(--muted);margin-top:3px}
+ /* 축소된 캡처는 글씨가 안 읽힌다 — 눌러서 원본 크기로 */
+ #uishots img,.gal img{cursor:zoom-in;transition:border-color var(--t-fast)} #uishots img:hover,.gal img:hover{border-color:var(--primary)}
+ #lightbox{position:fixed;inset:0;background:rgba(6,12,18,.92);z-index:999;display:none;align-items:center;justify-content:center;flex-direction:column;gap:10px;padding:20px;cursor:zoom-out}
+ #lightbox.on{display:flex} #lightbox img{max-width:96vw;max-height:86vh;object-fit:contain;border:1px solid var(--border);border-radius:8px;background:#fff}
+ #lightbox .lbbar{color:var(--text);font-size:13px;display:flex;gap:14px;align-items:center}
+ #lightbox .lbbar a{color:var(--primary);text-decoration:none} #lightbox .lbbar b{font-weight:600}
  .ev{padding:3px 0;border-bottom:1px solid var(--border);white-space:pre-wrap;word-break:break-all}
  /* 로그: 상태 글리프만 색 · 본문은 중립(가독성 + 톤 정돈) */
  .ev{color:var(--text2)} .ev .mk{display:inline-block;width:1.2em;font-weight:700;color:var(--muted)}
@@ -197,6 +203,7 @@ _PAGE = """<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
 <div class="tab" id="tab-deploy"><div class="muted">불러오고 있습니다</div></div>
 <div class="tab" id="tab-login"><div class="muted">불러오고 있습니다</div></div>
 <div class="tab" id="tab-diag"><div class="muted">불러오고 있습니다</div></div>
+<div id="lightbox"><div class="lbbar"><b id="lbcap"></b><a id="lbopen" href="#" target="_blank">새 탭에서 원본</a><span class="muted">아무 곳이나 누르면 닫힘 · Esc</span></div><img id="lbimg" alt=""></div>
 <form id="f"><input type="text" id="q" placeholder="예: 로그인 오류를 수정해줘 / 결제 API에 입력 검증을 추가해줘" autofocus>
  <select id="m"><option value="plan">분석만</option><option value="observe">브랜치 생성</option><option value="act">푸시 + MR 생성</option></select>
  <button class="act" id="go">실행</button><button type="button" id="stopbtn" class="danger" style="display:none">■ 중지</button></form>
@@ -255,6 +262,17 @@ document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
  if(location.hash.slice(1)!==b.dataset.t)history.replaceState(null,'','#'+b.dataset.t);  // 탭 딥링크(북마크·공유)
  if(b.dataset.t!=='run' && !loaded[b.dataset.t]){loaded[b.dataset.t]=1; render(b.dataset.t);}
 });
+// 캡처 확대 — 축소된 화면은 글씨가 안 읽힌다. 위임 방식이라 나중에 그려진 이미지도 동작.
+const lb=document.getElementById('lightbox'),lbimg=document.getElementById('lbimg'),
+      lbcap=document.getElementById('lbcap'),lbopen=document.getElementById('lbopen');
+document.addEventListener('click',e=>{
+ const img=e.target.closest('#uishots img, .gal img');
+ if(img){lbimg.src=img.src;lbcap.textContent=img.closest('figure')?.querySelector('figcaption')?.textContent||'';
+  lbopen.href=img.src;lb.classList.add('on');return;}
+ if(e.target.closest('#lbopen'))return;      // 원본 링크는 닫지 않는다
+ if(lb.classList.contains('on'))lb.classList.remove('on');
+});
+document.addEventListener('keydown',e=>{if(e.key==='Escape')lb.classList.remove('on');});
 // 해시 → 탭. 최초 로드뿐 아니라 hashchange도 들어야 한다(같은 문서 내 해시 이동은
 // 스크립트를 재실행하지 않으므로, 안 들으면 링크·뒤로가기로 탭이 안 바뀐다).
 function openTabFromHash(){
@@ -573,7 +591,7 @@ function render(t){
   h+='<h4>저장된 연결</h4><table>'+
    `<tr><th>AI 제공자</th><td>${esc(d.provider)} <span class=muted>(${esc(d.model)})</span></td></tr>`+
    `<tr><th>API 키</th><td>${d.api_key_set?'<span class="badge ok">설정됨</span>':'<span class=muted>구독 로그인 — 키가 필요 없습니다</span>'}</td></tr>`+
-   `<tr><th>GitLab</th><td>${esc(d.gitlab_url)}${d.gitlab_user?' · '+esc(d.gitlab_user):''} ${d.gitlab_token_set?'<span class="badge ok">연결됨</span>':'<span class="badge fail">연결 안 됨</span>'}</td></tr>`+
+   `<tr><th>GitLab</th><td>${esc(d.gitlab_host)}${d.gitlab_user?' · '+esc(d.gitlab_user):''} ${d.gitlab_token_set?'<span class="badge ok">연결됨</span>':'<span class="badge fail">연결 안 됨</span>'}</td></tr>`+
    `<tr><th>저장 위치</th><td class=muted style="font-family:Consolas,monospace">${esc(d.auth_file)} ${d.auth_file_exists?'':'<span class=muted>(기본값 사용)</span>'}</td></tr></table>`;
   h+='<div class=gsearch style="margin-top:12px"><button id=authchk>연결 확인</button><button id=docbtn class="ghost">전체 점검 실행</button></div>';
   h+='<div id=authout style="margin-top:10px"></div><pre id=docout class="smd" style="display:none;margin-top:10px"></pre>';
@@ -1267,14 +1285,29 @@ class MakerWebHandler(BaseHTTPRequestHandler):
         # 런타임 변경임을 명시 — config 파일은 그대로다(재시작하면 되돌아간다)
         return {"ok": True, "key": key, "value": val, "note": "현재 세션에만 적용됩니다"}
 
+    @staticmethod
+    def _mask(value: str, keep: int = 3) -> str:
+        """식별정보 마스킹 — 대시보드가 공개 도메인에 붙을 수 있어 원문을 그대로 내보내지 않는다.
+        '연결됨 여부'와 앞 몇 글자면 어느 계정인지 분간하기엔 충분하다."""
+        if not value:
+            return ""
+        if len(value) <= keep:
+            return "•" * len(value)
+        return value[:keep] + "•" * min(8, len(value) - keep)
+
     def _auth_info(self) -> dict:
-        # 저장된 연결 설정(네트워크 호출 없음, 즉시).
+        # 저장된 연결 설정(네트워크 호출 없음, 즉시). 식별정보는 마스킹해서 내보낸다.
+        from urllib.parse import urlparse as _up
         from .auth import load_auth, AUTH_FILE
         a = load_auth()
+        host = (_up(a.gitlab_url).hostname or a.gitlab_url) if a.gitlab_url else ""
         return {"provider": a.provider, "model": a.resolved_model(), "base": a.resolved_base(),
-                "gitlab_url": a.gitlab_url, "gitlab_user": a.gitlab_user,
+                # 주소는 호스트만, 그것도 마스킹 — 내부 GitLab 주소를 그대로 흘리지 않는다
+                "gitlab_host": self._mask(host, 6),
+                "gitlab_user": self._mask(a.gitlab_user, 3),
                 "gitlab_token_set": bool(a.gitlab_token), "api_key_set": bool(a.api_key),
-                "auth_file": str(AUTH_FILE), "auth_file_exists": AUTH_FILE.exists()}
+                # 전체 경로는 OS 사용자명이 드러나므로 파일명만
+                "auth_file": AUTH_FILE.name, "auth_file_exists": AUTH_FILE.exists()}
 
     def _auth_check(self) -> dict:
         # 실제 로그인 지속 확인 — claude CLI 단발 호출 + GitLab 토큰 검증(느림, 버튼).
@@ -1289,11 +1322,10 @@ class MakerWebHandler(BaseHTTPRequestHandler):
             out["claude"] = {"authenticated": bool(a.api_key), "reason": f"provider={a.provider}"}
         if a.gitlab_token:
             v = gitlab_verify_token(a.gitlab_url, a.gitlab_token)
-            out["gitlab"] = {"ok": v["ok"], "user": str(v.get("user", "")),
-                             "reason": (v.get("reason", "") or "")[:200], "url": a.gitlab_url}
+            out["gitlab"] = {"ok": v["ok"], "user": self._mask(str(v.get("user", "")), 3),
+                             "reason": (v.get("reason", "") or "")[:200]}
         else:
-            out["gitlab"] = {"ok": False, "reason": "연결 안 됨 — maker login --gitlab-user/-password",
-                             "url": a.gitlab_url}
+            out["gitlab"] = {"ok": False, "reason": "연결 안 됨 — 로그인이 필요합니다"}
         return out
 
     def _doctor(self) -> dict:
