@@ -22,19 +22,25 @@ from .mr import build_mr_draft, save_draft, create_gitlab_mr
 from .verify import verify
 
 
-def _merge_hits(*groups, k: int = 8) -> list[dict]:
-    """여러 검색 결과를 점수로 겨루게 해 합친다(같은 노드는 높은 점수 하나만).
+def _prefer(primary: list[dict], fallback: list[dict], k: int = 8) -> list[dict]:
+    """믿을 만한 결과를 앞에 두고, 남는 자리를 다른 결과로 채운다.
 
-    번역한 쿼리가 항상 더 낫지도, 원문이 항상 더 낫지도 않다. 둘 다 후보로 놓고
-    점수로 정하는 편이, 한쪽을 통째로 버리는 것보다 덜 틀린다.
+    두 결과를 점수로 섞거나 순위로 융합하면 안 된다. 코드는 영문이라 한글 원문 검색은
+    대부분 노이즈인데, 섞는 순간 그 노이즈가 절반의 표를 얻는다("로그인 처리"가 실제
+    login 함수 대신 SSE 세션 관리로 갔다). 그렇다고 버리지도 않는다 — 번역이 놓친
+    것이 원문에 남아 있을 수 있으니 뒤에 붙인다.
     """
-    best: dict[str, dict] = {}
-    for group in groups:
+    seen = set()
+    out: list[dict] = []
+    for group in (primary, fallback):
         for hit in group or ():
-            prev = best.get(hit["id"])
-            if prev is None or hit.get("score", 0) > prev.get("score", 0):
-                best[hit["id"]] = hit
-    return sorted(best.values(), key=lambda h: -h.get("score", 0))[:k]
+            if hit["id"] in seen:
+                continue
+            seen.add(hit["id"])
+            out.append(hit)
+            if len(out) >= k:
+                return out
+    return out
 
 
 class MakerLoop:
@@ -177,16 +183,21 @@ class MakerLoop:
             journal.event("query_expand", "start", note="요청 어휘 → 코드 어휘 변환")
             # max_tokens가 빠듯하면 JSON이 잘려 파싱이 조용히 실패한다. 그러면 착지가
             # 원문 검색만으로 정해지는데, 로그에는 아무 말도 안 남아 원인을 못 찾는다.
+            # 넓은 말(session, token, data …)을 잔뜩 뱉으면 그 말을 우연히 가진 노드가
+            # 점수를 쓸어간다("로그인 처리"가 SSE 세션 관리로 갔다). 동의어 나열이 아니라
+            # 그 코드가 실제로 가질 법한 이름을 요구한다.
             expanded = llm.json_chat(config.llm_base, config.llm_model, [
                 {"role": "system", "content":
-                 'Extract English code-search keywords from the dev request. '
-                 'Include UI/component words when the request is about a screen. '
-                 'Reply JSON only: {"keywords": ["...", "..."]}'},
+                 'You search a code knowledge graph. Given a dev request, name the '
+                 'identifiers the target code most likely has — function, class, file, '
+                 'or route names. Be specific: prefer "login_handler" over "auth", '
+                 '"ToolCard" over "component". Omit generic words that would match '
+                 'unrelated code. Reply JSON only: {"keywords": ["...", "..."]}'},
                 {"role": "user", "content": query}], max_tokens=300, timeout=45)
             if expanded and expanded.get("keywords"):
                 keyword_query = " ".join(str(k) for k in expanded["keywords"])
                 journal.event("query_expand", "ok", keywords=keyword_query)
-                landing = _merge_hits(landing, search(self.graph, keyword_query, k=8), k=8)
+                landing = _prefer(search(self.graph, keyword_query, k=8), landing, k=8)
             else:
                 journal.event("query_expand", "fail",
                               note="코드 어휘 변환 실패 — 원문 검색 결과만 사용합니다")

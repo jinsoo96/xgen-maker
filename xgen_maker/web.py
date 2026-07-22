@@ -662,8 +662,9 @@ function render(t){
 const GATES_ALL=[['intent','의도 분류'],['kg_search','관련 코드 찾기'],['fetch_latest','최신 코드 동기화'],
  ['branch','브랜치 생성'],['implement','구현(에이전트)'],['checks','검증(테스트·회귀)'],
  ['judge','품질 게이트'],['mr_ready','MR 준비']];
-const GATES_PLAN=[['intent','의도 분류'],['kg_search','관련 코드 찾기'],['plan_only','분석 정리']];
-const GLABEL=Object.fromEntries(GATES_ALL.concat(GATES_PLAN));
+const GATES_PLAN=[['intent','의도 분류'],['kg_search','관련 코드 찾기'],['plan_only answer','분석 정리']];
+const GLABEL={}; GATES_ALL.concat(GATES_PLAN).forEach(([keys,label])=>
+ keys.split(' ').forEach(kk=>{GLABEL[kk]=label;}));
 function gatesFor(mode){return mode==='plan'?GATES_PLAN:GATES_ALL;}
 function runstate(on,txt){const r=document.getElementById('runstate');r.classList.toggle('on',on);if(txt)document.getElementById('runstate-t').textContent=txt;}
 function resetPanel(mode){
@@ -673,7 +674,8 @@ function resetPanel(mode){
  runstate(true,'시작…');
 }
 function markGate(step,status){
- const el=document.querySelector(`#gates .g[data-s="${step}"]`);
+ const el=[...document.querySelectorAll('#gates .g')]
+  .find(g=>g.dataset.s.split(' ').includes(step));
  if(el){const dot=el.querySelector('.dot');
   if(status==='fail'){el.className='g fail';dot.textContent='✗';}
   else if(status==='start'){el.className='g active';dot.textContent='◐';}
