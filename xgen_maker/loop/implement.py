@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -79,13 +80,76 @@ def build_prompt(query: str, intent: str, landing: list[dict], legacy_notes: str
             f"위 요청을 이 저장소에서 구현하라.")
 
 
+def _activity(raw: str, meta: dict) -> str:
+    """에이전트가 흘린 한 줄(JSON)을 사람 말로. 볼 필요 없는 줄은 빈 문자열.
+
+    무엇을 읽고 무엇을 고쳤는지가 사람이 보고 싶은 것이다. 내부 훅·초기화 잡음은
+    걸러내고, 값이 큰 것(도구 사용·비용·사용량)만 남긴다.
+    """
+    try:
+        event = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return raw.strip()[:300]        # JSON이 아니면(다른 에이전트) 원문 그대로
+    kind = event.get("type")
+
+    if kind == "assistant":
+        said = []
+        for part in (event.get("message") or {}).get("content") or []:
+            if part.get("type") == "tool_use":
+                name = part.get("name", "")
+                args = part.get("input") or {}
+                where = args.get("file_path") or args.get("path") or args.get("pattern")                     or args.get("command") or args.get("query") or ""
+                said.append(f"{name} {str(where)}".strip())
+            elif part.get("type") == "text":
+                text = " ".join(str(part.get("text", "")).split())
+                if text:
+                    said.append(text)
+        return " · ".join(said)
+
+    if kind == "user":                  # 도구 실행 결과 — 실패만 알린다
+        for part in (event.get("message") or {}).get("content") or []:
+            if part.get("type") == "tool_result" and part.get("is_error"):
+                body = part.get("content")
+                text = body if isinstance(body, str) else str(body)
+                return f"도구 오류: {' '.join(text.split())[:200]}"
+        return ""
+
+    if kind == "rate_limit_event":
+        info = event.get("rate_limit_info") or {}
+        pct = info.get("utilization")
+        meta["rate_limit"] = info
+        if isinstance(pct, (int, float)):
+            return f"구독 사용량 {pct * 100:.0f}%"
+        return ""
+
+    if kind == "result":
+        meta["result"] = event.get("result") or ""
+        meta["is_error"] = bool(event.get("is_error"))
+        meta["cost_usd"] = event.get("total_cost_usd")
+        meta["usage"] = event.get("usage")
+        seconds = (event.get("duration_ms") or 0) / 1000
+        cost = event.get("total_cost_usd")
+        tail = f" · ${cost:.3f}" if isinstance(cost, (int, float)) else ""
+        return f"에이전트 완료 ({seconds:.0f}초{tail})"
+
+    if kind == "system" and event.get("subtype") == "init":
+        return f"에이전트 시작 · 모델 {event.get('model', '')}"
+    return ""
+
+
 def run_agent(repo_path: str | Path, prompt: str, session_dir: Path,
               agent_cmd: str | None = None, timeout: int = 1800,
-              should_cancel=None) -> dict:
+              should_cancel=None, on_activity=None) -> dict:
+    """에이전트를 돌린다. on_activity(줄)로 진행을 실시간으로 흘린다.
+
+    출력을 끝까지 모았다가 한 번에 주면, 몇 분 동안 화면에 아무것도 안 나온다.
+    무슨 파일을 읽고 무엇을 고치는지가 정확히 사람이 보고 싶은 것이다.
+    """
     prompt_path = session_dir / "agent-prompt.md"
     prompt_path.write_text(prompt, encoding="utf-8")
 
     stdin_payload = None
+    streaming = False
     if agent_cmd:
         command = agent_cmd.format(prompt_path=str(prompt_path))
         shell = True
@@ -94,11 +158,15 @@ def run_agent(repo_path: str | Path, prompt: str, session_dir: Path,
         if not exe:
             return {"ok": False, "output": "", "error": "claude CLI 미발견 — config.agent_cmd 필요"}
         # 프롬프트는 stdin으로 전달 — 멀티라인 argv의 셸 인용 문제 회피.
+        # stream-json은 작업을 한 줄씩 흘려준다(툴 사용·비용·사용량까지).
+        args = ["--permission-mode", "acceptEdits",
+                "--output-format", "stream-json", "--verbose", "-p"]
+        streaming = True
+        command = [exe, *args]
         # Windows npm 심(.cmd/.ps1)은 CreateProcess 직접 실행 불가 → cmd /c 경유.
-        command = [exe, "--permission-mode", "acceptEdits", "-p"]
         if exe.lower().endswith((".cmd", ".bat", ".ps1")):
             base = exe[:-4] + ".cmd" if exe.lower().endswith(".ps1") else exe
-            command = ["cmd", "/c", base, "--permission-mode", "acceptEdits", "-p"]
+            command = ["cmd", "/c", base, *args]
         stdin_payload = prompt
         shell = False
     # subprocess.run은 블로킹이라 실행 중 중지 요청을 볼 수 없다. 그러면 사용자가
@@ -112,13 +180,34 @@ def run_agent(repo_path: str | Path, prompt: str, session_dir: Path,
     except (OSError, FileNotFoundError) as error:
         return {"ok": False, "output": "", "error": f"에이전트 실행 실패: {error}"}
 
-    box: dict = {}
+    box: dict = {"lines": [], "err": [], "meta": {}}
 
     def pump():
+        """stdout을 한 줄씩 읽어 흘린다. communicate는 끝날 때까지 아무것도 주지 않는다."""
         try:
-            box["out"] = proc.communicate(input=stdin_payload)
+            if stdin_payload is not None:
+                proc.stdin.write(stdin_payload)
+                proc.stdin.close()
+            for raw in iter(proc.stdout.readline, ""):
+                box["lines"].append(raw)
+                if not raw.strip():
+                    continue
+                if streaming:
+                    said = _activity(raw, box["meta"])
+                    if said and on_activity is not None:
+                        on_activity(said)
+                elif on_activity is not None:
+                    on_activity(raw.rstrip()[:300])
+            proc.stdout.close()
         except Exception as e:  # noqa: BLE001 — 종료 경합 시 파이프 오류는 무시
-            box["out"] = ("", str(e))
+            box["err"].append(str(e))
+        finally:
+            try:
+                box["err"].append(proc.stderr.read() or "")
+                proc.stderr.close()
+            except Exception:  # noqa: BLE001
+                pass
+            proc.wait()
 
     worker = threading.Thread(target=pump, daemon=True)
     worker.start()
@@ -134,9 +223,12 @@ def run_agent(repo_path: str | Path, prompt: str, session_dir: Path,
             worker.join(timeout=5)
             return {"ok": False, "output": "", "error": f"에이전트 타임아웃({timeout}s)"}
         worker.join(timeout=0.25)
-    stdout, stderr = box.get("out", ("", ""))
-    output = (stdout or "") + (stderr or "")
-    (session_dir / "agent-output.log").write_text(output, encoding="utf-8")
+    raw_output = "".join(box["lines"]) + "".join(box["err"])
+    (session_dir / "agent-output.log").write_text(raw_output, encoding="utf-8")
+    meta = box["meta"]
+    # 스트리밍이면 최종 답변만 남기고, 아니면 원문을 그대로(둘 다 판정 재료로 쓰인다)
+    output = meta.get("result") or raw_output
     code = proc.returncode
-    return {"ok": code == 0, "output": output[-4000:],
+    return {"ok": code == 0 and not meta.get("is_error"), "output": output[-4000:],
+            "cost_usd": meta.get("cost_usd"), "usage": meta.get("usage"),
             "error": None if code == 0 else f"exit={code}"}

@@ -135,6 +135,7 @@ _PAGE = """<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
  #glegend{display:flex;flex-wrap:wrap;gap:12px;margin-top:8px;font-size:12px;color:var(--text2)} #glegend .lg{display:inline-flex;align-items:center;gap:5px}
  #glegend .lg i{width:11px;height:11px;border-radius:50%;display:inline-block}
  #modehint{font-size:12px;padding:2px 2px 7px;line-height:1.5}
+ td.cellwrap{white-space:normal;word-break:break-word;max-width:520px}
  .brgrp{margin:10px 0 16px} .brgrp table{margin-top:4px}
  .brdel{padding:1px 8px;font-size:11px;line-height:1.7;opacity:.55;white-space:nowrap}
  .brdel:hover{opacity:1;color:var(--danger);border-color:var(--danger)}
@@ -395,7 +396,7 @@ function drawGraph(data,svg,tip,onPick){
    s+=`<line x1="${nodes[l.s].x.toFixed(1)}" y1="${nodes[l.s].y.toFixed(1)}" x2="${nodes[l.t].x.toFixed(1)}" y2="${nodes[l.t].y.toFixed(1)}" stroke="#7f95a6" stroke-width="${(view.w/W*0.9*w).toFixed(2)}" opacity="${isRepo?0.55:0.4}" />`;});
   const fs=(view.w/W*(isRepo?13:10)).toFixed(1);
   nodes.forEach((n,i)=>{const c=KCOLOR[n.kind]||'#8894a0';const stk=n.seed?` stroke="#fff" stroke-width="${(view.w/W*2).toFixed(2)}"`:(n.deprecated?` stroke="#d99a63" stroke-width="${(view.w/W*1.5).toFixed(2)}"`:'');
-   const nm=isRepo?`${esc(n.name)} (${(n.count||0).toLocaleString()})`:esc(n.name).slice(0,22);
+   const nm=isRepo?`${esc(n.name)} (${(n.count||0).toLocaleString()})`:esc(n.name);
    const lbl=(n.seed||isRepo||(n.deg||0)>=labelMin)?`<text x="${(n.r+3).toFixed(0)}" y="4" font-size="${fs}" fill="var(--text)"${isRepo?' font-weight="600"':''}>${nm}</text>`:'';
    s+=`<g class="gn" data-i="${i}" transform="translate(${n.x.toFixed(1)},${n.y.toFixed(1)})" style="cursor:${isRepo?'zoom-in':'grab'}"><circle r="${n.r.toFixed(1)}" fill="${c}"${stk}></circle>${lbl}</g>`;});
   svg.innerHTML=s;}
@@ -466,7 +467,7 @@ function render(t){
  if(t==='pipeline') jget('/api/pipeline').then(d=>{
   const SI={ok:'✓',pass:'✓',start:'◐',fail:'✗',skipped:'—',empty:'—',observe:'◇',act:'◆',blocked:'✗',warn:'!'};
   let h='<h3>파이프라인 <span class=muted>작업이 거치는 단계와 현재 설정입니다</span></h3>';
-  h+='<div class=muted style="margin-bottom:10px">'+(d.last_query?('최근 작업: <b style="color:var(--text)">'+esc(d.last_query).slice(0,60)+'</b> 기준으로 각 단계의 결과를 표시합니다'):'아직 코드를 변경한 작업이 없습니다. 현재 설정만 표시합니다.')+'</div>';
+  h+='<div class=muted style="margin-bottom:10px">'+(d.last_query?('최근 작업: <b style="color:var(--text)">'+esc(d.last_query)+'</b> 기준으로 각 단계의 결과를 표시합니다'):'아직 코드를 변경한 작업이 없습니다. 현재 설정만 표시합니다.')+'</div>';
   h+='<table><tr><th>단계</th><th>설명</th><th>최근 결과</th><th>관련 설정</th></tr>'+
    d.stages.map(s=>{
     const off=(s.gate!=null&&(s.gate_value===false||s.gate_value===''||s.gate_value==null));
@@ -571,8 +572,8 @@ function render(t){
    d.learnings.map(e=>`<tr><td><span class="badge ${cls(e.kind)}">${esc(e.kind)}</span></td><td class=muted>${esc(e.repo)}</td><td class=muted>${esc(e.area)}</td><td>${esc(e.note)}</td></tr>`).join('')+'</table>';
   el.innerHTML=h;}).catch(tabErr(el));
  if(t==='mrs') jget('/api/mrs').then(d=>{
-  const row=m=>`<tr><td class=muted style="white-space:nowrap">${esc(m.updated||'')}</td><td>!${esc(m.iid)}</td><td><span class="badge ${cls(m.state)}">${esc(m.state)}</span></td><td class=muted style="font-size:12px">${esc(m.project||'')}</td><td>${esc(m.source)}→${esc(m.target)}</td><td>${esc(m.title).slice(0,44)}</td><td><a href="${esc(m.url)}" target=_blank>열기</a></td></tr>`;
-  const trow=m=>`<tr><td class=muted style="white-space:nowrap">${esc(m.updated||'')}</td><td>!${esc(m.iid)}</td><td><span class="badge ${cls(m.state)}">${esc(m.state)}</span></td><td>${esc(m.author||'')}</td><td class=muted style="font-size:12px">${esc(m.project||'')}</td><td>${esc(m.source)}→${esc(m.target)}</td><td>${esc(m.title).slice(0,40)}</td><td><a href="${esc(m.url)}" target=_blank>열기</a></td></tr>`;
+  const row=m=>`<tr><td class=muted style="white-space:nowrap">${esc(m.updated||'')}</td><td>!${esc(m.iid)}</td><td><span class="badge ${cls(m.state)}">${esc(m.state)}</span></td><td class=muted style="font-size:12px">${esc(m.project||'')}</td><td>${esc(m.source)}→${esc(m.target)}</td><td>${esc(m.title)}</td><td><a href="${esc(m.url)}" target=_blank>열기</a></td></tr>`;
+  const trow=m=>`<tr><td class=muted style="white-space:nowrap">${esc(m.updated||'')}</td><td>!${esc(m.iid)}</td><td><span class="badge ${cls(m.state)}">${esc(m.state)}</span></td><td>${esc(m.author||'')}</td><td class=muted style="font-size:12px">${esc(m.project||'')}</td><td>${esc(m.source)}→${esc(m.target)}</td><td>${esc(m.title)}</td><td><a href="${esc(m.url)}" target=_blank>열기</a></td></tr>`;
   const head='<tr><th>날짜</th><th>#</th><th>상태</th><th>프로젝트</th><th>브랜치</th><th>제목</th><th></th></tr>';
   const thead='<tr><th>날짜</th><th>#</th><th>상태</th><th>작성자</th><th>프로젝트</th><th>브랜치</th><th>제목</th><th></th></tr>';
   el.innerHTML='<h3>MAKER가 만든 MR <span class=muted>작업 기록과 일치하는 항목입니다</span></h3><table>'+head+(d.maker.map(row).join('')||'<tr><td colspan=7 class=muted>아직 없습니다. 푸시 + MR 생성 모드로 실행하면 여기에 표시됩니다.</td></tr>')+'</table>'+
@@ -613,7 +614,7 @@ function render(t){
     if(a.error){ab.innerHTML='<div class=muted>불러오지 못했습니다: '+esc(a.error)+'</div>';return;}
     if(!a.commits.length){ab.innerHTML='<div class=muted>결과가 없습니다'+(q?' ("'+esc(q)+'")':'')+'</div>';return;}
     ab.innerHTML='<table><tr><th>날짜</th><th>작성자</th><th>커밋</th><th>메시지</th></tr>'+
-     a.commits.map(c=>`<tr><td class=muted style="white-space:nowrap;font-size:11px">${esc(c.when)}</td><td class=muted>${esc(c.author)}</td><td class=muted style="font-family:Consolas,monospace">${c.url?`<a href="${esc(c.url)}" target=_blank>${esc(c.sha)}</a>`:esc(c.sha)}</td><td>${esc(c.title).slice(0,60)}</td></tr>`).join('')+'</table>';
+     a.commits.map(c=>`<tr><td class=muted style="white-space:nowrap;font-size:11px">${esc(c.when)}</td><td class=muted>${esc(c.author)}</td><td class=muted style="font-family:Consolas,monospace">${c.url?`<a href="${esc(c.url)}" target=_blank>${esc(c.sha)}</a>`:esc(c.sha)}</td><td>${esc(c.title)}</td></tr>`).join('')+'</table>';
    }).catch(e=>{ab.innerHTML='실패: '+esc(e.message||e);});};
   document.getElementById('brepo').onchange=()=>{load();document.getElementById('actbody').textContent='검색어를 입력하거나, 비워 두고 검색하면 최근 커밋을 표시합니다.';};
   document.getElementById('actbtn').onclick=searchAct;
@@ -626,7 +627,7 @@ function render(t){
   h+='<div class=muted style="margin-bottom:10px">진행 중인 검증은 <b>실행</b> 탭에서 확인할 수 있습니다. 항목을 선택하면 상세 내용을 표시합니다.</div>';
   if(!d.runs.length){h+='<div class=muted>아직 검증 기록이 없습니다. 코드를 변경하는 작업을 실행하면 결과가 기록됩니다.</div>';el.innerHTML=h;return;}
   h+='<div class="histcols"><div class="histlist"><table><tr><th>쿼리</th><th>반복</th><th>sandbox</th><th>checks</th><th>judge</th></tr>'+
-   d.runs.map(r=>`<tr class="hrow" data-sid="${esc(r.session)}"><td>${esc(r.query).slice(0,30)}</td><td>${r.iterations}</td><td><span class="badge ${cls(r.sandbox)}">${esc(r.sandbox)}</span></td><td><span class="badge ${cls(r.checks_status)}">${esc(r.checks_status)}</span></td><td><span class="badge ${cls(r.judge)}">${esc(r.judge)}</span>${r.judge_source?` <span class=muted style="font-size:11px">${r.judge_source==='heuristic'?'기본 평가':'AI 평가'}${r.judge_score!=null?' '+r.judge_score:''}</span>`:''}</td></tr>`).join('')+'</table></div>'+
+   d.runs.map(r=>`<tr class="hrow" data-sid="${esc(r.session)}"><td class=cellwrap title="${esc(r.query)}">${esc(r.query)}</td><td>${r.iterations}</td><td><span class="badge ${cls(r.sandbox)}">${esc(r.sandbox)}</span></td><td><span class="badge ${cls(r.checks_status)}">${esc(r.checks_status)}</span></td><td><span class="badge ${cls(r.judge)}">${esc(r.judge)}</span>${r.judge_source?` <span class=muted style="font-size:11px">${r.judge_source==='heuristic'?'기본 평가':'AI 평가'}${r.judge_score!=null?' '+r.judge_score:''}</span>`:''}</td></tr>`).join('')+'</table></div>'+
    '<aside id="testdetail"><div class=muted>왼쪽에서 항목을 선택하면 상세 내용을 표시합니다.</div></aside></div>';
   el.innerHTML=h;
   const td=document.getElementById('testdetail');
@@ -642,7 +643,7 @@ function render(t){
    '<div id=uiout class=muted style="font-size:12px">URL을 넣고 <b>캡처 후 비교</b>: 기준 화면과의 차이를 표시합니다. 기준이 없다면 <b>기준으로 저장</b>으로 먼저 등록하세요.</div>'+
    '<div id=uishots></div></div>';
   if(d.baselines.length){h+='<h4>기준 화면</h4><div class=gal>'+d.baselines.map(b=>`<figure><img src="${esc(b.url)}" loading=lazy><figcaption>${esc(b.slug)}</figcaption></figure>`).join('')+'</div>';}
-  if(d.recent.length){h+='<h4>최근 비교 결과</h4><div class=gal>'+d.recent.map(r=>`<figure><img src="${esc(r.diff_url)}" loading=lazy><figcaption>${esc(r.route)} <span class=muted>${esc(r.session).slice(0,16)}</span></figcaption></figure>`).join('')+'</div>';}
+  if(d.recent.length){h+='<h4>최근 비교 결과</h4><div class=gal>'+d.recent.map(r=>`<figure><img src="${esc(r.diff_url)}" loading=lazy><figcaption>${esc(r.route)} <span class=muted>${esc(r.session)}</span></figcaption></figure>`).join('')+'</div>';}
   el.innerHTML=h;
   const uiurl=document.getElementById('uiurl'),uiout=document.getElementById('uiout'),uishots=document.getElementById('uishots');
   const run=(save)=>{const u=uiurl.value.trim();if(!u){uiout.textContent='주소를 입력하세요.';return;}
@@ -715,6 +716,13 @@ function render(t){
 // 우측 진행 패널 — 단계 게이트 + 찾은 코드 위치
 // 모드마다 실제로 도는 단계가 다르다. 안 도는 단계를 걸어두면 영영 '진행 중'으로 남아
 // 멈춘 것처럼 보인다 — 분석만인데 '브랜치 생성'을 기다리게 하지 않는다.
+const STEPKO={intent:'의도 분류',kg_search:'관련 코드 찾기',query_expand:'코드 용어 변환',
+ impact:'영향 분석',chain:'연관 코드',legacy_check:'근거 코드',learnings:'과거 교훈',
+ authorize:'권한 확인',fetch_latest:'최신 코드',worktree:'작업 공간',branch:'브랜치',
+ implement:'구현',checks:'검증',judge:'품질 평가',iteration:'수렴',verify:'로컬 확인',
+ ui_verify:'화면 검증',deploy_test:'배포 검증',release:'릴리즈 경로',commit:'커밋',
+ push:'푸시',mr_create:'MR 생성',mr_ready:'MR 준비',plan_only:'분석 정리',answer:'답변',
+ kg_refresh:'그래프 갱신',cost:'사용량',session_start:'시작',session_end:'종료'};
 const GATES_ALL=[['intent','의도 분류'],['kg_search','관련 코드 찾기'],['fetch_latest','최신 코드 동기화'],
  ['branch','브랜치 생성'],['implement','구현(에이전트)'],['checks','검증(테스트·회귀)'],
  ['judge','품질 게이트'],['mr_ready','MR 준비']];
@@ -838,7 +846,7 @@ function renderSessions(el,q){
    return;
   }
   h+='<div class="histcols"><div class="histlist"><table><tr><th>결과</th><th>쿼리</th><th>브랜치</th><th>MR</th><th></th></tr>'
-   +rows.map(s=>`<tr class="hrow" data-sid="${esc(s.session)}"><td><span class="badge ${cls(s.outcome)}">${esc(outcomeLabel(s.outcome))}</span></td><td title="${esc(s.query)}">${esc(s.query).slice(0,52)}</td><td class="muted">${esc(s.branch)}</td><td>${s.mr?`<a href="${esc(s.mr)}" target=_blank onclick="event.stopPropagation()">MR</a>`:''}</td>`
+   +rows.map(s=>`<tr class="hrow" data-sid="${esc(s.session)}"><td><span class="badge ${cls(s.outcome)}">${esc(outcomeLabel(s.outcome))}</span></td><td class=cellwrap title="${esc(s.query)}">${esc(s.query)}</td><td class="muted">${esc(s.branch)}</td><td>${s.mr?`<a href="${esc(s.mr)}" target=_blank onclick="event.stopPropagation()">MR</a>`:''}</td>`
     +`<td><button class="sessdel ghost" data-sid="${esc(s.session)}" title="이 기록을 지웁니다">지우기</button></td></tr>`).join('')
    +'</table></div><aside id="histdetail"><div class=muted>왼쪽에서 작업을 선택하세요.</div></aside></div>';
   el.innerHTML=h;
@@ -855,7 +863,7 @@ function renderSessions(el,q){
 function deleteSession(sid,el,q){
  jget('/api/session-delete?id='+encodeURIComponent(sid)).then(p=>{
   if(!p.ok){alert(p.error||'지울 수 없습니다');return;}
-  const what=(p.query?'"'+p.query.slice(0,60)+'"':sid)
+  const what=(p.query?'"'+p.query+'"':sid)
    +(p.branch?'\\n브랜치 '+p.branch+'는 그대로 남습니다(코드는 지우지 않습니다).':'');
   if(!confirm('이 기록을 지웁니다.\\n\\n'+what+'\\n\\n되돌릴 수 없습니다. 계속할까요?'))return;
   jget('/api/session-delete?confirm=1&id='+encodeURIComponent(sid)).then(r=>{
@@ -870,7 +878,7 @@ function showSession(sid,target){
  jget('/api/session?id='+encodeURIComponent(sid)).then(s=>{
   let h=`<h4>${esc(s.query)||'(쿼리 없음)'}</h4><div class=muted style="margin-bottom:10px">결과 <span class="badge ${cls(s.outcome)}">${esc(outcomeLabel(s.outcome))}</span>${s.mr?` · <a href="${esc(s.mr)}" target=_blank>MR</a>`:''}</div>`;
   if(s.query) h+=`<button class="resumebtn ghost" style="margin-bottom:10px" data-q="${esc(s.query)}">▶ 이 작업 이어서 실행</button>`;
-  h+='<div class="side-h">진행 단계</div><div class="tl">'+s.steps.map(st=>`<div class="tlr ${st.status}"><span class="ti">${SICON[st.status]||'·'}</span><span class="ts">${esc(st.step)}</span><span class="td">${esc(st.summary).slice(0,90)}</span></div>`).join('')+'</div>';
+  h+='<div class="side-h">진행 단계</div><div class="tl">'+s.steps.map(st=>`<div class="tlr ${st.status}"><span class="ti">${SICON[st.status]||'·'}</span><span class="ts">${esc(st.step)}</span><span class="td">${esc(st.summary)}</span></div>`).join('')+'</div>';
   if(s.summary_md) h+='<div class="side-h" style="margin-top:12px">SUMMARY.md</div><pre class="smd">'+esc(s.summary_md)+'</pre>';
   if(s.undoable) h+=`<div class="side-h" style="margin-top:12px">되돌리기</div><div class=muted style="font-size:12px;margin-bottom:6px">이 작업에서 만든 브랜치(${esc(s.branch)})를 삭제합니다. ${s.pushed?'원격에도 등록되어 있습니다':'로컬에만 있습니다'}.</div>`+
    `<label style="font-size:12px"><input type=checkbox class="undoremote" ${s.pushed?'':'disabled'}> 원격 브랜치도 함께 삭제</label><br><button class="undobtn danger" data-sid="${esc(s.session)}">↺ 되돌리기</button><div class="undoout muted" style="font-size:12px;margin-top:6px"></div>`;
@@ -913,7 +921,9 @@ document.getElementById('f').addEventListener('submit',e=>{
   const e=JSON.parse(ev.data);
   if(e.type==='run_id'){window.__runid=e.id;}
   else if(e.type==='event'){const mark={ok:'✓',pass:'✓',fail:'✗',empty:'·',skipped:'·',observe:'◇',act:'◆'}[e.status]||'▸';
-   line(e.status==='fail'?'fail':'ok', e.step.padEnd(14)+' '+e.status+(e.detail?'  '+e.detail:''), mark);
+   // 단계 이름도 사람 말로. 에이전트 활동은 이름 없이 내용만(줄줄이 이어지므로)
+   const label=(e.step==='agent')?'':(STEPKO[e.step]||e.step)+'  ';
+   line(e.status==='fail'?'fail':'ok', label+(e.detail||e.status), mark);
    markGate(e.step, e.status);
    if(e.landing)showLanding(e.landing);}
   else if(e.type==='result'){const r=e.report; let html='<b>결과: '+esc(outcomeLabel(r.outcome))+'</b>';
@@ -1000,14 +1010,11 @@ class _SSEJournal:
         if self.cancelled():
             raise _Cancelled()
         self._real.event(step, status, **data)
-        detail = json.dumps({k: v for k, v in data.items()
-                             if k in ("hits", "branch", "score", "env", "keywords",
-                                      "affected", "nodes", "sha", "draft", "url", "reason",
-                                      "error", "promotion", "target", "count", "next_manual",
-                                      "n", "phase", "files", "sandbox", "decision", "regression",
-                                      "source", "detail")},
-                            ensure_ascii=False, default=str)[:180]
-        item = {"type": "event", "step": step, "status": status, "detail": detail}
+        # 화이트리스트로 거른 JSON을 그대로 흘리면 화면엔 `{}`나 조각만 남는다.
+        # 무엇을 했는지 사람 말로 한 줄 만든다(loop/narrate.py).
+        from .loop.narrate import describe
+        item = {"type": "event", "step": step, "status": status,
+                "detail": describe(step, status, data)}
         # 착지점(landing)은 우측 패널용으로 잘리지 않게 별도 전달
         if data.get("landing"):
             item["landing"] = data["landing"]
