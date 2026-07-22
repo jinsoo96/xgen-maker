@@ -975,6 +975,80 @@ class TestWebLoopbackGuard(unittest.TestCase):
         self.assertNotIsInstance(ctx.exception, SystemExit)
 
 
+class TestSessionManagement(unittest.TestCase):
+    """세션 목록 — 찾기·지우기. 지우는 건 되돌릴 수 없어 경계가 중요하다."""
+
+    def _make(self, root: Path, name: str, query: str, branch: str = "") -> None:
+        d = root / name
+        d.mkdir(parents=True)
+        events = [{"step": "session_start", "query": query},
+                  {"step": "session_end", "status": "answered"}]
+        if branch:
+            events.insert(1, {"step": "branch", "branch": branch})
+        d.joinpath("journal.jsonl").write_text(
+            "\n".join(json.dumps(e, ensure_ascii=False) for e in events), encoding="utf-8")
+
+    def test_delete_removes_only_that_session(self):
+        from xgen_maker.loop.history import delete_session, read_sessions
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._make(root, "s1", "첫 작업")
+            self._make(root, "s2", "둘째 작업")
+            r = delete_session(root, "s1")
+            self.assertTrue(r["ok"])
+            self.assertFalse((root / "s1").exists())
+            self.assertTrue((root / "s2").exists())
+            self.assertEqual([s["query"] for s in read_sessions(root, 10)], ["둘째 작업"])
+
+    def test_delete_reports_leftover_branch(self):
+        """기록만 지우고 브랜치는 남긴다 — 남는다는 사실을 반드시 알린다."""
+        from xgen_maker.loop.history import delete_session
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._make(root, "s1", "작업", branch="feature/x")
+            r = delete_session(root, "s1")
+            self.assertEqual(r["branch"], "feature/x")
+            self.assertIn("feature/x", r["note"])
+
+    def test_path_escape_is_refused(self):
+        """세션 이름으로 worklogs 밖을 지우게 두면 안 된다."""
+        from xgen_maker.loop.history import session_path, delete_session
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "worklogs"
+            root.mkdir()
+            outside = Path(tmp) / "precious"
+            outside.mkdir()
+            (outside / "keep.txt").write_text("x", encoding="utf-8")
+            for evil in ("../precious", "..", ".", "", "../../etc"):
+                self.assertIsNone(session_path(root, evil), evil)
+                self.assertFalse(delete_session(root, evil)["ok"], evil)
+            self.assertTrue((outside / "keep.txt").exists())
+
+    def test_search_filters_sessions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            wl = base / "wl"
+            wl.mkdir()
+            self._make(wl, "s1", "로그인 고쳐줘", branch="fix/login")
+            self._make(wl, "s2", "결제 화면 확인")
+            cfg = base / "cfg.json"
+            cfg.write_text(json.dumps({"kg_path": str(_make_kg(base)).replace("\\", "/"),
+                                       "worklogs_dir": str(wl).replace("\\", "/"),
+                                       "llm_enabled": False}), encoding="utf-8")
+            handler = web.MakerWebHandler
+            prev = (handler.config, handler.graph)
+            try:
+                handler.config = MakerConfig.from_file(cfg)
+                handler.graph = Graph.load(handler.config.kg_path)
+                from xgen_maker.loop.history import read_sessions
+                rows = read_sessions(wl, 100)
+                self.assertEqual(len(rows), 2)
+                hits = [s for s in rows if "로그인" in s["query"]]
+                self.assertEqual(len(hits), 1)
+            finally:
+                handler.config, handler.graph = prev
+
+
 class TestGraphAutoReload(unittest.TestCase):
     """밖에서 KG가 바뀌면(kg rebuild·CLI sync·스케줄러) 재시작 없이 반영돼야 한다.
 

@@ -124,6 +124,9 @@ _PAGE = """<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
  #gcode tr.gcf{background:var(--primary-subtle)} #gcode tr.gcf .gcn{color:var(--primary);font-weight:700}
  #glegend{display:flex;flex-wrap:wrap;gap:12px;margin-top:8px;font-size:12px;color:var(--text2)} #glegend .lg{display:inline-flex;align-items:center;gap:5px}
  #glegend .lg i{width:11px;height:11px;border-radius:50%;display:inline-block}
+ .sessbar{display:flex;gap:10px;align-items:center;margin-bottom:10px}
+ .sessbar input{flex:1;max-width:420px;padding:7px 11px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);color:var(--text)}
+ .sessdel{padding:1px 8px;font-size:11px;line-height:1.7;opacity:.5;white-space:nowrap} .sessdel:hover{opacity:1;color:var(--danger);border-color:var(--danger)}
  .histcols{display:flex;gap:16px;align-items:flex-start} .histlist{flex:1;min-width:0} #histdetail,#testdetail{width:380px;flex-shrink:0;background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:14px;position:sticky;top:12px;max-height:78vh;overflow:auto}
  .hrow,.brow{cursor:pointer} .hrow:hover,.brow:hover{background:var(--bg3)} .hrow.sel{background:var(--bg3);outline:2px solid var(--primary);outline-offset:-2px}
  .tl{display:flex;flex-direction:column;gap:2px} .tlr{display:grid;grid-template-columns:18px 96px 1fr;gap:6px;padding:3px 4px;border-bottom:1px solid var(--border);font-size:12px;align-items:baseline}
@@ -175,13 +178,13 @@ _PAGE = """<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
 <header><b>⚒ XGEN MAKER</b>
  <span class="mode" id="mode"></span>
  <button id="newsess" title="현재 작업을 정리하고 새로 시작합니다">＋ 새 세션</button>
- <button id="pastsess" title="지난 작업 기록을 확인합니다">🕘 이전 세션</button>
+ <button id="pastsess" title="지난 작업을 찾아 이어서 하거나 정리합니다">🕘 세션 목록</button>
  <button id="sync" title="최신 코드로 동기화합니다">⟳ Sync</button></header>
 <nav>
  <button class="on" data-t="run">실행</button>
  <button data-t="pipeline">파이프라인</button>
  <button data-t="graph">지식그래프</button>
- <button data-t="history">작업 이력</button>
+ <button data-t="history">세션 목록</button>
  <button data-t="learn">학습</button>
  <button data-t="mrs">MR</button>
  <button data-t="branches">브랜치</button>
@@ -235,15 +238,18 @@ function line(cls,txt,mark){const d=document.createElement('div');d.className='e
 function refreshInfo(){fetch('/api/info').then(r=>r.json()).then(d=>{if(!d||d.repo_names===undefined)return;window.__repos=d.repo_names||[];document.getElementById('mode').textContent=(d.nodes||0).toLocaleString()+' 노드 · '+(d.repos||0)+' 레포';}).catch(()=>{});}
 refreshInfo();
 // Sync 버튼 — 그래프 최신화(변경분만)
-// 이전 세션 — 헤더에서 바로 작업 이력으로(＋새 세션만 있고 돌아갈 길이 없어 안 보였다)
+// 헤더의 세션 목록 버튼 — ＋새 세션만 있고 돌아갈 길이 없어 지난 작업이 안 보였다
 document.getElementById('pastsess').onclick=()=>{
  document.querySelector('nav button[data-t=history]').click();
 };
 // 지난 세션 개수를 버튼에 표시해 '있다는 것' 자체가 보이게
-jget('/api/history').then(d=>{
- const n=(d.sessions||[]).length, b=document.getElementById('pastsess');
- if(n&&b)b.textContent='🕘 이전 세션 '+n;
-}).catch(()=>{});
+function refreshSessCount(){
+ jget('/api/history?limit=1000').then(d=>{
+  const n=(d.sessions||[]).length, b=document.getElementById('pastsess');
+  if(b)b.textContent='🕘 세션 목록'+(n?' '+n:'');
+ }).catch(()=>{});
+}
+refreshSessCount();
 // 새 세션 — 진행 중 실행 중단 + 로그·패널 초기화
 document.getElementById('newsess').onclick=()=>{
  if(window.__es){try{window.__es.close()}catch(_){}window.__es=null;}
@@ -504,13 +510,7 @@ function render(t){
    gh.innerHTML=s;
   }).catch(()=>{const gh=document.getElementById('ghealth');if(gh)gh.textContent='';});
   }).catch(tabErr(el));
- if(t==='history') jget('/api/history').then(d=>{
-  el.innerHTML='<h3>작업 이력 <span class=muted>항목을 선택하면 상세 내용을 확인합니다</span></h3>'+
-   '<div class="histcols"><div class="histlist"><table><tr><th>결과</th><th>쿼리</th><th>브랜치</th><th>MR</th></tr>'+
-   d.sessions.map(s=>`<tr class="hrow" data-sid="${esc(s.session)}"><td><span class="badge ${cls(s.outcome)}">${esc(outcomeLabel(s.outcome))}</span></td><td>${esc(s.query).slice(0,52)}</td><td class="muted">${esc(s.branch)}</td><td>${s.mr?`<a href="${esc(s.mr)}" target=_blank onclick="event.stopPropagation()">MR</a>`:''}</td></tr>`).join('')+'</table></div>'+
-   '<aside id="histdetail"><div class=muted>왼쪽에서 작업을 선택하세요.</div></aside></div>';
-  el.querySelectorAll('.hrow').forEach(r=>r.onclick=()=>{el.querySelectorAll('.hrow').forEach(x=>x.classList.remove('sel'));r.classList.add('sel');showSession(r.dataset.sid);});
-  }).catch(tabErr(el));
+ if(t==='history') renderSessions(el,'');
  if(t==='learn') jget('/api/learnings').then(d=>{
   let h='<h3>학습 기록 <span class=muted>이전 작업에서 얻은 내용을 다음 작업에 반영합니다</span></h3>';
   if(!d.learnings.length){h+='<div class=muted>아직 기록이 없습니다. 작업이 쌓이면 자동으로 정리됩니다.</div>';}
@@ -715,6 +715,48 @@ function jumpToRepoGraph(repo){
  go();
 }
 const SICON={ok:'✓',start:'◐',fail:'✗',skipped:'—'};
+// 세션 목록 — 찾기·이어하기·지우기. 세션이 쌓이면 목록만으로는 원하는 걸 못 찾는다.
+function renderSessions(el,q){
+ jget('/api/history?limit=200'+(q?'&q='+encodeURIComponent(q):'')).then(d=>{
+  const rows=d.sessions||[];
+  let h='<h3>세션 목록 <span class=muted>작업을 찾아 이어서 하거나 정리합니다</span></h3>';
+  h+=`<div class=sessbar><input id=sessq placeholder="쿼리·브랜치로 찾기" value="${esc(q||'')}">`
+    +`<span class=muted>${rows.length}개</span></div>`;
+  if(!rows.length){
+   h+='<div class=muted>'+(q?'찾는 작업이 없습니다.':'아직 작업 기록이 없습니다.')+'</div>';
+   el.innerHTML=h;
+   const box=document.getElementById('sessq');
+   if(box){box.onkeydown=e=>{if(e.key==='Enter')renderSessions(el,box.value.trim());};}
+   return;
+  }
+  h+='<div class="histcols"><div class="histlist"><table><tr><th>결과</th><th>쿼리</th><th>브랜치</th><th>MR</th><th></th></tr>'
+   +rows.map(s=>`<tr class="hrow" data-sid="${esc(s.session)}"><td><span class="badge ${cls(s.outcome)}">${esc(outcomeLabel(s.outcome))}</span></td><td title="${esc(s.query)}">${esc(s.query).slice(0,52)}</td><td class="muted">${esc(s.branch)}</td><td>${s.mr?`<a href="${esc(s.mr)}" target=_blank onclick="event.stopPropagation()">MR</a>`:''}</td>`
+    +`<td><button class="sessdel ghost" data-sid="${esc(s.session)}" title="이 기록을 지웁니다">지우기</button></td></tr>`).join('')
+   +'</table></div><aside id="histdetail"><div class=muted>왼쪽에서 작업을 선택하세요.</div></aside></div>';
+  el.innerHTML=h;
+  const box=document.getElementById('sessq');
+  if(box){box.onkeydown=e=>{if(e.key==='Enter')renderSessions(el,box.value.trim());};}
+  el.querySelectorAll('.hrow').forEach(r=>r.onclick=()=>{
+   el.querySelectorAll('.hrow').forEach(x=>x.classList.remove('sel'));
+   r.classList.add('sel'); showSession(r.dataset.sid);});
+  el.querySelectorAll('.sessdel').forEach(b=>b.onclick=ev=>{
+   ev.stopPropagation(); deleteSession(b.dataset.sid, el, q);});
+ }).catch(tabErr(el));
+}
+// 지우기 — 무엇이 지워지는지 먼저 보여주고 확인받는다(되돌릴 수 없다)
+function deleteSession(sid,el,q){
+ jget('/api/session-delete?id='+encodeURIComponent(sid)).then(p=>{
+  if(!p.ok){alert(p.error||'지울 수 없습니다');return;}
+  const what=(p.query?'"'+p.query.slice(0,60)+'"':sid)
+   +(p.branch?'\\n브랜치 '+p.branch+'는 그대로 남습니다(코드는 지우지 않습니다).':'');
+  if(!confirm('이 기록을 지웁니다.\\n\\n'+what+'\\n\\n되돌릴 수 없습니다. 계속할까요?'))return;
+  jget('/api/session-delete?confirm=1&id='+encodeURIComponent(sid)).then(r=>{
+   if(!r.ok){alert(r.error||'삭제 실패');return;}
+   if(r.note)alert(r.note);
+   renderSessions(el,q); refreshSessCount();
+  }).catch(e=>alert('삭제 실패: '+(e.message||e)));
+ }).catch(e=>alert('확인 실패: '+(e.message||e)));
+}
 function showSession(sid,target){
  const d=target||document.getElementById('histdetail'); d.innerHTML='<div class=muted>불러오고 있습니다</div>';
  jget('/api/session?id='+encodeURIComponent(sid)).then(s=>{
@@ -1726,7 +1768,31 @@ class MakerWebHandler(BaseHTTPRequestHandler):
                 self._json({"ok": False, "error": "실행 중인 작업이 없습니다"})
         elif parsed.path == "/api/history":
             from .loop.history import read_sessions
-            self._json({"sessions": read_sessions(self.config.worklogs_dir, 30)})
+            qs = parse_qs(parsed.query)
+            try:
+                limit = int(qs.get("limit", ["30"])[0])
+            except ValueError:
+                limit = 30
+            sessions = read_sessions(self.config.worklogs_dir, limit)
+            needle = qs.get("q", [""])[0].strip().lower()
+            if needle:      # 세션이 쌓이면 목록만으로는 못 찾는다
+                sessions = [s for s in sessions
+                            if needle in (s.get("query", "") + " " + s.get("branch", "")).lower()]
+            self._json({"sessions": sessions})
+        elif parsed.path == "/api/session-delete":
+            # 지우는 건 되돌릴 수 없다. confirm=1 없으면 무엇이 지워지는지만 알려준다.
+            from .loop.history import read_session_detail, session_path, delete_session
+            qs = parse_qs(parsed.query)
+            sid = qs.get("id", [""])[0]
+            if session_path(self.config.worklogs_dir, sid) is None:
+                self._json({"ok": False, "error": "세션을 찾을 수 없습니다"})
+            elif qs.get("confirm", ["0"])[0] != "1":
+                detail = read_session_detail(self.config.worklogs_dir, sid) or {}
+                self._json({"ok": True, "preview": True, "session": sid,
+                            "query": detail.get("query", ""), "branch": detail.get("branch", ""),
+                            "note": "기록만 지웁니다 — 코드와 브랜치는 그대로 남습니다"})
+            else:
+                self._json(delete_session(self.config.worklogs_dir, sid))
         elif parsed.path == "/api/tests":
             from .loop.history import read_test_runs
             self._json({"runs": read_test_runs(self.config.worklogs_dir, 40)})

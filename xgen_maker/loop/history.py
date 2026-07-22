@@ -8,6 +8,38 @@ import json
 from pathlib import Path
 
 
+def session_path(worklogs_dir: str | Path, session_id: str) -> Path | None:
+    """세션 폴더 경로. 이름이 조작돼 worklogs 밖을 가리키면 거부한다."""
+    root = Path(worklogs_dir).resolve()
+    if not session_id or session_id in (".", ".."):
+        return None
+    target = (root / session_id).resolve()
+    if not target.is_relative_to(root) or target == root:
+        return None
+    return target if target.is_dir() else None
+
+
+def delete_session(worklogs_dir: str | Path, session_id: str) -> dict:
+    """세션 기록을 지운다. 지우는 건 기록뿐 — 코드·브랜치는 건드리지 않는다.
+
+    브랜치가 남아 있으면 알린다. 기록만 지우면 그 브랜치를 되돌릴 근거가 사라져,
+    나중에 "이게 왜 있지" 하는 브랜치만 남는다.
+    """
+    import shutil
+    target = session_path(worklogs_dir, session_id)
+    if target is None:
+        return {"ok": False, "error": "세션을 찾을 수 없습니다"}
+    detail = read_session_detail(worklogs_dir, session_id) or {}   # 기록이 깨졌어도 지울 수 있게
+    branch = detail.get("branch") or ""
+    try:
+        shutil.rmtree(target)
+    except OSError as e:
+        return {"ok": False, "error": f"삭제 실패: {e}"}
+    return {"ok": True, "session": session_id, "branch": branch,
+            "note": (f"브랜치 {branch}는 그대로 있습니다 — 필요하면 직접 정리하세요"
+                     if branch else "")}
+
+
 def read_sessions(worklogs_dir: str | Path, limit: int = 20) -> list[dict]:
     root = Path(worklogs_dir)
     if not root.is_dir():
