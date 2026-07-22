@@ -77,6 +77,9 @@ def describe(step: str, status: str, data: dict) -> str:
             phase = "다시 시도" if get("phase") == "retry" else "첫 시도"
             return f"에이전트가 코드를 고치는 중 ({phase} {get('n', 1)}회차)"
         return f"{get('files', 0)}개 파일 수정됨"
+    if step == "anchor":
+        named = " · ".join(get("anchors") or [])
+        return f"요청이 지목한 곳: {named} → 관련 코드 {get('scope', 0)}개로 좁힘"
     if step == "agent":
         return str(get("text", ""))       # 에이전트가 실제로 한 일 — 그대로 보여준다
     if step == "checks":

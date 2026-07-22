@@ -13,6 +13,7 @@ from ..codes import Outcome, ErrorCode
 from ..config import MakerConfig
 from ..kg.graph import Graph
 from ..kg.search import search, impact, retrieve_chain
+from ..kg.anchor import find_anchors, expand, rank_within
 from ..kg.build import refresh_files, git_head
 from .intent import classify
 from .converge import converge
@@ -221,6 +222,18 @@ class MakerLoop:
             else:
                 journal.event("query_expand", "fail",
                               note="코드 어휘 변환 실패 — 원문 검색 결과만 사용합니다")
+
+        # 요청이 화면 주소·파일·심볼을 직접 지목했다면 그건 추측할 필요가 없다.
+        # 그래프에서 그대로 찾아 관계를 타고 나가면 범위가 정확히 좁혀진다.
+        # 이름 맞추기(검색)는 그 범위 안에서만 하면 되므로 엉뚱한 저장소로 샐 수 없다.
+        anchors = find_anchors(self.graph, query)
+        if anchors:
+            scope = expand(self.graph, anchors)
+            ranked = rank_within(scope, query, report.get("keywords", ""), k=8)
+            if ranked:
+                journal.event("anchor", "ok",
+                              anchors=[a["name"] for a in anchors], scope=len(scope))
+                landing = _prefer(ranked, landing, k=8)
         journal.event("kg_search", "ok" if landing else "empty",
                       hits=[{"id": n["id"], "kind": n["kind"], "score": n["score"]}
                             for n in landing[:8]],
@@ -318,7 +331,9 @@ class MakerLoop:
             journal.event("plan_only", "ok", draft=str(draft),
                           reason="allow_write=False" if repo_path else f"repos에 '{repo}' 경로 없음")
             journal.close("planned")
-            report.update({"outcome": "planned", "mr_draft": str(draft)})
+            # 착지 결과를 결과에도 담는다 — 화면은 SSE로 받지만 CLI/MCP는 이것만 본다
+            report.update({"outcome": "planned", "mr_draft": str(draft),
+                           "landing": landing[:10]})
             return report
 
         # ⑤ 브랜치 — 항상 최신 GitLab 코드에서 분기 + KG 최신화

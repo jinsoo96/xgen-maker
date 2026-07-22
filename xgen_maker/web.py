@@ -1419,6 +1419,7 @@ class MakerWebHandler(BaseHTTPRequestHandler):
     PIPELINE = [
         ("intent", "의도 분류", "요청 유형을 판별합니다", None),
         ("kg_search", "지식그래프 착지", "변경할 코드를 지식그래프에서 찾습니다", None),
+        ("anchor", "지목한 곳 확인", "요청이 가리킨 화면·파일에서 관계를 타고 범위를 좁힙니다", None),
         ("query_expand", "키워드 확장", "한글 요청을 코드 용어로 변환합니다", "llm_enabled"),
         ("impact", "영향 분석", "변경 시 영향받는 코드를 찾습니다", None),
         ("chain", "워크플로우 체인", "연관된 코드를 함께 살펴봅니다", None),

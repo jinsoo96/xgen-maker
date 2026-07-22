@@ -21,6 +21,8 @@ class Event(str, Enum):
     INTENT = "intent"
     QUERY_EXPAND = "query_expand"
     KG_SEARCH = "kg_search"
+    ANCHOR = "anchor"                 # 요청이 직접 지목한 곳(화면 주소·파일·심볼)
+    AGENT = "agent"                   # 에이전트가 실제로 한 일(실시간)
     ANSWER = "answer"
     IMPACT = "impact"
     CHAIN = "chain"
@@ -86,6 +88,8 @@ class ErrorCode(str, Enum):
 PAYLOADS: dict[str, str] = {
     Event.INTENT: "intent, scores, source, branch_prefix",
     Event.KG_SEARCH: "hits[] (id, kind, score)",
+    Event.ANCHOR: "anchors[] (이름), scope (좁혀진 개수)",
+    Event.AGENT: "text (도구 사용·응답 한 줄)",
     Event.IMPACT: "target, affected(int)",
     Event.BRANCH: "branch, base",
     Event.CHECKS: "py_syntax/pytest/node_test 각 상태",
