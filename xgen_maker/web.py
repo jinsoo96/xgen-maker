@@ -246,12 +246,17 @@ document.getElementById('newsess').onclick=()=>{
 const syncBtn=document.getElementById('sync');
 syncBtn.onclick=()=>{
  syncBtn.disabled=true; syncBtn.classList.add('spin'); const old=syncBtn.textContent; syncBtn.textContent='⟳ 동기화 중';
- fetch('/api/sync').then(r=>r.json()).then(d=>{
+ // pull=1 — 원격까지 받아온다. 작업 중인 브랜치는 절대 건드리지 않고, 못 당긴 건 이유를 알려준다.
+ fetch('/api/sync?pull=1').then(r=>r.json()).then(d=>{
   if(d.ok){ syncBtn.textContent=d.changed>0?('✓ '+d.changed+'파일 갱신'):'✓ 최신'; refreshInfo();
-   line('info','Sync: '+(d.changed>0?d.changed+'개 파일 반영':'변경 없음(최신)')+' · '+d.nodes.toLocaleString()+'노드','⟳'); }
-  else line('fail','Sync 실패: '+d.error,'✗');
+   const up=(d.updated_repos||[]);
+   line('info','동기화: '+(up.length?up.length+'개 저장소 최신화('+up.join(', ')+') · ':'')
+        +(d.changed>0?d.changed+'개 파일 반영':'변경 없음')+' · '+d.nodes.toLocaleString()+'노드','⟳');
+   (d.not_on_latest||[]).forEach(n=>line('info','그대로 둠: '+n.repo+' ('+n.branch+') — '+n.reason,'·'));
+  }
+  else line('fail','동기화 실패: '+d.error,'✗');
   setTimeout(()=>{syncBtn.textContent=old; syncBtn.classList.remove('spin'); syncBtn.disabled=false;},2500);
- }).catch(e=>{line('fail','Sync 오류','✗'); syncBtn.textContent=old; syncBtn.classList.remove('spin'); syncBtn.disabled=false;});
+ }).catch(e=>{line('fail','동기화 오류','✗'); syncBtn.textContent=old; syncBtn.classList.remove('spin'); syncBtn.disabled=false;});
 };
 // 탭 전환
 const loaded={};
@@ -1569,8 +1574,24 @@ class MakerWebHandler(BaseHTTPRequestHandler):
             self._json(self._doctor())
         elif parsed.path == "/api/sync":
             # 그래프 최신화 — git 변경분만 재추출(CLI maker kg sync와 동일 로직)
+            # pull=1이면 원격까지 안전 최신화(fetch + 조건 만족 시에만 fast-forward)
             from .kg.sync import sync_all
             from .kg.enrich import enrich_deterministic
+            do_pull = parse_qs(parsed.query).get("pull", ["0"])[0] == "1"
+            if do_pull:
+                from .kg.refresh import refresh_all
+                try:
+                    with _GRAPH_LOCK:
+                        r = refresh_all(self.config, graph=self.graph)
+                        MakerWebHandler._adj_ver = None
+                    self._json({"ok": True, "changed": r["changed"], "nodes": r["nodes"],
+                                "pulled": True, "updated_repos": r["updated_repos"],
+                                "not_on_latest": r["not_on_latest"],
+                                "per_repo": [{"repo": s.get("repo"), "changed": s.get("changed", 0),
+                                              "action": s.get("action")} for s in r["sync"]]})
+                except Exception as error:  # noqa: BLE001
+                    self._json({"ok": False, "error": str(error)[:200]})
+                return
             try:
                 with _GRAPH_LOCK:  # 실행 중인 루프의 그래프 갱신/저장과 겹치지 않게
                     results = sync_all(self.graph)

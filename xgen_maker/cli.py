@@ -177,6 +177,29 @@ def cmd_kg_sync(args) -> None:
         print(f"[kg sync] 총 {total}개 파일 증분 반영 → {args.kg}")
 
 
+def cmd_kg_refresh(args) -> None:
+    """원격까지 최신화 — fetch + (안전할 때만) fast-forward + 그래프 증분 반영.
+
+    스케줄러(매일 08:00)와 대시보드 Sync 버튼이 함께 쓰는 경로.
+    사용자의 작업 브랜치는 절대 건드리지 않는다(refresh.py 불변식 참조).
+    """
+    from .kg.refresh import refresh_all
+    config = MakerConfig.from_file(args.config) if args.config else MakerConfig()
+    if args.kg:
+        config.kg_path = args.kg
+    r = refresh_all(config)
+    for p in r["pulls"]:
+        mark = {"updated": "↓", "already_latest": "=", "fetched_only": "·",
+                "fetch_failed": "✗", "ff_failed": "✗", "error": "✗"}.get(p.get("action"), "?")
+        extra = f" — {p['reason']}" if p.get("reason") else ""
+        print(f"[refresh] {mark} {p.get('repo','?'):24} {p.get('action','')}{extra}")
+    print(f"[refresh] 그래프 {r['changed']}개 파일 반영 · {r['nodes']:,}노드 / {r['edges']:,}엣지")
+    if r["not_on_latest"]:
+        print("[refresh] 최신이 아닌 채로 둔 저장소(작업 보호):")
+        for n in r["not_on_latest"]:
+            print(f"           - {n['repo']} ({n['branch']}) {n['reason']}")
+
+
 def cmd_kg_annotate(args) -> None:
     from .kg.overlay import annotate, add_custom_edge, load_overlay
     overlay_path = _overlay_path(args.kg)
@@ -671,6 +694,11 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--kg", default="kg/merged.json")
     p.add_argument("--quiet", action="store_true")
     p.set_defaults(func=cmd_kg_sync)
+
+    p = kg_sub.add_parser("refresh", help="원격까지 최신화 — fetch + 안전할 때만 ff + 증분 반영")
+    p.add_argument("--config", default=None)
+    p.add_argument("--kg", default=None)
+    p.set_defaults(func=cmd_kg_refresh)
 
     p = kg_sub.add_parser("hook", help="레포에 자동 sync 훅 설치/제거 (post-commit/merge/checkout)")
     p.add_argument("hook_action", choices=["install", "remove"])
