@@ -8,7 +8,7 @@ Ask in plain language. MAKER finds *where* in your code to change, works on a fr
 lets a coding agent implement it, then **tests and fixes itself until it passes** — and stops at
 a merge request for a human to review.
 
-[![tests](https://img.shields.io/badge/tests-304%20passing-3aa8c9)](#testing)
+[![tests](https://img.shields.io/badge/tests-318%20passing-3aa8c9)](#testing)
 [![python](https://img.shields.io/badge/python-3.12%2B-3aa8c9)](#requirements)
 [![deps](https://img.shields.io/badge/dependencies-stdlib%20first-3aa8c9)](#requirements)
 [![license](https://img.shields.io/badge/license-private-8894a0)](#license)
@@ -50,7 +50,8 @@ you: review · merge · deploy
 
 | | |
 |---|---|
-| 🕸 **Code knowledge graph** | AST-level nodes (files, classes, functions, endpoints, routes) with `contains` / `imports` / `calls` edges across repos. Incrementally kept fresh — no full rebuilds. |
+| 🕸 **Code knowledge graph** | AST-level nodes (files, classes, functions, endpoints, routes) across Python, TypeScript and Rust, with `contains` / `imports` / `calls` edges spanning repos. Incrementally kept fresh — no full rebuilds. |
+| 🛣 **Request path across services** | Reads the API gateway's routing table, so a front-end call resolves through the gateway to the backend repository that actually serves it — a hop that exists in configuration, not in code. |
 | 🎯 **Grounded landing** | Natural-language query → the exact `repo:path:line` to change, plus the code that *depends* on it so the agent doesn't break callers. |
 | 🔁 **Convergence loop** | Implement → sandbox + tests + regression → quality judge → feed failures back → retry until it passes or gives up honestly. |
 | 🛡 **Safety by construction** | Protected branches untouchable, branch-naming enforced, infrastructure files vetoed, merge-request-only, one-command undo. |
@@ -77,10 +78,12 @@ maker doctor --config maker.config.json            # verifies every capability f
 ### Build the graph
 
 ```bash
-maker kg build --repo "core=/path/to/core" --repo "web=/path/to/web::apps/web/src" --out kg
-maker kg merge kg/*.repo.json --out kg/merged.json
-maker kg enrich --kg kg/merged.json        # optional: semantic summaries
+maker kg rebuild --config maker.config.json   # every repo in your config, extracted and merged
+maker kg enrich --kg kg/merged.json           # optional: semantic summaries
 ```
+
+Adding a repository is one line in `maker.config.json` — `rebuild` is the only command that
+follows. (`kg build` / `kg merge` still exist for one-off graphs outside a config.)
 
 ### Run a query
 
@@ -195,7 +198,7 @@ classify      graph      branch/commit   (subprocess)  tests·sandbox     draft
 python -m pytest -q
 ```
 
-304 tests covering the graph extractors, incremental sync, safety guards, the convergence loop
+318 tests covering the graph extractors, incremental sync, safety guards, the convergence loop
 end-to-end over a real temporary repository, and the dashboard's endpoints. Regression tests are
 written against bugs that actually occurred — including the ones this project introduced and
 then fixed.

@@ -104,12 +104,43 @@ def repair_dangling(graph: Graph, sources: list[dict]) -> dict:
     return {"repaired": repaired, "dropped": before - len(graph.edges)}
 
 
+def _resync_gateway(graph: Graph, sources: list[dict]) -> dict | None:
+    """게이트웨이 라우팅 테이블을 다시 읽는다.
+
+    증분 갱신은 코드 파일만 본다. 그런데 "이 API가 어느 백엔드로 가나"의 답은 설정
+    파일에 있고, 그게 바뀌는 순간이 바로 새 모듈이 붙는 순간이다. 설정은 작아서
+    매번 다시 읽어도 싸다 — 바뀌었는지 따지느니 그냥 갈아끼운다.
+    """
+    from pathlib import Path
+    from .extract_gateway import extract_gateway_routes, link_gateway_routes, find_services_file
+
+    owners = [s for s in sources
+              if s.get("root") and find_services_file(s["root"]) is not None]
+    if not owners:
+        return None
+    stale = {n["id"] for n in graph.nodes_by_kind("gateway_route")}
+    for node_id in stale:
+        graph.nodes.pop(node_id, None)
+    graph.edges = [e for e in graph.edges
+                   if e["src"] not in stale and e["dst"] not in stale]
+    graph._edge_seen = {(e["src"], e["dst"], e["kind"]) for e in graph.edges}
+    for source in owners:
+        extract_gateway_routes(graph, source["repo"], Path(source["root"]))
+    links = link_gateway_routes(graph)
+    return {"repo": "(API 관문)", "changed": 0,
+            "action": f"라우팅 테이블 {len(graph.nodes_by_kind('gateway_route'))}개 · "
+                      f"백엔드 연결 {links['serves']} · 호출 연결 {links['calls']}"}
+
+
 def sync_all(graph: Graph) -> list[dict]:
     sources = graph.meta.get("sources", [])
     if not sources:
         return [{"action": "full_rebuild_needed",
                  "reason": "meta.sources 없음 — 구버전 그래프, kg build+merge 재실행 필요"}]
     results = [sync_source(graph, source) for source in sources]
+    gw = _resync_gateway(graph, sources)
+    if gw:
+        results.append(gw)
     fix = repair_dangling(graph, sources)
     if fix["repaired"] or fix["dropped"]:
         results.append({"repo": "(무결성 복구)", "changed": fix["repaired"],

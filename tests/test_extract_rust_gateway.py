@@ -147,5 +147,64 @@ class TestGatewayRoutingTable(unittest.TestCase):
         self.assertEqual([e["dst"] for e in via], ["gw:gwroute:/api/a/b"])
 
 
+class TestGatewayIncrementalSync(unittest.TestCase):
+    """설정에 모듈이 붙는 순간이 새 API가 생기는 순간 — 증분이 그걸 놓치면 안 된다."""
+
+    def test_new_module_appears_after_sync(self):
+        from xgen_maker.kg.sync import sync_all
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "gw"
+            (root / "config").mkdir(parents=True)
+            (root / "src").mkdir()
+            (root / "src" / "main.rs").write_text("fn main(){}\n", encoding="utf-8")
+            services = root / "config" / "services.yaml"
+            services.write_text("base_path: /api\nservices:\n  s1:\n"
+                                "    host: http://be-one:8000\n    modules:\n      - alpha\n",
+                                encoding="utf-8")
+            gw = build_repo("gw", root)
+            backend = Graph()
+            backend.add_node("be-one", "repo", "be-one", "be-one", "/x")
+            caller = Graph()
+            caller.add_node("fe", "repo", "fe", "fe", "/y")
+            caller.add_node("fe:c", "api_call", "GET /api/beta/x", "fe", "a.ts", 1,
+                            method="GET", norm_path="/api/beta/x")
+            merged, _ = merge_and_link([gw, backend, caller])
+            merged.meta["sources"] = [{"repo": "gw", "root": str(root), "scope": ""}]
+            self.assertNotIn("/api/beta",
+                             {n["name"] for n in merged.nodes_by_kind("gateway_route")})
+
+            services.write_text("base_path: /api\nservices:\n  s1:\n"
+                                "    host: http://be-one:8000\n    modules:\n"
+                                "      - alpha\n      - beta\n", encoding="utf-8")
+            sync_all(merged)
+
+            self.assertIn("/api/beta",
+                          {n["name"] for n in merged.nodes_by_kind("gateway_route")})
+            via = [e for e in merged.edges if e["kind"] == "routes_via" and e["src"] == "fe:c"]
+            self.assertEqual(len(via), 1)
+
+    def test_removed_module_disappears(self):
+        """설정에서 빠진 경로가 그래프에 남으면 없는 길을 가리키게 된다."""
+        from xgen_maker.kg.sync import sync_all
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "gw"
+            (root / "config").mkdir(parents=True)
+            (root / "src").mkdir()
+            (root / "src" / "main.rs").write_text("fn main(){}\n", encoding="utf-8")
+            services = root / "config" / "services.yaml"
+            services.write_text("base_path: /api\nservices:\n  s1:\n"
+                                "    host: http://be-one:8000\n    modules:\n"
+                                "      - alpha\n      - beta\n", encoding="utf-8")
+            graph = build_repo("gw", root)
+            graph.meta["sources"] = [{"repo": "gw", "root": str(root), "scope": ""}]
+
+            services.write_text("base_path: /api\nservices:\n  s1:\n"
+                                "    host: http://be-one:8000\n    modules:\n      - alpha\n",
+                                encoding="utf-8")
+            sync_all(graph)
+            self.assertEqual({n["name"] for n in graph.nodes_by_kind("gateway_route")},
+                             {"/api/alpha"})
+
+
 if __name__ == "__main__":
     unittest.main()
