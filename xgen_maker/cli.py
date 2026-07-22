@@ -57,6 +57,54 @@ def cmd_kg_build(args) -> None:
               f" scope={scope or '-'} → {out_path}")
 
 
+def cmd_kg_rebuild(args) -> None:
+    """설정에 적힌 저장소 전체를 다시 추출하고 하나로 합친다.
+
+    레포를 추가할 때 build를 저장소 수만큼 치고 merge를 따로 부르면 빠뜨리기 쉽다.
+    config.repos(+repo_scopes)를 유일한 출처로 삼아 그래프가 설정을 따라오게 한다.
+    사람이 단 메모(overlay)는 merge 뒤 다시 입힌다.
+    """
+    from .kg.extract_infra import extract_infra, link_infra_to_code
+    config = MakerConfig.from_file(args.config) if args.config else MakerConfig()
+    if not config.repos:
+        raise SystemExit("[kg rebuild] config.repos가 비어 있습니다")
+    out = args.kg or config.kg_path
+    scopes = getattr(config, "repo_scopes", None) or {}
+    graphs, failed = [], []
+    for name, root in config.repos.items():
+        if not Path(root).is_dir():
+            failed.append((name, f"경로 없음: {root}"))
+            continue
+        scope = scopes.get(name) or None
+        try:
+            g = build_repo(name, root, scope, max_files=args.max_files)
+        except Exception as exc:                                  # 한 레포 실패로 전체를 잃지 않는다
+            failed.append((name, f"{type(exc).__name__}: {exc}"))
+            continue
+        graphs.append(g)
+        print(f"[kg rebuild] {name}: {json.dumps(g.stats(), ensure_ascii=False)}"
+              f" scope={scope or '-'}")
+    if not graphs:
+        raise SystemExit("[kg rebuild] 빌드된 저장소가 없습니다 — 경로를 확인하세요")
+
+    infra_path = args.infra or getattr(config, "infra_path", "") or ""
+    if infra_path and Path(infra_path).is_dir():
+        try:
+            graphs.append(extract_infra(infra_path))
+            print(f"[kg rebuild] infra: {infra_path}")
+        except Exception as exc:
+            failed.append(("infra", f"{type(exc).__name__}: {exc}"))
+
+    merged, links = merge_and_link(graphs)
+    merged.meta["infra_code_links"] = link_infra_to_code(merged)
+    merged.save(out)
+    _apply_overlay_and_save(merged, out)
+    print(f"[kg rebuild] {json.dumps(merged.stats(), ensure_ascii=False)}")
+    print(f"[kg rebuild] 저장소 {len(graphs)}개 · crossrepo {links}링크 → {out}")
+    for name, reason in failed:                                   # 조용히 빠뜨리지 않는다
+        print(f"[kg rebuild] ! 제외 {name}: {reason}")
+
+
 def cmd_kg_infra(args) -> None:
     import os
     from .kg.extract_infra import extract_infra
@@ -619,6 +667,13 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--out", default="kg")
     p.add_argument("--max-files", type=int, default=20000)
     p.set_defaults(func=cmd_kg_build)
+
+    p = kg_sub.add_parser("rebuild", help="설정의 저장소 전체를 재추출+병합(레포 추가 시 이것만)")
+    p.add_argument("--config", default="maker.config.json")
+    p.add_argument("--kg", default=None, help="출력 경로(기본: config.kg_path)")
+    p.add_argument("--infra", default=None, help="인프라 저장소 경로(기본: config.infra_path)")
+    p.add_argument("--max-files", type=int, default=20000)
+    p.set_defaults(func=cmd_kg_rebuild)
 
     p = kg_sub.add_parser("merge")
     p.add_argument("inputs", nargs="+")

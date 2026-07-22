@@ -113,6 +113,26 @@ class TestTsExtractAndRoutes(unittest.TestCase):
         self.assertEqual(len(routes), 1)
         self.assertEqual(routes[0]["name"], "/users")
 
+    def test_routes_survive_incremental_refresh(self):
+        """증분 갱신에서도 화면 라우트가 나와야 한다.
+
+        회귀: Rust 추출기를 붙이며 TS 파일 수집이 Rust 분기로 옮겨가, page.tsx가
+        라우트 추출 대상에서 통째로 빠졌다(전체 빌드·증분 양쪽).
+        """
+        from xgen_maker.kg.build import refresh_files
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_ts_repo(root)
+            graph = build_repo("fe", root)
+            self.assertTrue(graph.nodes_by_kind("route"))
+
+            page = root / "src" / "app" / "settings" / "page.tsx"
+            page.parent.mkdir(parents=True, exist_ok=True)
+            page.write_text("export default function Settings(){return null}\n",
+                            encoding="utf-8")
+            refresh_files(graph, "fe", root, {"src/app/settings/page.tsx"})
+        self.assertIn("/settings", {n["name"] for n in graph.nodes_by_kind("route")})
+
     def test_route_from_rel(self):
         self.assertEqual(route_from_rel("apps/web/src/app/(main)/dashboard/page.tsx"),
                          "/dashboard")

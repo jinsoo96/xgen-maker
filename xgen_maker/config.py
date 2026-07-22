@@ -30,6 +30,9 @@ DEFAULT_LLM_MODEL = os.environ.get("XGEN_MAKER_LLM_MODEL", "gpt-4o-mini")
 @dataclass
 class MakerConfig:
     repos: dict[str, str] = field(default_factory=dict)   # repo명 → 로컬 경로
+    # 한 저장소를 여러 논리 레포로 쪼갤 때만(모노레포). repo명 → 루트 기준 하위 경로.
+    # repos 값은 순수 경로로 남긴다 — pipeline/rollback/web이 그 값을 그대로 Path로 쓴다.
+    repo_scopes: dict[str, str] = field(default_factory=dict)
     kg_path: str = "kg/merged.json"
     mode: str = "observe"                                  # observe=푸시/MR 미실행, act=푸시+MR
     allow_write: bool = False                              # False면 브랜치/구현도 계획만(dry)

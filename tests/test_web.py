@@ -265,6 +265,30 @@ class TestWebServer(unittest.TestCase):
         # 없는 노드
         self.assertFalse(h._node_code("nope")["ok"])
 
+    def test_node_code_lands_on_the_line(self):
+        """줄을 아는 노드는 그 줄이 보이는 창을 준다 — 파일 앞머리를 띄우면 거짓 안내다."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "src").mkdir()
+            (root / "src" / "main.rs").write_text(
+                "\n".join(f"line {i}" for i in range(1, 121)), encoding="utf-8")
+            graph = Graph()
+            graph.add_node("gw:src/main.rs", "file", "main.rs", "gw", "src/main.rs")
+            graph.add_node("gw:ep", "endpoint", "POST /x", "gw", "src/main.rs", 100,
+                           method="POST", route_path="/x")
+            h = web.MakerWebHandler.__new__(web.MakerWebHandler)
+            h.config = MakerConfig(repos={"gw": str(root)})
+            h.graph = graph
+
+            r = h._node_code("gw:ep")
+            self.assertTrue(r["ok"])
+            self.assertEqual(r["focus_line"], 100)
+            shown = range(r["first_line"], r["first_line"] + len(r["code"].splitlines()))
+            self.assertIn(100, shown)
+
+            f = h._node_code("gw:src/main.rs")     # 줄이 없는 파일 노드는 앞머리부터
+            self.assertEqual(f["first_line"], 1)
+
     def test_tests_api(self):
         status, body = self._get("/api/tests")
         self.assertEqual(status, 200)
@@ -949,6 +973,58 @@ class TestWebLoopbackGuard(unittest.TestCase):
         with self.assertRaises(Exception) as ctx:
             web.serve("/nonexistent/config.json", host="127.0.0.1", port=0)
         self.assertNotIsInstance(ctx.exception, SystemExit)
+
+
+class TestGraphAutoReload(unittest.TestCase):
+    """밖에서 KG가 바뀌면(kg rebuild·CLI sync·스케줄러) 재시작 없이 반영돼야 한다.
+
+    반영이 안 되면 서버가 기동 시점 그래프로 조용히 낡은 좌표에 착지시킨다.
+    """
+
+    def test_reloads_when_file_changes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            kg = _make_kg(base)
+            cfg = base / "cfg.json"
+            cfg.write_text(f'{{"kg_path": "{kg.as_posix()}", "llm_enabled": false}}',
+                           encoding="utf-8")
+            handler = web.MakerWebHandler
+            prev = (handler.config, handler.graph, handler._kg_stamp)
+            try:
+                handler.config = MakerConfig.from_file(cfg)
+                handler.graph = Graph.load(kg)
+                handler._kg_stamp = None
+                handler._reload_graph_if_changed()      # 첫 호출은 기준점만 잡는다
+                self.assertNotIn("r:refund.py", handler.graph.nodes)
+
+                grown = Graph.load(kg)
+                grown.add_node("r:refund.py", "file", "refund.py", "r", "refund.py")
+                grown.save(kg)
+                handler._reload_graph_if_changed()
+                self.assertIn("r:refund.py", handler.graph.nodes)
+            finally:
+                handler.config, handler.graph, handler._kg_stamp = prev
+
+    def test_broken_file_keeps_previous_graph(self):
+        """반쯤 쓰인/깨진 파일을 읽어도 멀쩡한 그래프를 버리지 않는다."""
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            kg = _make_kg(base)
+            cfg = base / "cfg.json"
+            cfg.write_text(f'{{"kg_path": "{kg.as_posix()}", "llm_enabled": false}}',
+                           encoding="utf-8")
+            handler = web.MakerWebHandler
+            prev = (handler.config, handler.graph, handler._kg_stamp)
+            try:
+                handler.config = MakerConfig.from_file(cfg)
+                handler.graph = Graph.load(kg)
+                handler._kg_stamp = None
+                handler._reload_graph_if_changed()
+                kg.write_text("{ this is not json", encoding="utf-8")
+                handler._reload_graph_if_changed()
+                self.assertIn("r:pay.py#charge", handler.graph.nodes)
+            finally:
+                handler.config, handler.graph, handler._kg_stamp = prev
 
 
 if __name__ == "__main__":

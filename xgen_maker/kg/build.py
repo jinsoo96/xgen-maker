@@ -11,6 +11,8 @@ from pathlib import Path
 from .graph import Graph
 from .extract_python import extract_python_file
 from .extract_typescript import extract_ts_file
+from .extract_rust import extract_rust_file, link_rust_routes, RUST_EXTS
+from .extract_gateway import extract_gateway_routes, link_gateway_routes
 from .routes_nextjs import extract_routes
 from .crossrepo import link_api_calls, link_feature_packages
 from .workspaces import ImportResolver, scan_workspaces, scan_aliases
@@ -20,6 +22,7 @@ SKIP_DIRS = {"node_modules", ".git", ".next", "dist", "build", "__pycache__",
              "storybook-static", ".idea", ".vscode", "migrations_backup"}
 PY_EXTS = {".py"}
 TS_EXTS = {".ts", ".tsx", ".js", ".jsx"}
+# Rust — 게이트웨이처럼 전 요청이 지나는 서비스가 여기 있다(추출기 없으면 통째로 안 보임)
 
 
 def git_head(repo_root: str | Path) -> str | None:
@@ -47,7 +50,7 @@ def collect_files(repo_root: Path, scope: str | None = None,
             if entry.is_dir():
                 if entry.name not in SKIP_DIRS and not entry.name.startswith("."):
                     stack.append(entry)
-            elif entry.suffix in PY_EXTS | TS_EXTS:
+            elif entry.suffix in PY_EXTS | TS_EXTS | RUST_EXTS:
                 rel_files.append(entry.relative_to(repo_root).as_posix())
                 if len(rel_files) >= max_files:
                     return rel_files
@@ -76,7 +79,9 @@ def build_repo(repo: str, repo_root: str | Path, scope: str | None = None,
                 extract_python_file(graph, repo, repo_root, rel, known)
             elif suffix in TS_EXTS:
                 extract_ts_file(graph, repo, repo_root, rel, known, resolver=resolver)
-                ts_files.append(rel)
+                ts_files.append(rel)      # Next.js 라우트(page.tsx)는 TS 파일에서만 나온다
+            elif suffix in RUST_EXTS:
+                extract_rust_file(graph, repo, repo_root, rel, known)
         except (OSError, RecursionError):
             continue
         file_id = f"{repo}:{rel}"
@@ -84,6 +89,8 @@ def build_repo(repo: str, repo_root: str | Path, scope: str | None = None,
             graph.add_edge(repo, file_id, "contains")
 
     route_count = extract_routes(graph, repo, ts_files)
+    link_rust_routes(graph, repo)  # 라우트→핸들러는 파일 간이라 추출이 끝난 뒤 연결
+    extract_gateway_routes(graph, repo, repo_root)  # 게이트웨이면 라우팅 테이블도(아니면 0)
     if resolver is not None:
         _attach_feature_members(graph, repo, rel_files, resolver.workspaces)
     graph.meta = {"repo": repo, "root": str(repo_root), "scope": scope or "",
@@ -134,12 +141,15 @@ def refresh_files(graph: Graph, repo: str, repo_root: str | Path,
                 extract_python_file(graph, repo, repo_root, rel, known)
             elif file_path.suffix in TS_EXTS:
                 extract_ts_file(graph, repo, repo_root, rel, known)
-                ts_files.append(rel)
+                ts_files.append(rel)      # Next.js 라우트(page.tsx)는 TS 파일에서만 나온다
+            elif file_path.suffix in RUST_EXTS:
+                extract_rust_file(graph, repo, repo_root, rel, known)
         except (OSError, RecursionError):
             continue
         if f"{repo}:{rel}" in graph.nodes:
             graph.add_edge(repo, f"{repo}:{rel}", "contains")
     extract_routes(graph, repo, ts_files)
+    link_rust_routes(graph, repo)  # 라우트→핸들러는 파일 간이라 추출 후 연결
     link_api_calls(graph)
     return len(targets)
 
@@ -160,4 +170,6 @@ def merge_and_link(graphs: list[Graph]) -> tuple[Graph, int]:
     feature_links = link_feature_packages(merged)
     merged.meta["crossrepo_links"] = links
     merged.meta["feature_links"] = feature_links
+    # 게이트웨이 경유 경로는 모든 레포가 모인 뒤에야 이을 수 있다(호출·라우팅표·백엔드가 각각 다른 레포)
+    merged.meta["gateway_links"] = link_gateway_routes(merged)
     return merged, links
