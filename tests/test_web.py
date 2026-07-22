@@ -1128,3 +1128,60 @@ class TestGraphAutoReload(unittest.TestCase):
 if __name__ == "__main__":
     import urllib.error
     unittest.main()
+
+
+class TestSyncProgressAndCancel(unittest.TestCase):
+    """최신화는 저장소를 여럿 돈다 — 진행이 안 보이고 못 멈추면 멈춘 것과 같다."""
+
+    def _config(self, tmp: Path, repos: dict):
+        cfg = MakerConfig()
+        cfg.repos = repos
+        cfg.kg_path = str(_make_kg(tmp))
+        return cfg
+
+    def test_progress_is_reported_per_repo(self):
+        from xgen_maker.kg.refresh import pull_all
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            repos = {}
+            for name in ("a", "b", "c"):
+                (base / name).mkdir()
+                repos[name] = str(base / name)
+            seen = []
+            pull_all(self._config(base, repos),
+                     on_progress=lambda step, info: seen.append((step, info["repo"],
+                                                                 info["index"], info["total"])))
+            self.assertEqual([s[1] for s in seen], ["a", "b", "c"])
+            self.assertEqual(seen[0][3], 3)          # 총 개수를 알려준다
+
+    def test_cancel_stops_remaining_repos(self):
+        from xgen_maker.kg.refresh import pull_all
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            repos = {}
+            for name in ("a", "b", "c"):
+                (base / name).mkdir()
+                repos[name] = str(base / name)
+            done = []
+            # 첫 저장소를 처리한 뒤 중지 신호
+            state = {"stop": False}
+
+            def progress(step, info):
+                done.append(info["repo"])
+                state["stop"] = True
+
+            results = pull_all(self._config(base, repos),
+                               on_progress=progress,
+                               should_cancel=lambda: state["stop"])
+            self.assertEqual(done, ["a"])            # 두 번째부터는 시작도 안 한다
+            self.assertEqual(results[-1]["action"], "cancelled")
+            self.assertIn("중지", results[-1]["reason"])
+
+    def test_page_wires_stream_and_stop(self):
+        """화면이 스트리밍 경로와 중지를 실제로 걸고 있는지."""
+        page = web._PAGE
+        self.assertIn("/api/sync-stream", page)
+        self.assertIn("stopSync", page)
+        # 선언이 사용보다 앞서야 한다(const/function 순서가 뒤집히면 스크립트가 죽는다)
+        self.assertLess(page.index("function startSync"),
+                        page.rindex("syncBtn.onclick=startSync"))

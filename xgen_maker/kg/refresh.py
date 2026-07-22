@@ -82,11 +82,23 @@ def pull_repo(repo: str, root: str | Path, token: str = "") -> dict:
             "ahead": 0}
 
 
-def pull_all(config) -> list[dict]:
-    """config.repos 전체를 안전 최신화. 같은 경로를 공유하는 레포는 한 번만 당긴다."""
+def pull_all(config, on_progress=None, should_cancel=None) -> list[dict]:
+    """config.repos 전체를 안전 최신화. 같은 경로를 공유하는 레포는 한 번만 당긴다.
+
+    on_progress(단계, 정보)로 진행을 흘린다 — 저장소가 여럿이면 몇 분씩 걸리는데,
+    아무 신호가 없으면 멈춘 것과 구분되지 않는다.
+    should_cancel()이 참이면 남은 저장소를 건너뛴다. 이미 끝난 저장소는 되돌리지
+    않는다(fetch는 워킹트리를 바꾸지 않으므로 중간에 멈춰도 안전하다).
+    """
     seen: dict[str, dict] = {}
     results = []
-    for repo, root in (config.repos or {}).items():
+    repos = list((config.repos or {}).items())
+    for index, (repo, root) in enumerate(repos, start=1):
+        if should_cancel is not None and should_cancel():
+            results.append({"repo": repo, "action": "cancelled", "reason": "사용자가 중지했습니다"})
+            break
+        if on_progress is not None:
+            on_progress("pull", {"repo": repo, "index": index, "total": len(repos)})
         key = str(Path(root).resolve()).lower()
         if key in seen:  # frontend-app/lib/features처럼 한 클론을 여러 스코프가 공유
             shared = dict(seen[key])
@@ -103,7 +115,8 @@ def pull_all(config) -> list[dict]:
     return results
 
 
-def refresh_all(config, graph=None, save: bool = True) -> dict:
+def refresh_all(config, graph=None, save: bool = True,
+                on_progress=None, should_cancel=None) -> dict:
     """최신화 전 과정: 원격 받아오기 → 그래프 증분 반영 → 저장.
 
     graph를 주면 그걸 갱신하고(웹처럼 살아있는 그래프), 없으면 파일에서 읽어 쓴다.
@@ -113,10 +126,12 @@ def refresh_all(config, graph=None, save: bool = True) -> dict:
     from .enrich import enrich_deterministic
     from .overlay import load_overlay, apply_overlay
 
-    pulls = pull_all(config)
+    pulls = pull_all(config, on_progress=on_progress, should_cancel=should_cancel)
     own_graph = graph is None
     g = graph if graph is not None else Graph.load(config.kg_path)
 
+    if on_progress is not None:
+        on_progress("sync", {"note": "받아온 변경을 그래프에 반영합니다"})
     sync = sync_all(g)
     changed = sum(r.get("changed", 0) for r in sync)
     if changed or any(r.get("action") for r in sync):

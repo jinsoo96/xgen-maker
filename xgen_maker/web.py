@@ -16,6 +16,16 @@ from .config import MakerConfig, resolve_default_repo
 from .kg.graph import Graph
 
 
+def _sync_summary(result: dict, pulled: bool) -> dict:
+    """최신화 결과를 화면이 쓰는 모양으로. 붙잡아 둔 저장소는 이유까지 넘긴다."""
+    return {"ok": True, "pulled": pulled,
+            "changed": result.get("changed", 0), "nodes": result.get("nodes", 0),
+            "updated_repos": result.get("updated_repos", []),
+            "not_on_latest": result.get("not_on_latest", []),
+            "per_repo": [{"repo": s.get("repo"), "changed": s.get("changed", 0),
+                          "action": s.get("action")} for s in result.get("sync", [])]}
+
+
 def _apply_overlay_for(kg_path: str, graph: Graph) -> None:
     """사람이 단 메모·직접 연결을 그래프에 입힌다. 기동 로드와 자동 리로드가 같은 규칙을 쓴다."""
     from pathlib import Path
@@ -268,20 +278,49 @@ document.getElementById('newsess').onclick=()=>{
  document.querySelector('nav button[data-t=run]').click();
 };
 const syncBtn=document.getElementById('sync');
-syncBtn.onclick=()=>{
- syncBtn.disabled=true; syncBtn.classList.add('spin'); const old=syncBtn.textContent; syncBtn.textContent='⟳ 동기화 중';
- // pull=1 — 원격까지 받아온다. 작업 중인 브랜치는 절대 건드리지 않고, 못 당긴 건 이유를 알려준다.
- fetch('/api/sync?pull=1').then(r=>r.json()).then(d=>{
-  if(d.ok){ syncBtn.textContent=d.changed>0?('✓ '+d.changed+'파일 갱신'):'✓ 최신'; refreshInfo();
-   const up=(d.updated_repos||[]);
-   line('info','동기화: '+(up.length?up.length+'개 저장소 최신화('+up.join(', ')+') · ':'')
-        +(d.changed>0?d.changed+'개 파일 반영':'변경 없음')+' · '+d.nodes.toLocaleString()+'노드','⟳');
-   (d.not_on_latest||[]).forEach(n=>line('info','그대로 둠: '+n.repo+' ('+n.branch+') — '+n.reason,'·'));
+// 저장소를 여럿 도는 동안 아무 신호가 없으면 멈춘 것과 구분이 안 된다.
+// 실행과 같은 방식으로 진행을 흘리고, 같은 방식으로 멈출 수 있게 한다.
+let syncES=null, syncRun=null;
+function syncIdle(label){
+ syncBtn.textContent=label; syncBtn.classList.remove('spin'); syncBtn.disabled=false;
+ syncBtn.onclick=startSync; syncES=null; syncRun=null;
+ setTimeout(()=>{if(!syncES)syncBtn.textContent='⟳ Sync';},2500);
+}
+function stopSync(){
+ if(!syncRun)return;
+ syncBtn.textContent='중지하는 중';
+ jget('/api/stop?id='+encodeURIComponent(syncRun)).catch(()=>{});
+}
+function startSync(){
+ syncBtn.disabled=false; syncBtn.classList.add('spin'); syncBtn.textContent='■ 중지';
+ syncBtn.title='동기화를 멈춥니다'; syncBtn.onclick=stopSync;
+ line('info','동기화를 시작합니다','⟳');
+ const es=new EventSource('/api/sync-stream?pull=1'); syncES=es;
+ es.onmessage=ev=>{
+  const e=JSON.parse(ev.data);
+  if(e.type==='run_id'){syncRun=e.id;}
+  else if(e.type==='event'){
+   if(e.step==='pull'){syncBtn.textContent='■ 중지 ('+e.index+'/'+e.total+')';
+    line('ok','받아오는 중 '+e.index+'/'+e.total+'  '+e.repo,'⟳');}
+   else if(e.step==='sync'){syncBtn.textContent='■ 중지 (반영 중)'; line('ok',e.note,'⟳');}
   }
-  else line('fail','동기화 실패: '+d.error,'✗');
-  setTimeout(()=>{syncBtn.textContent=old; syncBtn.classList.remove('spin'); syncBtn.disabled=false;},2500);
- }).catch(e=>{line('fail','동기화 오류','✗'); syncBtn.textContent=old; syncBtn.classList.remove('spin'); syncBtn.disabled=false;});
-};
+  else if(e.type==='result'){
+   const d=e.report;
+   const up=(d.updated_repos||[]);
+   line(e.cancelled?'fail':'ok',
+        (e.cancelled?'동기화 중지됨 · ':'동기화 완료 · ')
+        +(up.length?up.length+'개 저장소 최신화('+up.join(', ')+') · ':'')
+        +(d.changed>0?d.changed+'개 파일 반영':'변경 없음')
+        +' · '+(d.nodes||0).toLocaleString()+'노드', e.cancelled?'■':'✓');
+   (d.not_on_latest||[]).forEach(n=>line('info','그대로 둠: '+n.repo+' ('+n.branch+') — '+n.reason,'·'));
+   refreshInfo(); loaded['graph']=0;
+   es.close(); syncIdle(e.cancelled?'■ 중지됨':(d.changed>0?'✓ '+d.changed+'파일':'✓ 최신'));
+  }
+  else if(e.type==='error'){line('fail','동기화 실패: '+e.message,'✗'); es.close(); syncIdle('✗ 실패');}
+ };
+ es.onerror=()=>{es.close(); syncIdle('✗ 연결 끊김');};
+}
+syncBtn.onclick=startSync;
 // 탭 전환
 const loaded={};
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
@@ -1744,6 +1783,8 @@ class MakerWebHandler(BaseHTTPRequestHandler):
             self._json(self._auth_check())
         elif parsed.path == "/api/doctor":
             self._json(self._doctor())
+        elif parsed.path == "/api/sync-stream":
+            self._sse_sync(parse_qs(parsed.query))
         elif parsed.path == "/api/sync":
             # 그래프 최신화 — git 변경분만 재추출(CLI maker kg sync와 동일 로직)
             # pull=1이면 원격까지 안전 최신화(fetch + 조건 만족 시에만 fast-forward)
@@ -1924,6 +1965,66 @@ class MakerWebHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
+
+    def _sse_sync(self, params):
+        """그래프 최신화를 진행 상황과 함께 흘린다. 실행과 같은 방식으로 중지도 받는다."""
+        import uuid
+        from .kg.refresh import refresh_all
+        do_pull = params.get("pull", ["0"])[0] == "1"
+        self._response_started = True
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        q: queue.Queue = queue.Queue()
+        run_id = uuid.uuid4().hex[:12]
+        cancel = threading.Event()
+        MakerWebHandler._cancels[run_id] = cancel
+        q.put({"type": "run_id", "id": run_id})
+
+        def work():
+            try:
+                with _GRAPH_LOCK:      # 실행 중인 루프의 그래프 갱신과 겹치지 않게
+                    result = refresh_all(
+                        self.config, graph=self.graph,
+                        on_progress=lambda step, info: q.put({"type": "event", "step": step, **info}),
+                        should_cancel=cancel.is_set) if do_pull else self._sync_only()
+                    MakerWebHandler._adj_ver = None
+                q.put({"type": "result", "report": _sync_summary(result, do_pull),
+                       "cancelled": cancel.is_set()})
+            except Exception as error:  # noqa: BLE001
+                q.put({"type": "error", "message": str(error)[:200]})
+            finally:
+                MakerWebHandler._cancels.pop(run_id, None)
+                q.put(None)
+
+        threading.Thread(target=work, daemon=True).start()
+        try:
+            while True:
+                item = q.get()
+                if item is None:
+                    break
+                try:
+                    payload = json.dumps(item, ensure_ascii=False, default=str)
+                    self.wfile.write(f"data: {payload}\n\n".encode("utf-8"))
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    cancel.set()
+                    break
+        finally:
+            MakerWebHandler._cancels.pop(run_id, None)
+
+    def _sync_only(self) -> dict:
+        """원격을 받지 않고 로컬 변경만 그래프에 반영."""
+        from .kg.sync import sync_all
+        from .kg.enrich import enrich_deterministic
+        results = sync_all(self.graph)
+        changed = sum(r.get("changed", 0) for r in results)
+        if changed or any(r.get("action") for r in results):
+            enrich_deterministic(self.graph)
+            self.graph.save(self.config.kg_path)
+        return {"sync": results, "changed": changed, "nodes": len(self.graph.nodes),
+                "pulls": [], "updated_repos": [], "not_on_latest": []}
 
     def _sse_run(self, params):
         query = (params.get("q", [""])[0]).strip()
