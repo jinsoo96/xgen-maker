@@ -45,9 +45,13 @@ def search(graph: Graph, query: str, k: int = 10,
             continue
         if (node.get("meta") or {}).get("deprecated"):
             continue          # 사람이 "쓰지 말라"고 표시한 코드로는 착지하지 않는다(R8)
+        # 이름이 그대로 입력된 노드를 앞세우되, 컨테이너(저장소·기능)는 예외다.
+        # 저장소 이름은 그 안의 모든 코드와 겹치므로 "payments"만 쳐도 늘 정확히
+        # 일치해, 정작 고칠 함수를 밀어낸다.
         name = node.get("name", "").lower()
-        exact = name == needle
-        partial = not exact and len(needle) > 2 and needle in name
+        pointable = node["kind"] not in ("repo", "feature")
+        exact = pointable and name == needle
+        partial = pointable and not exact and len(needle) > 2 and needle in name
         results.append(((exact, partial, score), node))
     results.sort(key=lambda pair: pair[0], reverse=True)
     return [{"score": round(key[2], 1), **node} for key, node in results[:k]]

@@ -21,7 +21,29 @@ _CAMEL = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 
 # BM25 표준 파라미터. 도메인 값이 아니라 알고리즘 상수다.
 _K1 = 1.5
-_B = 0.75
+# 표준값 0.75는 길이 정규화가 세다. 코드 블록은 길이 편차가 커서(짧은 헬퍼 vs 긴 서비스
+# 클래스) 길다는 이유로 관련 있는 함수가 밀린다. probe가 코드 검색용으로 낮춘 값을 따른다.
+_B = 0.5
+
+# 언어 키워드는 어느 코드에나 있어 변별력이 없다. 요청 문장에 섞여 들어오면 노이즈만 된다.
+_CODE_STOPWORDS = frozenset("""
+if else for while return break continue def class function func const let var
+import from export default public private static void new this self true false null none
+type interface struct enum impl trait fn pub mut async await try catch throw finally
+""".split())
+
+# 노드 종류별 사전 가중치 — 질의와 무관하게, 무엇이 '고칠 자리'로 알맞은가.
+# 컨테이너(저장소·기능)는 좌표가 아니고, 정의 자리(함수·클래스)가 좌표다.
+_KIND_BOOST = {
+    "function": 2.0, "class": 1.8, "endpoint": 1.6, "route": 1.6,
+    "gateway_route": 1.4, "file": 1.3, "api_call": 1.2,
+    # 컨테이너는 문서가 짧아(이름·경로뿐) 길이 정규화로 점수가 부풀기 쉽다.
+    # 그런데 "여기를 고쳐라"의 답이 될 수는 없으므로 확실히 눌러 둔다.
+    "feature": 0.5, "repo": 0.15,
+}
+# 테스트는 대개 고칠 대상이 아니라 고친 뒤 돌리는 것이다. 요청이 테스트를 지목하면 예외.
+_TEST_MARKERS = ("test", "spec", "__tests__", "conftest", "fixture")
+_TEST_PENALTY = 0.35
 # 이름은 노드의 정체라 더 무겁게, 경로는 그 다음.
 _FIELD_WEIGHT = {"name": 3, "path": 2, "repo": 1, "kind": 1, "meta": 1}
 _META_KEYS = ("summary", "doc", "package", "route_path", "module", "service", "handler")
@@ -60,12 +82,16 @@ class Bm25Index:
     def __init__(self, nodes: list[dict]):
         self.postings: dict[str, dict[str, int]] = {}
         self.length: dict[str, float] = {}
+        self.meta: dict[str, tuple[str, str]] = {}   # node_id → (종류, 경로소문자)
         for node in nodes:
             terms = node_terms(node)
             if not terms:
                 continue
             node_id = node["id"]
             self.length[node_id] = len(terms)
+            # 테스트 판정은 경로만으론 부족하다 — TestFooInline처럼 이름만 테스트인 것도 있다
+            self.meta[node_id] = (node.get("kind", ""),
+                                  f"{node.get('path', '')} {node.get('name', '')}".lower())
             counts: dict[str, int] = {}
             for term in terms:
                 counts[term] = counts.get(term, 0) + 1
@@ -106,9 +132,18 @@ class Bm25Index:
         return hits
 
     def search(self, query: str) -> dict[str, float]:
-        """쿼리 → {node_id: 점수}. 임계값으로 자르지 않는다 — 순위는 호출자가 정한다."""
+        """쿼리 → {node_id: 점수}. 임계값으로 자르지 않는다 — 순위는 호출자가 정한다.
+
+        점수 = BM25 × 폭넓게 맞은 정도 × 종류 가중치.
+        BM25만 쓰면 흔한 단어 하나를 여러 번 가진 노드가, 여러 단어를 고루 가진 노드를
+        이긴다. 요청이 막연할수록 그 편향이 커진다 — 그래서 '몇 개나 맞았나'를 곱한다.
+        """
+        tokens = [t for t in tokenize(query) if t not in _CODE_STOPWORDS]
+        if not tokens:
+            tokens = tokenize(query)          # 전부 걸러졌으면 원래 토큰으로
         scores: dict[str, float] = {}
-        for token in tokenize(query):
+        matched: dict[str, set[str]] = {}
+        for token in tokens:
             for term in self.match_terms(token):
                 # 접두사로 이어 붙인 어휘는 정확히 같은 말이 아니므로 그만큼만 인정한다
                 fidelity = len(token) / len(term) if term != token else 1.0
@@ -117,4 +152,21 @@ class Bm25Index:
                     length = self.length[node_id]
                     norm = tf * (_K1 + 1) / (tf + _K1 * (1 - _B + _B * length / self.avg_len))
                     scores[node_id] = scores.get(node_id, 0.0) + weight * norm
+                    matched.setdefault(node_id, set()).add(token)
+
+        wants_test = any(m in query.lower() for m in _TEST_MARKERS)
+        total = len(tokens)
+        for node_id, base in scores.items():
+            coverage = len(matched[node_id]) / total
+            scores[node_id] = base * (1.0 + coverage ** 1.5 * 2.0) * self._prior(node_id, wants_test)
         return scores
+
+    def _prior(self, node_id: str, wants_test: bool) -> float:
+        """질의와 무관한 가중치 — 무엇이 '고칠 자리'로 알맞은가."""
+        node = self.meta.get(node_id)
+        if node is None:
+            return 1.0
+        boost = _KIND_BOOST.get(node[0], 1.0)
+        if not wants_test and any(m in node[1] for m in _TEST_MARKERS):
+            boost *= _TEST_PENALTY
+        return boost
