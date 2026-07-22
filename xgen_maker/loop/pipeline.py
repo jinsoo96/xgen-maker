@@ -210,6 +210,7 @@ class MakerLoop:
             if expanded and expanded.get("keywords"):
                 keyword_query = " ".join(str(k) for k in expanded["keywords"])
                 journal.event("query_expand", "ok", keywords=keyword_query)
+                report["keywords"] = keyword_query   # 브랜치 이름 후보로도 쓴다
                 landing = _prefer(search(self.graph, keyword_query, k=8), landing, k=8)
             else:
                 journal.event("query_expand", "fail",
@@ -261,14 +262,25 @@ class MakerLoop:
             journal.event("learnings", "skipped", area=area,
                           reason="이 영역에 쌓인 교훈이 아직 없습니다")
 
-        # 브랜치명: 착지점(예: ontology-graph-section) 기반으로 의미있게 (팀 규칙: js·251205 금지)
+        # 브랜치명은 "무엇을 하려는가"를 담아야 한다. 착지 노드 이름을 먼저 쓰면
+        # 착지가 빗나갔을 때 요청과 무관한 이름이 된다(뒤로가기 버튼을 고쳐 달라는데
+        # fix/test-create-unknown-provider-falls-back-to-openai 가 나왔다).
+        # 그래서 요청 → (한글이면) 코드 용어 변환 결과 → 착지 이름 순으로 고른다.
         from ..config import suggest_branch, branch_name_issue
         prefix = intent_info["branch_prefix"] or "fix/"
-        landing_kw = [top["name"], *(n["name"] for n in landing[1:3])]
-        branch = suggest_branch(prefix, landing_kw)
-        if branch_name_issue(branch):  # 착지명이 부실하면 쿼리 확장 키워드로 폴백
-            branch = suggest_branch(prefix, query.split())
-        if branch_name_issue(branch):
+        branch = ""
+        # 코드 용어 변환은 LLM이 요청을 읽고 만든 것이라 가장 서술적이다.
+        # 그 다음이 요청의 영문 토큰, 마지막이 착지 이름.
+        for source in ((report.get("keywords") or "").split(),
+                       [w for w in query.split() if w.isascii()],
+                       [top["name"], *(n["name"] for n in landing[1:3])]):
+            if not source:
+                continue
+            candidate = suggest_branch(prefix, source)
+            if not branch_name_issue(candidate):
+                branch = candidate
+                break
+        if not branch:
             branch = prefix + journal.slug
         report["branch"] = branch
         report["repo"] = repo

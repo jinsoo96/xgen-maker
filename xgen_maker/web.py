@@ -134,8 +134,14 @@ _PAGE = """<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
  #gcode tr.gcf{background:var(--primary-subtle)} #gcode tr.gcf .gcn{color:var(--primary);font-weight:700}
  #glegend{display:flex;flex-wrap:wrap;gap:12px;margin-top:8px;font-size:12px;color:var(--text2)} #glegend .lg{display:inline-flex;align-items:center;gap:5px}
  #glegend .lg i{width:11px;height:11px;border-radius:50%;display:inline-block}
- #modehint{font-size:12px;padding:2px 2px 7px;line-height:1.5}
- td.cellwrap{white-space:normal;word-break:break-word;max-width:520px}
+ #draftbox{display:none;position:fixed;right:18px;bottom:86px;width:min(560px,46vw);max-height:70vh;z-index:40;background:var(--bg2);border:1px solid var(--border);border-radius:12px;overflow:auto;box-shadow:0 8px 32px rgba(0,0,0,.28)}
+ #draftbox .dfh{position:sticky;top:0;background:var(--bg2);display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--border)}
+ #draftbox .dfx{margin-left:auto;cursor:pointer;color:var(--muted)} #draftbox .dfx:hover{color:var(--text)}
+ #draftbox .dfcopy{padding:1px 9px;font-size:11px}
+ #draftbox .dfbody{margin:0;padding:12px;white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.6}
+ /* 한국어는 어절 단위로 끊어야 읽힌다. break-word는 글자 하나씩 쪼개 세로로 늘어뜨린다. */
+ td.cellwrap{white-space:normal;word-break:keep-all;overflow-wrap:anywhere;min-width:16em}
+ .histlist table{table-layout:auto;width:100%}
  .brgrp{margin:10px 0 16px} .brgrp table{margin-top:4px}
  .brdel{padding:1px 8px;font-size:11px;line-height:1.7;opacity:.55;white-space:nowrap}
  .brdel:hover{opacity:1;color:var(--danger);border-color:var(--danger)}
@@ -232,8 +238,8 @@ _PAGE = """<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
 <div class="tab" id="tab-deploy"><div class="muted">불러오고 있습니다</div></div>
 <div class="tab" id="tab-login"><div class="muted">불러오고 있습니다</div></div>
 <div class="tab" id="tab-diag"><div class="muted">불러오고 있습니다</div></div>
+<div id="draftbox"></div>
 <div id="lightbox"><div class="lbbar"><b id="lbcap"></b><a id="lbopen" href="#" target="_blank">새 탭에서 원본</a><span class="muted">아무 곳이나 누르면 닫힘 · Esc</span></div><img id="lbimg" alt=""></div>
-<div id="modehint" class="muted"></div>
 <form id="f"><input type="text" id="q" placeholder="예: 로그인 오류를 수정해줘 / 결제 API에 입력 검증을 추가해줘" autofocus>
  <select id="m" title="아래로 갈수록 더 많이 합니다(누적)">
   <option value="plan">사전 분석</option>
@@ -730,16 +736,6 @@ const GATES_PLAN=[['intent','의도 분류'],['kg_search','관련 코드 찾기'
 const GLABEL={}; GATES_ALL.concat(GATES_PLAN).forEach(([keys,label])=>
  keys.split(' ').forEach(kk=>{GLABEL[kk]=label;}));
 function gatesFor(mode){return mode==='plan'?GATES_PLAN:GATES_ALL;}
-const MODEDESC={
- plan:'고칠 자리를 찾아 알려줍니다. 코드와 브랜치를 만들지 않습니다.',
- observe:'분석에 더해 브랜치를 따고, 코드를 고치고, 테스트로 검증하고 커밋합니다. 내 PC에만 남습니다.',
- act:'개발에 더해 브랜치를 원격에 올리고 병합 요청을 만듭니다. 머지와 배포는 사람이 합니다.'};
-function showModeHint(){
- const m=document.getElementById('m'), h=document.getElementById('modehint');
- if(m&&h)h.textContent=MODEDESC[m.value]||'';
-}
-document.getElementById('m').addEventListener('change',showModeHint);
-showModeHint();
 function runstate(on,txt){const r=document.getElementById('runstate');r.classList.toggle('on',on);if(txt)document.getElementById('runstate-t').textContent=txt;}
 function resetPanel(mode){
  document.getElementById('gates').innerHTML=gatesFor(mode).map(g=>`<div class="g" data-s="${g[0]}"><span class=dot>○</span>${g[1]}</div>`).join('');
@@ -831,6 +827,20 @@ function deleteBranch(repo,name){
   }).catch(e=>alert('삭제 실패: '+(e.message||e)));
  }).catch(e=>alert('확인 실패: '+(e.message||e)));
 }
+// 병합 요청 초안 — 경로만 알려주면 사람이 파일을 찾아 열어야 한다. 그 자리에서 보여준다.
+function showDraft(sid){
+ jget('/api/draft?id='+encodeURIComponent(sid)).then(r=>{
+  const box=document.getElementById('draftbox');
+  if(!r.ok){box.innerHTML='<div class=dfh><b>병합 요청 초안</b><span class=dfx>✕</span></div><div class=muted style="padding:12px">'+esc(r.error||'초안을 열 수 없습니다')+'</div>';}
+  else{box.innerHTML='<div class=dfh><b>병합 요청 초안</b> <span class=muted>'+esc(sid)+'</span>'
+   +'<button class="dfcopy ghost">복사</button><span class=dfx>✕</span></div>'
+   +'<pre class=dfbody>'+esc(r.markdown)+'</pre>';}
+  box.style.display='block';
+  box.querySelector('.dfx').onclick=()=>{box.style.display='none';};
+  const cp=box.querySelector('.dfcopy');
+  if(cp)cp.onclick=()=>{navigator.clipboard.writeText(r.markdown).then(()=>{cp.textContent='복사됨';setTimeout(()=>cp.textContent='복사',1500);}).catch(()=>{cp.textContent='복사 실패';});};
+ }).catch(e=>alert('초안을 불러오지 못했습니다: '+(e.message||e)));
+}
 // 세션 목록 — 찾기·이어하기·지우기. 세션이 쌓이면 목록만으로는 원하는 걸 못 찾는다.
 function renderSessions(el,q){
  jget('/api/history?limit=200'+(q?'&q='+encodeURIComponent(q):'')).then(d=>{
@@ -878,6 +888,7 @@ function showSession(sid,target){
  jget('/api/session?id='+encodeURIComponent(sid)).then(s=>{
   let h=`<h4>${esc(s.query)||'(쿼리 없음)'}</h4><div class=muted style="margin-bottom:10px">결과 <span class="badge ${cls(s.outcome)}">${esc(outcomeLabel(s.outcome))}</span>${s.mr?` · <a href="${esc(s.mr)}" target=_blank>MR</a>`:''}</div>`;
   if(s.query) h+=`<button class="resumebtn ghost" style="margin-bottom:10px" data-q="${esc(s.query)}">▶ 이 작업 이어서 실행</button>`;
+  h+=`<button class="draftbtn ghost" style="margin:0 0 10px 6px" data-sid="${esc(sid)}">📄 병합 요청 초안</button>`;
   h+='<div class="side-h">진행 단계</div><div class="tl">'+s.steps.map(st=>`<div class="tlr ${st.status}"><span class="ti">${SICON[st.status]||'·'}</span><span class="ts">${esc(st.step)}</span><span class="td">${esc(st.summary)}</span></div>`).join('')+'</div>';
   if(s.summary_md) h+='<div class="side-h" style="margin-top:12px">SUMMARY.md</div><pre class="smd">'+esc(s.summary_md)+'</pre>';
   if(s.undoable) h+=`<div class="side-h" style="margin-top:12px">되돌리기</div><div class=muted style="font-size:12px;margin-bottom:6px">이 작업에서 만든 브랜치(${esc(s.branch)})를 삭제합니다. ${s.pushed?'원격에도 등록되어 있습니다':'로컬에만 있습니다'}.</div>`+
@@ -888,6 +899,8 @@ function showSession(sid,target){
   // document 전역 조회를 쓰면 먼저 그려진 탭의 버튼만 잡혀 나중 탭 버튼이 죽는다.
   const ub=d.querySelector('.undobtn');
   if(ub) ub.onclick=()=>doUndo(ub.dataset.sid,d.querySelector('.undoremote').checked,d);
+  const dbtn=d.querySelector('.draftbtn');
+  if(dbtn) dbtn.onclick=()=>showDraft(dbtn.dataset.sid);
   const rb=d.querySelector('.resumebtn');
   if(rb) rb.onclick=()=>{document.querySelector('nav button[data-t=run]').click();
    const q=document.getElementById('q');q.value=rb.dataset.q;q.focus();
@@ -929,9 +942,11 @@ document.getElementById('f').addEventListener('submit',e=>{
   else if(e.type==='result'){const r=e.report; let html='<b>결과: '+esc(outcomeLabel(r.outcome))+'</b>';
    if(r.landing&&r.landing.length)showLanding(r.landing);
    if(r.branch)html+='<br>'+(r.outcome==='plan_only'?'제안 브랜치명(아직 만들지 않음): ':'브랜치: ')+esc(r.branch); if(r.iterations)html+=' · 수렴 '+r.iterations+'회';
-   if(r.mr_draft)html+='<br>MR초안: '+esc(r.mr_draft); if(r.mr&&r.mr.url)html+='<br>MR: <a href="'+esc(r.mr.url)+'" target=_blank>'+esc(r.mr.url)+'</a>';
+   if(r.mr_draft&&r.session_dir)html+='<br><button class="draftbtn ghost" data-sid="'+esc(r.session_dir.split(/[\\/]/).pop())+'">📄 병합 요청 초안 보기</button>';
+   if(r.mr&&r.mr.url)html+='<br>MR: <a href="'+esc(r.mr.url)+'" target=_blank>'+esc(r.mr.url)+'</a>';
    if(r.answer)html+='<br>'+esc(r.answer).replace(/\\n/g,'<br>');
    const d=document.createElement('div');d.className='result';d.innerHTML=html;log.appendChild(d);log.scrollTop=log.scrollHeight;
+   const db=d.querySelector('.draftbtn'); if(db)db.onclick=()=>showDraft(db.dataset.sid);
    done(); loaded['history']=0; loaded['tests']=0;}  // 이력·테스트 갱신 유도
   else if(e.type==='stopped'){line('fail',e.message||'중지됨','■'); done();}
   else if(e.type==='error'){line('fail',e.message,'✗'); done();}
@@ -1926,6 +1941,16 @@ class MakerWebHandler(BaseHTTPRequestHandler):
                 self._json({"ok": True, "preview": True, **row})
             else:
                 self._json(delete_local(self.config, repo, name))
+        elif parsed.path == "/api/draft":
+            from .loop.history import session_path
+            sid = parse_qs(parsed.query).get("id", [""])[0]
+            target = session_path(self.config.worklogs_dir, sid)
+            draft = (target / "MR-DRAFT.md") if target else None
+            if draft is None or not draft.is_file():
+                self._json({"ok": False, "error": "이 작업에는 초안이 없습니다"})
+            else:
+                self._json({"ok": True, "session": sid,
+                            "markdown": draft.read_text(encoding="utf-8")})
         elif parsed.path == "/api/session-delete":
             # 지우는 건 되돌릴 수 없다. confirm=1 없으면 무엇이 지워지는지만 알려준다.
             from .loop.history import read_session_detail, session_path, delete_session
