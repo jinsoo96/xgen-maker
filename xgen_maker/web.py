@@ -652,9 +652,13 @@ function render(t){
    '<button id=uisnap>캡처 후 비교</button><button id=uibase class="ghost">기준으로 저장</button></div>'+
    '<div id=uiout class=muted style="font-size:12px">URL을 넣고 <b>캡처 후 비교</b>: 기준 화면과의 차이를 표시합니다. 기준이 없다면 <b>기준으로 저장</b>으로 먼저 등록하세요.</div>'+
    '<div id=uishots></div></div>';
-  if(d.baselines.length){h+='<h4>기준 화면</h4><div class=gal>'+d.baselines.map(b=>`<figure><img src="${esc(b.url)}" loading=lazy><figcaption>${esc(b.slug)}</figcaption></figure>`).join('')+'</div>';}
-  if(d.recent.length){h+='<h4>최근 비교 결과</h4><div class=gal>'+d.recent.map(r=>`<figure><img src="${esc(r.diff_url)}" loading=lazy><figcaption>${esc(r.route)} <span class=muted>${esc(r.session)}</span></figcaption></figure>`).join('')+'</div>';}
+  h+='<h4 style="margin-top:18px">캡처한 화면 <span class=muted>기준·캡처·차이를 모두 모았습니다</span></h4>'+
+   '<div class=sessbar><input id=shotq placeholder="화면 주소·작업·종류로 찾기 (예: ontology, diff)"><span id=shotn class=muted></span></div>'+
+   '<div id=shotgal class=muted style="font-size:12px">불러오고 있습니다</div>';
   el.innerHTML=h;
+  renderShots('');
+  const sq=document.getElementById('shotq');
+  if(sq)sq.onkeydown=e=>{if(e.key==='Enter')renderShots(sq.value.trim());};
   const uiurl=document.getElementById('uiurl'),uiout=document.getElementById('uiout'),uishots=document.getElementById('uishots');
   const run=(save)=>{const u=uiurl.value.trim();if(!u){uiout.textContent='주소를 입력하세요.';return;}
    uiout.innerHTML='<span class=spin style="display:inline-block;width:14px;height:14px;vertical-align:middle"></span> 화면을 캡처하고 있습니다';uishots.innerHTML='';
@@ -830,6 +834,22 @@ function deleteBranch(repo,name){
    renderLocalBranches();
   }).catch(e=>alert('삭제 실패: '+(e.message||e)));
  }).catch(e=>alert('확인 실패: '+(e.message||e)));
+}
+// 캡처한 화면 — 장수나 세션 수로 자르지 않는다. 찾으려고 보는 화면이다.
+const SHOTKIND={baseline:'기준',snapshot:'캡처',diff:'차이'};
+function renderShots(q){
+ const box=document.getElementById('shotgal'), num=document.getElementById('shotn');
+ if(!box)return;
+ jget('/api/ui-images'+(q?'?q='+encodeURIComponent(q):'')).then(d=>{
+  const rows=d.images||[];
+  if(num)num.textContent=rows.length+'장';
+  if(!rows.length){box.innerHTML='<span class=muted>'+(q?'찾는 화면이 없습니다.':'아직 캡처한 화면이 없습니다. 위에서 주소를 넣고 캡처해 보세요.')+'</span>';return;}
+  box.innerHTML='<div class=gal>'+rows.map(s=>
+   `<figure><img src="${esc(s.url)}" loading=lazy alt="${esc(s.route)}">`
+   +`<figcaption><b>${esc(SHOTKIND[s.kind]||s.kind)}</b> ${esc(s.route)}`
+   +(s.session?` <span class=muted>${esc(s.session)}</span>`:'')
+   +`<br><span class=muted>${esc(s.when)} · ${(s.bytes/1024).toFixed(0)}KB</span></figcaption></figure>`).join('')+'</div>';
+ }).catch(e=>{box.innerHTML='<span class=muted>화면을 불러오지 못했습니다: '+esc(e.message||e)+'</span>';});
 }
 // 병합 요청 초안 — 경로만 알려주면 사람이 파일을 찾아 열어야 한다. 그 자리에서 보여준다.
 function showDraft(sid){
@@ -1697,19 +1717,56 @@ class MakerWebHandler(BaseHTTPRequestHandler):
         if baseline_dir.is_dir():
             for p in sorted(baseline_dir.glob("*.png")):
                 baselines.append({"slug": p.stem, "url": f"/api/ui-image?f=kg/ui-baselines/{p.name}"})
-        # 세션에 남은 검증 아티팩트(스냅샷·diff) 수집
-        recent = []
-        wl = Path(self.config.worklogs_dir)
-        if wl.is_dir():
-            for sd in sorted([p for p in wl.iterdir() if p.is_dir()], reverse=True)[:20]:
-                for diff in sorted(sd.glob("diff_*.png")):
-                    recent.append({"session": sd.name, "route": diff.stem[5:],
-                                   "diff_url": f"/api/ui-image?f=worklogs/{sd.name}/{diff.name}"})
-                if len(recent) >= 12:
-                    break
+        shots = self._ui_images()
         return {"preview_base": base, "reachable": http_reachable(base, timeout=5) if base else False,
                 "pillow": pillow, "playwright": playwright,
-                "baselines": baselines, "recent": recent[:12]}
+                "baselines": baselines, "images": shots,
+                # 예전 이름 — 화면이 갱신되기 전에도 깨지지 않게 남겨 둔다
+                "recent": [s for s in shots if s["kind"] == "diff"]}
+
+    def _ui_images(self, needle: str = "") -> list[dict]:
+        """캡처된 화면 전부. 세션 수나 장수로 자르지 않는다 — 찾으려고 보는 화면이다.
+
+        기준(baseline)·캡처(snapshot)·차이(diff)를 한 목록으로 모아, 어느 작업의
+        어느 화면인지와 언제 찍었는지를 함께 준다. 그래야 검색이 가능하다.
+        """
+        from pathlib import Path
+        import datetime
+        found: list[dict] = []
+
+        def add(path: Path, kind: str, route: str, session: str) -> None:
+            try:
+                stat = path.stat()
+            except OSError:
+                return
+            rel = path.relative_to(Path(self.config.kg_path).parent.parent).as_posix()
+            found.append({
+                "kind": kind, "route": route, "session": session,
+                "name": path.name, "bytes": stat.st_size,
+                "when": datetime.datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M"),
+                "url": f"/api/ui-image?f={rel}",
+            })
+
+        baseline_dir, snap_dir = self._ui_dirs()
+        for directory, kind in ((baseline_dir, "baseline"), (snap_dir, "snapshot")):
+            if directory.is_dir():
+                for p in sorted(directory.glob("*.png")):
+                    add(p, kind, p.stem, "")
+        wl = Path(self.config.worklogs_dir)
+        if wl.is_dir():
+            for sd in sorted([p for p in wl.iterdir() if p.is_dir()], reverse=True):
+                for p in sorted(sd.glob("*.png")):
+                    stem = p.stem
+                    kind = "diff" if stem.startswith("diff_") else "snapshot"
+                    route = stem[5:] if kind == "diff" else stem
+                    add(p, kind, route, sd.name)
+
+        found.sort(key=lambda s: s["when"], reverse=True)
+        if needle:
+            low = needle.lower()
+            found = [s for s in found
+                     if low in f"{s['route']} {s['session']} {s['name']} {s['kind']}".lower()]
+        return found
 
     def _ui_snap(self, qs: dict) -> dict:
         # 임의 URL 스냅샷 → (baseline=1이면 기준 저장) → 기준 있으면 픽셀 diff(R11·R23).
@@ -1849,6 +1906,8 @@ class MakerWebHandler(BaseHTTPRequestHandler):
             self._json(self._annotate(parse_qs(parsed.query)))
         elif parsed.path == "/api/node-code":
             self._json(self._node_code(parse_qs(parsed.query).get("id", [""])[0]))
+        elif parsed.path == "/api/ui-images":
+            self._json({"images": self._ui_images(parse_qs(parsed.query).get("q", [""])[0].strip())})
         elif parsed.path == "/api/ui-status":
             self._json(self._ui_status())
         elif parsed.path == "/api/ui-snap":
