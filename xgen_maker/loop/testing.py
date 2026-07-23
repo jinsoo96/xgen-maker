@@ -139,7 +139,7 @@ def check_node_tests(repo_root: Path, changed: list[str], timeout: int = 600,
             "cross_package": scope is not None and len(outputs) > 0}
 
 
-_TEST_CHECKS = ("pytest", "node_test")
+_TEST_CHECKS = ("pytest", "node_test", "cargo_test")
 
 
 def regression_verdict(results: list[dict]) -> str:
@@ -160,6 +160,21 @@ def regression_verdict(results: list[dict]) -> str:
     return "none"
 
 
+def check_rust_tests(repo_root: Path, changed: list[str], timeout: int = 600) -> dict:
+    """Rust는 cargo test. 툴체인이 없으면 정직하게 사유를 남긴다(cargo가 있으면 실제 실행)."""
+    import shutil
+    if not any(f.endswith(".rs") for f in changed):
+        return _skip("cargo_test", "rust 변경 없음", "na")
+    if not (repo_root / "Cargo.toml").exists():
+        return _skip("cargo_test", "Cargo.toml 없음", "na")
+    if not shutil.which("cargo"):
+        return _skip("cargo_test", "Rust 툴체인 없음 — rustup 설치 필요", "env")
+    code, output = _run(["cargo", "test", "--quiet"], repo_root, timeout)
+    if code == 0:
+        return {"name": "cargo_test", "status": "passed", "output": output[-400:]}
+    return {"name": "cargo_test", "status": "failed", "output": output[-1500:]}
+
+
 def run_checks(repo_root: str | Path, changed: list[str], test_timeout: int = 600,
                strict_regression: bool = False, graph=None, repo: str = "") -> dict:
     """전체 검증 실행. blocked=True면 MR 진행 차단.
@@ -169,10 +184,14 @@ def run_checks(repo_root: str | Path, changed: list[str], test_timeout: int = 60
     """
     repo_root = Path(repo_root)
     scope = affected_node_files(graph, changed, repo) if graph is not None else None
+    # pytest는 빠진 PyPI 의존성을 격리 캐시에 깔아 가며 실제로 돌린다(testenv).
+    # "의존성 없어서 skip"이 아니라, 깔 수 있는 건 깔고 진짜 테스트한다.
+    from .testenv import run_pytest_with_deps
     results = [
         check_python_syntax(repo_root, changed),
-        check_pytest(repo_root, changed, test_timeout),
+        run_pytest_with_deps(repo or str(repo_root), repo_root, changed, test_timeout),
         check_node_tests(repo_root, changed, test_timeout, scope=scope),
+        check_rust_tests(repo_root, changed, test_timeout),
     ]
     verdict = regression_verdict(results)
     if strict_regression and verdict == "unverified":
