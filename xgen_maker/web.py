@@ -149,6 +149,7 @@ _PAGE = """<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
  .brgrp{margin:10px 0 16px} .brgrp table{margin-top:4px}
  .brdel{padding:1px 8px;font-size:11px;line-height:1.7;opacity:.55;white-space:nowrap}
  .brdel:hover{opacity:1;color:var(--danger);border-color:var(--danger)}
+ .modenote{font-size:12px;color:var(--muted);padding:0 6px;white-space:nowrap;cursor:help}
  .sessbar{display:flex;gap:10px;align-items:center;margin-bottom:10px}
  .sessbar input{flex:1;max-width:420px;padding:7px 11px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);color:var(--text)}
  .sessdel{padding:1px 8px;font-size:11px;line-height:1.7;opacity:.5;white-space:nowrap} .sessdel:hover{opacity:1;color:var(--danger);border-color:var(--danger)}
@@ -245,11 +246,7 @@ _PAGE = """<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
 <div id="draftbox"></div>
 <div id="lightbox"><div class="lbbar"><b id="lbcap"></b><a id="lbopen" href="#" target="_blank">새 탭에서 원본</a><span class="muted">아무 곳이나 누르면 닫힘 · Esc</span></div><img id="lbimg" alt=""></div>
 <form id="f"><input type="text" id="q" placeholder="예: 로그인 오류를 수정해줘 / 결제 API에 입력 검증을 추가해줘" autofocus>
- <select id="m" title="아래로 갈수록 더 많이 합니다(누적)">
-  <option value="plan">사전 분석</option>
-  <option value="observe">개발</option>
-  <option value="act">브랜치 푸시·MR 생성</option>
- </select>
+ <span class=modenote title="지식그래프에서 찾아 → 브랜치 → 고치고 → 검증 → 커밋 → MR 초안까지. 원격 푸시는 안 합니다.">브랜치 따서 MR 초안까지</span>
  <button class="act" id="go">실행</button><button type="button" id="stopbtn" class="danger" style="display:none">■ 중지</button></form>
 <script>
 const log=document.getElementById('log'), q=document.getElementById('q'), go=document.getElementById('go'), stopbtn=document.getElementById('stopbtn');
@@ -737,7 +734,7 @@ const STEPKO={intent:'의도 분류',kg_search:'관련 코드 찾기',query_expa
  ui_verify:'화면 검증',deploy_test:'배포 검증',release:'릴리즈 경로',commit:'커밋',
  push:'푸시',mr_create:'MR 생성',mr_ready:'MR 준비',plan_only:'분석 정리',answer:'답변',
  kg_refresh:'그래프 갱신',cost:'사용량',session_start:'시작',session_end:'종료'};
-const GATES_ALL=[['intent','의도 분류'],['kg_search','관련 코드 찾기'],['fetch_latest','최신 코드 동기화'],
+const GATES_ALL=[['intent','의도 분류'],['kg_search','지식그래프 착지'],['fetch_latest','최신 코드'],
  ['branch','브랜치 생성'],['implement','구현(에이전트)'],['checks','검증(테스트·회귀)'],
  ['judge','품질 게이트'],['mr_ready','MR 준비']];
 const GATES_PLAN=[['intent','의도 분류'],['kg_search','관련 코드 찾기'],['plan_only answer','분석 정리']];
@@ -945,7 +942,7 @@ document.getElementById('f').addEventListener('submit',e=>{
  e.preventDefault(); const query=q.value.trim(); if(!query)return;
  document.querySelector('nav button[data-t=run]').click();
  go.disabled=true; stopbtn.style.display='inline-block'; line('step',query,'▶'); q.value='';
- const mode=document.getElementById('m').value; resetPanel(mode);
+ const mode='observe'; resetPanel(mode);   // 모드 나누지 않는다 — 항상 MR 전단계까지
  window.__runid=null;
  if(window.__es){try{window.__es.close()}catch(_){}}
  const es=new EventSource('/api/run?q='+encodeURIComponent(query)+'&mode='+mode);

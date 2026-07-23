@@ -41,9 +41,11 @@ class TestCmdRunModeMapping(unittest.TestCase):
         self.assertTrue(cfg.allow_write)   # 예전엔 mode만 바뀌고 write는 꺼져 push 불가였음
         self.assertEqual(cfg.mode, "act")
 
-    def test_no_mode_keeps_safe_default(self):
+    def test_no_mode_defaults_to_observe(self):
+        """모드를 나누지 않는다 — 기본은 MR 전단계까지(observe): 로컬 커밋·초안, 푸시 없음."""
         cfg = _run(None)
-        self.assertFalse(cfg.allow_write)  # 미지정 = config 기본(안전=plan-only)
+        self.assertEqual(cfg.mode, "observe")
+        self.assertTrue(cfg.allow_write)      # 로컬 브랜치·커밋은 한다(원격은 안 나감)
 
 
 if __name__ == "__main__":

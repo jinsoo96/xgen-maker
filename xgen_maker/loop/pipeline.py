@@ -200,17 +200,17 @@ class MakerLoop:
             # 넓은 말(session, token, data …)을 잔뜩 뱉으면 그 말을 우연히 가진 노드가
             # 점수를 쓸어간다("로그인 처리"가 SSE 세션 관리로 갔다). 동의어 나열이 아니라
             # 그 코드가 실제로 가질 법한 이름을 요구한다.
+            # 프롬프트는 짧게. 규칙을 길게 늘어놓으면 claude CLI가 JSON을 못 내고 실패한다
+            # (실측: 긴 프롬프트 → None, 짧은 프롬프트 → 깨끗한 단어). 지어낸 클래스명 대신
+            # 요청의 도메인 단어를 영어로 — 그게 실제 코드와 훨씬 잘 맞는다.
             expanded = llm.json_chat(config.llm_base, config.llm_model, [
                 {"role": "system", "content":
-                 'You search a code knowledge graph. Given a dev request: (1) name the '
-                 'identifiers the target code most likely has — function, class, file, '
-                 'or route names. Be specific: prefer "login_handler" over "auth", '
-                 '"ToolCard" over "component". Omit generic words that would match '
-                 'unrelated code. (2) Write a git branch slug naming the WORK, not the '
-                 'code location: 2-4 lowercase words, hyphenated, no repetition, no '
-                 'prefix. e.g. "back-button-style", "health-version-field". '
-                 'Reply JSON only: {"keywords": ["...", "..."], "branch": "..."}'},
-                {"role": "user", "content": query}], max_tokens=300, timeout=45)
+                 'Extract 4-7 plain lowercase english search words from the dev request '
+                 '(the domain nouns/verbs, e.g. gateway, login, token, validate). Keep any '
+                 'service name given (gateway, workflow, frontend, model). Do not invent '
+                 'class names. Also give a 2-4 word hyphen branch slug for the work. '
+                 'Reply JSON only: {"keywords": ["..."], "branch": "..."}'},
+                {"role": "user", "content": query}], max_tokens=200, timeout=45)
             if expanded and expanded.get("keywords"):
                 keyword_query = " ".join(str(k) for k in expanded["keywords"])
                 journal.event("query_expand", "ok", keywords=keyword_query)

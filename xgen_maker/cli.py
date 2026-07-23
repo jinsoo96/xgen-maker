@@ -293,12 +293,9 @@ def cmd_run(args) -> None:
     config = MakerConfig.from_file(args.config) if args.config else MakerConfig()
     if args.kg:
         config.kg_path = args.kg
-    if args.mode:
-        # 웹/chat과 동일 매핑: plan=쓰기없음(분석·MR초안만), observe/act=쓰기(로컬/푸시)
-        # mode도 함께 맞춘다. plan인데 설정 파일의 mode(observe 등)가 남아 있으면
-        # 로그에 "observe 모드라서 건너뜀"처럼 사실과 다른 사유가 찍힌다.
-        config.mode = args.mode
-        config.allow_write = args.mode != "plan"
+    # 기본은 MR 전단계까지(observe) — 모드를 나누지 않는다. --mode로만 바꾼다.
+    config.mode = args.mode or "observe"
+    config.allow_write = config.mode != "plan"
     loop = MakerLoop(config)
     report = loop.run(args.query)
     print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
