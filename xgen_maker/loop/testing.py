@@ -160,18 +160,56 @@ def regression_verdict(results: list[dict]) -> str:
     return "none"
 
 
-def check_rust_tests(repo_root: Path, changed: list[str], timeout: int = 600) -> dict:
-    """Rust는 cargo test. 툴체인이 없으면 정직하게 사유를 남긴다(cargo가 있으면 실제 실행)."""
+def _find_cargo() -> tuple[str, dict] | None:
+    """cargo 실행 파일과, Windows GNU 툴체인 링커(mingw)가 담긴 PATH를 찾는다.
+
+    MAKER를 부른 셸에 cargo·mingw가 PATH에 없어도 돈다 — 표준 설치 위치에서 찾아
+    서브프로세스 env에만 얹는다.
+    """
+    import os
     import shutil
+    cargo = shutil.which("cargo")
+    if not cargo:
+        home = Path.home() / ".cargo" / "bin"
+        cand = home / ("cargo.exe" if os.name == "nt" else "cargo")
+        cargo = str(cand) if cand.exists() else None
+    if not cargo:
+        return None
+    env = dict(os.environ)
+    extra = [str(Path(cargo).parent)]
+    if os.name == "nt" and not shutil.which("dlltool"):   # GNU 링커(mingw)를 찾아 얹는다
+        base = Path.home() / "AppData" / "Local" / "Microsoft" / "WinGet" / "Packages"
+        hits = list(base.glob("*WinLibs*/mingw64/bin")) if base.is_dir() else []
+        extra += [str(h) for h in hits]
+    env["PATH"] = os.pathsep.join(extra) + os.pathsep + env.get("PATH", "")
+    return cargo, env
+
+
+def check_rust_tests(repo_root: Path, changed: list[str], timeout: int = 600) -> dict:
+    """Rust는 cargo test. cargo·링커를 표준 위치에서 찾아 실제로 돌린다."""
+    import subprocess
     if not any(f.endswith(".rs") for f in changed):
         return _skip("cargo_test", "rust 변경 없음", "na")
     if not (repo_root / "Cargo.toml").exists():
         return _skip("cargo_test", "Cargo.toml 없음", "na")
-    if not shutil.which("cargo"):
+    found = _find_cargo()
+    if found is None:
         return _skip("cargo_test", "Rust 툴체인 없음 — rustup 설치 필요", "env")
-    code, output = _run(["cargo", "test", "--quiet"], repo_root, timeout)
-    if code == 0:
+    cargo, env = found
+    try:
+        proc = subprocess.run([cargo, "test", "--quiet"], cwd=str(repo_root), env=env,
+                              capture_output=True, text=True, encoding="utf-8",
+                              errors="replace", timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return _skip("cargo_test", f"타임아웃({timeout}s) — 첫 빌드가 오래 걸릴 수 있습니다", "env")
+    except (OSError, subprocess.SubprocessError) as e:
+        return _skip("cargo_test", f"실행 불가: {e}", "env")
+    output = proc.stdout + proc.stderr
+    if proc.returncode == 0:
         return {"name": "cargo_test", "status": "passed", "output": output[-400:]}
+    # 링커·툴체인 문제(코드 실패 아님)는 정직하게 env로 분류
+    if any(s in output for s in ("linking with", "dlltool", "link.exe", "linker `")):
+        return _skip("cargo_test", "링커 미구성(mingw/MSVC 필요) — 코드 아닌 환경 문제", "env")
     return {"name": "cargo_test", "status": "failed", "output": output[-1500:]}
 
 

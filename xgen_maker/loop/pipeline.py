@@ -495,7 +495,11 @@ class MakerLoop:
                           reason="프리뷰 주소(preview_base) 미설정 — 렌더할 화면이 없습니다")
         else:
             from .ui_verify import ui_verify
-            ui_report = ui_verify(config, self.graph, changed, repo, journal.dir)
+            # 프리뷰가 서빙하는 것 = 사람의 메인 체크아웃. 격리를 안 썼으면 우리가 고친
+            # 게 그 체크아웃이라(핫리로드로) 변경이 프리뷰에 반영된다 = 실측. 격리를 썼으면
+            # 별도 worktree라 프리뷰엔 안 비치므로 = 기존 화면 회귀검사. 이 구분을 남긴다.
+            ui_report = ui_verify(config, self.graph, changed, repo, journal.dir,
+                                  live=not isolate)
             journal.event("ui_verify", "skipped" if ui_report.get("skipped")
                           else ("fail" if ui_report.get("problems") else "ok"),
                           **{k: v for k, v in ui_report.items() if k != "results"})

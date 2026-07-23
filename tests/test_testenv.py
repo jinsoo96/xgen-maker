@@ -90,3 +90,21 @@ class TestAutoInstallsMissingDep(unittest.TestCase):
             # 핵심: 빠진 의존성을 스스로 깔아 테스트를 통과시켰다
             self.assertEqual(r["status"], "passed", r.get("reason") or r.get("output"))
             self.assertIn(probe, r["installed"])
+
+
+class TestRustCheck(unittest.TestCase):
+    """Rust는 cargo를 스스로 찾아 돌린다 — 부른 셸 PATH에 없어도."""
+
+    def test_no_rs_change_skips(self):
+        from xgen_maker.loop.testing import check_rust_tests
+        with tempfile.TemporaryDirectory() as tmp:
+            r = check_rust_tests(Path(tmp), ["a.py"], timeout=30)
+            self.assertEqual(r["status"], "skipped")
+            self.assertIn("rust 변경 없음", r["reason"])
+
+    def test_no_cargo_toml_skips(self):
+        from xgen_maker.loop.testing import check_rust_tests
+        with tempfile.TemporaryDirectory() as tmp:
+            r = check_rust_tests(Path(tmp), ["src/x.rs"], timeout=30)
+            self.assertEqual(r["status"], "skipped")
+            self.assertIn("Cargo.toml", r["reason"])

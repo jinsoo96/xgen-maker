@@ -91,7 +91,13 @@ def describe(step: str, status: str, data: dict) -> str:
         return f"품질 점수 {get('score', 0)} ({get('source', '')})"
     if step == "iteration":
         return "통과 — 다음 단계로" if get("decision") == "stop" else "기준 미달 — 다시 시도"
-    if step in ("verify", "ui_verify", "deploy_test"):
+    if step == "ui_verify":
+        if status == "skipped":
+            return get("reason", "")
+        n = get("routes", 0)
+        head = f"화면 {n}개 검증 · 문제 {get('problems', 0)}건"
+        return f"{head} — {get('verified', '')}" if get("verified") else head
+    if step in ("verify", "deploy_test"):
         return get("reason", "") if status == "skipped" else get("note", "") or status
     if step == "release":
         return f"배포 환경 {get('env', '')} · 경로 {' → '.join(get('promotion') or [])}"

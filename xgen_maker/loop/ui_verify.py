@@ -125,10 +125,11 @@ def _url(base: str, route_path: str) -> str:
 
 
 def ui_verify(config, graph, changed_files: list[str], repo: str,
-              session_dir: Path, vision: bool = True) -> dict:
+              session_dir: Path, vision: bool = True, live: bool = True) -> dict:
     """영향 라우트별로 스냅샷 + (baseline 있으면)픽셀diff + (키 있으면)비전판정.
 
     인증 자격(env XGEN_MAKER_UI_EMAIL/PASSWORD)이 있으면 로그인 후 실제 보호화면을 캡처.
+    live=True면 프리뷰가 이번 변경을 비추는 상태(실측), False면 기존 화면 회귀검사.
     """
     base = getattr(config, "preview_base", "")
     if not base:
@@ -181,4 +182,7 @@ def ui_verify(config, graph, changed_files: list[str], repo: str,
                 if (r.get("vision") and not r["vision"].get("renders_ok"))
                 or (r.get("pixel_diff", {}).get("changed_ratio", 0) > 0.05)]
     return {"skipped": False, "routes": len(results), "results": results,
-            "problems": len(problems)}
+            "problems": len(problems), "live": live,
+            "verified": ("이번 변경이 반영된 화면을 검증" if live
+                         else "기존 화면 회귀검사(격리 작업이라 변경은 프리뷰 미반영 — "
+                              "실측하려면 작업 트리를 커밋/정리해 격리 없이 실행)")}
