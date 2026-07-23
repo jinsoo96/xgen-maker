@@ -342,13 +342,20 @@ class MakerLoop:
         try:
             repo_git = GitRepo(repo_path)
             base_branch = repo_git.current_branch()
-            # 격리 worktree를 쓰면 사람의 체크아웃은 건드리지 않으므로 더러워도 된다.
-            # 오히려 그게 안전장치다. 격리를 안 쓸 때만 깨끗한 트리를 요구한다.
-            isolate = getattr(config, "isolate_worktree", False)
-            if not isolate and not repo_git.is_clean():
-                raise GitOpsError(
-                    "워킹트리에 커밋 안 된 변경이 있습니다 — 격리 작업공간을 켜면"
-                    "(isolate_worktree) 사람 체크아웃을 건드리지 않고 진행할 수 있습니다")
+            # 격리 결정을 알아서 한다. 트리가 깨끗하면 격리를 끈다 — 변경이 그 자리에
+            # 반영돼 프리뷰(핫리로드 dev 서버)가 실제 결과를 비춘다. 더러우면 격리를
+            # 켠다 — 사람 체크아웃을 건드리지 않고 별도 worktree에서 작업한다.
+            # "auto"가 이 판단을 하고, True/False는 명시적 강제다.
+            iso_cfg = getattr(config, "isolate_worktree", "auto")
+            clean = repo_git.is_clean()
+            if iso_cfg == "auto":
+                isolate = not clean
+            else:
+                isolate = bool(iso_cfg)
+                if not isolate and not clean:
+                    raise GitOpsError(
+                        "워킹트리에 커밋 안 된 변경이 있습니다 — isolate_worktree를 auto나 "
+                        "true로 두면 사람 체크아웃을 건드리지 않고 진행합니다")
             base_ref, changed_since = "", []
             fetch_sha = ""
             if getattr(config, "fetch_latest", False):
@@ -363,7 +370,7 @@ class MakerLoop:
             worktree_path = None
             main_git = repo_git
             self._main_git = main_git
-            if getattr(config, "isolate_worktree", False):
+            if isolate:                          # 위에서 auto/강제를 이미 판단했다
                 import tempfile
                 worktree_path = Path(tempfile.mkdtemp(prefix="maker-wt-"))
                 self._worktree = worktree_path  # 실패/조기return에도 finally가 정리

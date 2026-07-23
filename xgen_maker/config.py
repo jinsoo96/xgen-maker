@@ -58,7 +58,9 @@ class MakerConfig:
     # 브랜치보다 한참 뒤처져 있어(실측 544커밋), 워킹트리만 보면 지도가 낡는다.
     graph_ref: str = "auto"
     fetch_latest: bool = True                              # 작업 전 origin/target 최신 fetch + KG 갱신
-    isolate_worktree: bool = False                         # tmp git worktree 격리(동시실행 충돌 방지)
+    # "auto"=트리가 더러우면 격리(사람 체크아웃 보호), 깨끗하면 그 자리 작업
+    # (변경이 프리뷰에 반영). True/False는 명시적 강제.
+    isolate_worktree: str | bool = "auto"
     release_stages: list = field(default_factory=lambda: [  # develop→stg→main 릴리즈 사다리
         {"branch": "develop", "env": "dev", "role": "개발 통합"},
         {"branch": "stg", "env": "stg", "role": "스테이징 검증"},
