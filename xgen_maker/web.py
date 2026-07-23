@@ -633,7 +633,7 @@ function render(t){
   let h='<h3>테스트 기록 <span class=muted>코드 변경마다 실행된 검증 결과입니다</span></h3>';
   h+='<div class=muted style="margin-bottom:10px">진행 중인 검증은 <b>실행</b> 탭에서 확인할 수 있습니다. 항목을 선택하면 상세 내용을 표시합니다.</div>';
   if(!d.runs.length){h+='<div class=muted>아직 검증 기록이 없습니다. 코드를 변경하는 작업을 실행하면 결과가 기록됩니다.</div>';el.innerHTML=h;return;}
-  h+='<div class="histcols"><div class="histlist"><table><tr><th>쿼리</th><th>반복</th><th>sandbox</th><th>checks</th><th>judge</th></tr>'+
+  h+='<div class="histcols"><div class="histlist"><table><tr><th>쿼리</th><th>반복</th><th>격리 실행</th><th>테스트·검사</th><th>품질 평가</th></tr>'+
    d.runs.map(r=>`<tr class="hrow" data-sid="${esc(r.session)}"><td class=cellwrap title="${esc(r.query)}">${esc(r.query)}</td><td>${r.iterations}</td><td><span class="badge ${cls(r.sandbox)}">${esc(r.sandbox)}</span></td><td><span class="badge ${cls(r.checks_status)}">${esc(r.checks_status)}</span></td><td><span class="badge ${cls(r.judge)}">${esc(r.judge)}</span>${r.judge_source?` <span class=muted style="font-size:11px">${r.judge_source==='heuristic'?'기본 평가':'AI 평가'}${r.judge_score!=null?' '+r.judge_score:''}</span>`:''}</td></tr>`).join('')+'</table></div>'+
    '<aside id="testdetail"><div class=muted>왼쪽에서 항목을 선택하면 상세 내용을 표시합니다.</div></aside></div>';
   el.innerHTML=h;

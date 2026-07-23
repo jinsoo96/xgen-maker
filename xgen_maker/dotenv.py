@@ -49,6 +49,36 @@ def find_env() -> Path | None:
     return None
 
 
+def write_env(values: dict[str, str], path: str | Path | None = None) -> dict:
+    """자격·설정을 .env에 쓴다 — 있는 키는 갱신, 없으면 추가, 나머지 줄은 보존.
+
+    로그인·설정을 저장하면 .env에 자동 반영돼, 다음 실행부터 재입력이 필요 없다.
+    빈 값은 지운다(키 제거). 주석·순서는 건드리지 않는다.
+    """
+    env_path = Path(path) if path else (find_env() or
+                                        Path(__file__).resolve().parent.parent / ".env")
+    existing = env_path.read_text(encoding="utf-8").splitlines() if env_path.is_file() else []
+    remaining = dict(values)
+    out: list[str] = []
+    for raw in existing:
+        stripped = raw.strip()
+        body = stripped[len("export "):].strip() if stripped.startswith("export ") else stripped
+        key = body.partition("=")[0].strip() if ("=" in body and not stripped.startswith("#")) else None
+        if key is not None and key in remaining:
+            val = remaining.pop(key)
+            if val == "":               # 빈 값 = 삭제
+                continue
+            out.append(f"{key}={val}")
+        else:
+            out.append(raw)
+    for key, val in remaining.items():   # 새 키는 끝에
+        if val != "":
+            out.append(f"{key}={val}")
+    env_path.parent.mkdir(parents=True, exist_ok=True)
+    env_path.write_text("\n".join(out) + "\n", encoding="utf-8")
+    return {"path": str(env_path), "keys": [k for k, v in values.items() if v != ""]}
+
+
 def load_env(path: str | Path | None = None, override: bool = False) -> dict:
     """반환 {loaded, path, keys}. 이미 있는 env는 기본 보존(override=False)."""
     global _LOADED

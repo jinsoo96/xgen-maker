@@ -93,7 +93,7 @@ def load_auth() -> Auth:
     return auth
 
 
-def save_auth(auth: Auth) -> Path:
+def save_auth(auth: Auth, write_env_file: bool = True) -> Path:
     AUTH_DIR.mkdir(parents=True, exist_ok=True)
     AUTH_FILE.write_text(json.dumps(asdict(auth), ensure_ascii=False, indent=1),
                          encoding="utf-8")
@@ -101,6 +101,20 @@ def save_auth(auth: Auth) -> Path:
         os.chmod(AUTH_FILE, 0o600)  # 키 파일 권한 축소(가능한 OS에서)
     except OSError:
         pass
+    # 자격을 .env에도 자동 반영 — 다음 실행부터 재입력이 필요 없다(요구사항).
+    # 값이 있는 것만 쓴다(빈 값은 write_env가 해당 키를 지운다).
+    if write_env_file:
+        try:
+            from .dotenv import write_env
+            write_env({
+                "XGEN_MAKER_GITLAB_URL": auth.gitlab_url,
+                "XGEN_MAKER_GITLAB_TOKEN": auth.gitlab_token,
+                "ANTHROPIC_API_KEY": auth.api_key if auth.provider == "anthropic" else "",
+                "XGEN_MAKER_LLM_KEY": auth.api_key if auth.provider == "vllm" else "",
+                "XGEN_MAKER_LLM_BASE": auth.base if auth.provider == "vllm" else "",
+            })
+        except Exception:  # noqa: BLE001 — .env 쓰기 실패가 로그인 자체를 막지 않게
+            pass
     return AUTH_FILE
 
 
