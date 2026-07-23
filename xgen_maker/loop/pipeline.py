@@ -226,7 +226,9 @@ class MakerLoop:
         # 요청이 화면 주소·파일·심볼을 직접 지목했다면 그건 추측할 필요가 없다.
         # 그래프에서 그대로 찾아 관계를 타고 나가면 범위가 정확히 좁혀진다.
         # 이름 맞추기(검색)는 그 범위 안에서만 하면 되므로 엉뚱한 저장소로 샐 수 없다.
-        anchors = find_anchors(self.graph, query)
+        # 코드 용어 변환 결과를 hint로 넘긴다 — 같은 경로가 여러 저장소에 있을 때
+        # 요청이 지목한 저장소로 좁히는 데 쓴다("게이트웨이"→gateway)
+        anchors = find_anchors(self.graph, query, report.get("keywords", ""))
         if anchors:
             scope = expand(self.graph, anchors)
             ranked = rank_within(scope, query, report.get("keywords", ""), k=8)
@@ -340,8 +342,13 @@ class MakerLoop:
         try:
             repo_git = GitRepo(repo_path)
             base_branch = repo_git.current_branch()
-            if not repo_git.is_clean():
-                raise GitOpsError("워킹트리가 깨끗하지 않음 — 사람 확인 필요")
+            # 격리 worktree를 쓰면 사람의 체크아웃은 건드리지 않으므로 더러워도 된다.
+            # 오히려 그게 안전장치다. 격리를 안 쓸 때만 깨끗한 트리를 요구한다.
+            isolate = getattr(config, "isolate_worktree", False)
+            if not isolate and not repo_git.is_clean():
+                raise GitOpsError(
+                    "워킹트리에 커밋 안 된 변경이 있습니다 — 격리 작업공간을 켜면"
+                    "(isolate_worktree) 사람 체크아웃을 건드리지 않고 진행할 수 있습니다")
             base_ref, changed_since = "", []
             fetch_sha = ""
             if getattr(config, "fetch_latest", False):

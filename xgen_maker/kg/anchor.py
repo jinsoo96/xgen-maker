@@ -44,22 +44,31 @@ def mentions(query: str) -> dict[str, list[str]]:
 _MAX_ANCHORS_PER_MENTION = 4
 
 
-def find_anchors(graph: Graph, query: str) -> list[dict]:
-    """요청이 지목한 노드들. 정확히 일치하고, 그 이름이 충분히 구체적일 때만."""
+def find_anchors(graph: Graph, query: str, hint: str = "") -> list[dict]:
+    """요청이 지목한 노드들. 정확히 일치하고, 그 이름이 충분히 구체적일 때만.
+
+    hint(코드 용어 변환 결과)는 저장소를 가려낼 때만 쓴다. 같은 경로가 여러 저장소에
+    있으면("/health"는 7곳) 요청이 지목한 저장소로 좁힌다("게이트웨이"→gateway).
+    """
+    from .rank import tokenize
     found = mentions(query)
     if not any(found.values()):
         return []
     wanted_routes = {r.lower() for r in found["routes"]}
     wanted_files = {f.lower() for f in found["files"]}
     wanted_symbols = {s.lower() for s in found["symbols"]}
+    hint_words = set(tokenize(query)) | set(tokenize(hint))
 
-    # 이름별로 후보를 모아, 흔한 이름(여러 곳에 있는 것)은 통째로 뺀다.
-    by_mention: dict[str, list[dict]] = {}
+    # 이름별로 후보를 모은다. 라우트는 엔드포인트의 route_path도 함께 본다.
+    by_mention: dict[tuple, list[dict]] = {}
     for node in graph.nodes.values():
         name = node["name"].lower()
         kind = node["kind"]
+        route_path = str((node.get("meta") or {}).get("route_path", "")).lower()
         if kind in ("route", "gateway_route") and name in wanted_routes:
             by_mention.setdefault(("route", name), []).append(node)
+        elif kind == "endpoint" and route_path in wanted_routes:
+            by_mention.setdefault(("route", route_path), []).append(node)
         elif kind == "file" and name in wanted_files:
             by_mention.setdefault(("file", name), []).append(node)
         elif kind in ("function", "class") and name in wanted_symbols:
@@ -67,8 +76,12 @@ def find_anchors(graph: Graph, query: str) -> list[dict]:
 
     anchors: list[dict] = []
     for nodes in by_mention.values():
-        if len(nodes) <= _MAX_ANCHORS_PER_MENTION:   # 구체적인 지목만 남긴다
-            anchors.extend(nodes)
+        if len(nodes) > _MAX_ANCHORS_PER_MENTION:
+            # 여러 저장소에 흩어졌으면 요청이 지목한 저장소로 좁혀 본다.
+            scoped = [n for n in nodes
+                      if hint_words & set(tokenize(n["repo"]))]
+            nodes = scoped if 0 < len(scoped) <= _MAX_ANCHORS_PER_MENTION else []
+        anchors.extend(nodes)
     return anchors
 
 

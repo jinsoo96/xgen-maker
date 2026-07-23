@@ -143,12 +143,27 @@ class TestPipelineE2E(unittest.TestCase):
         # MR 초안이 만들어지지 않아야 함 (게이트 차단)
         self.assertNotIn("mr_draft", report)
 
-    def test_dirty_worktree_blocks_branch(self):
+    def test_dirty_worktree_blocks_branch_without_isolation(self):
+        """격리를 안 쓰면 더러운 트리를 건드릴 위험이 있어 막는다."""
         (self.repo_root / "dirty.txt").write_text("x", encoding="utf-8")
-        loop = MakerLoop(self.config)
-        report = loop.run("greet 함수 버그 고쳐줘")
+        self.config.isolate_worktree = False
+        report = MakerLoop(self.config).run("greet 함수 버그 고쳐줘")
         self.assertEqual(report["outcome"], "branch_failed")
-        self.assertIn("깨끗", report["error"])
+        self.assertIn("커밋 안 된 변경", report["error"])
+
+    def test_dirty_worktree_ok_with_isolation(self):
+        """격리 worktree는 사람 체크아웃과 별개라 더러워도 진행할 수 있어야 한다.
+
+        초기 목적: 사용자가 작업 중인 트리를 건드리지 않고 알아서 흐르는 파이프라인.
+        더러운 트리에서 막히면 그 흐름이 성립하지 않는다.
+        """
+        (self.repo_root / "dirty.txt").write_text("x", encoding="utf-8")
+        self.config.isolate_worktree = True
+        report = MakerLoop(self.config).run("greet 함수 버그 고쳐줘")
+        # 더러운 트리 때문에 멈추지 않는다(브랜치 단계를 통과해 그 뒤로 간다)
+        self.assertNotEqual(report["outcome"], "branch_failed")
+        # 사람의 더러운 파일은 그대로 남아 있다(격리가 지켜 준다)
+        self.assertTrue((self.repo_root / "dirty.txt").exists())
 
 
 if __name__ == "__main__":
