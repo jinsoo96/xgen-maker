@@ -259,7 +259,10 @@ class MakerLoop:
         journal.event("impact", "ok", target=top["id"], affected=len(impact_nodes))
 
         # ③-2 체인 검색 (graph-tool-call wRRF 차용) — 착지 파일의 워크플로우 체인
-        chain_result = retrieve_chain(self.graph, query, k=6, hops=2)
+        # 체인 검색도 착지에 쓴 어휘를 쓴다 — 한글 원문만 넘기면 코드와 어휘가 달라
+        # 체인이 비고, 회귀 방지 근거(같이 볼 코드)를 못 준다.
+        chain_query = (query + " " + report.get("keywords", "")).strip()
+        chain_result = retrieve_chain(self.graph, chain_query, k=6, hops=2)
         chain_nodes = chain_result["chain"]
         journal.event("chain", "ok", nodes=len(chain_nodes),
                       relations=list(chain_result["by_relation"].keys()))
@@ -392,7 +395,7 @@ class MakerLoop:
                     landing = relanded
                     top = landing[0]
                     impact_nodes = impact(self.graph, top["id"], depth=3)
-                    chain_nodes = retrieve_chain(self.graph, query, k=6, hops=2)["chain"]
+                    chain_nodes = retrieve_chain(self.graph, chain_query, k=6, hops=2)["chain"]
                     # 최신 코드(FETCH_HEAD 체크아웃)에서 다시 발췌 — "코드가 권위"
                     legacy_notes = self._legacy_notes(landing, repo, repo_path)
                     if past:  # 학습 메모리 재주입(재발췌로 덮였으므로)
