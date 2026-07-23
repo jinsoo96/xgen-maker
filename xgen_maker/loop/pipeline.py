@@ -474,8 +474,11 @@ class MakerLoop:
                       **verify_report)
 
         # ⑦-3 UI/UX 검증 — 영향 라우트 스냅샷 + 픽셀diff + 비전판정 (Visual Feedback Loop)
-        if not config.enable_ui_verify:
-            journal.event("ui_verify", "skipped", reason="enable_ui_verify=False")
+        # 프리뷰 주소가 있으면 돈다 — 렌더할 곳이 있다는 게 곧 검증하라는 뜻이다.
+        # (도달 불가·비UI 변경은 ui_verify 안에서 사유와 함께 건너뛴다)
+        if not config.preview_base:
+            journal.event("ui_verify", "skipped",
+                          reason="프리뷰 주소(preview_base) 미설정 — 렌더할 화면이 없습니다")
         else:
             from .ui_verify import ui_verify
             ui_report = ui_verify(config, self.graph, changed, repo, journal.dir)

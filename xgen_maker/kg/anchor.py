@@ -39,26 +39,36 @@ def mentions(query: str) -> dict[str, list[str]]:
     }
 
 
+# 이 이상 많은 노드가 한 이름에 걸리면 지목이 아니다(page.tsx는 44곳에 있다).
+# 애매한 이름은 범위를 못 좁히므로 버리고 검색에 맡긴다.
+_MAX_ANCHORS_PER_MENTION = 4
+
+
 def find_anchors(graph: Graph, query: str) -> list[dict]:
-    """요청이 지목한 노드들. 정확히 일치하는 것만 — 비슷한 것은 검색이 할 일이다."""
+    """요청이 지목한 노드들. 정확히 일치하고, 그 이름이 충분히 구체적일 때만."""
     found = mentions(query)
     if not any(found.values()):
         return []
     wanted_routes = {r.lower() for r in found["routes"]}
     wanted_files = {f.lower() for f in found["files"]}
     wanted_symbols = {s.lower() for s in found["symbols"]}
-    anchors = []
+
+    # 이름별로 후보를 모아, 흔한 이름(여러 곳에 있는 것)은 통째로 뺀다.
+    by_mention: dict[str, list[dict]] = {}
     for node in graph.nodes.values():
         name = node["name"].lower()
         kind = node["kind"]
-        if kind == "route" and name in wanted_routes:
-            anchors.append(node)
-        elif kind == "gateway_route" and name in wanted_routes:
-            anchors.append(node)
+        if kind in ("route", "gateway_route") and name in wanted_routes:
+            by_mention.setdefault(("route", name), []).append(node)
         elif kind == "file" and name in wanted_files:
-            anchors.append(node)
+            by_mention.setdefault(("file", name), []).append(node)
         elif kind in ("function", "class") and name in wanted_symbols:
-            anchors.append(node)
+            by_mention.setdefault(("sym", name), []).append(node)
+
+    anchors: list[dict] = []
+    for nodes in by_mention.values():
+        if len(nodes) <= _MAX_ANCHORS_PER_MENTION:   # 구체적인 지목만 남긴다
+            anchors.extend(nodes)
     return anchors
 
 

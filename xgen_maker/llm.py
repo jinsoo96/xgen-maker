@@ -96,17 +96,55 @@ def chat(base: str, model: str, messages: list[dict], max_tokens: int = 800,
     return _chat_openai(base, model, messages, max_tokens, temperature, timeout)
 
 
+_VISION_FORMAT = ('\n\nReply JSON only: '
+                  '{"renders_ok": true/false, "issues": ["..."], "summary": "..."}')
+
+
+def _vision_judge_cli(image_path: str, question: str, timeout: int) -> dict | None:
+    """구독 로그인(claude CLI)으로 스크린샷 판정 — API 키 불필요.
+
+    claude CLI는 이미지를 읽을 수 있다. 경로를 주고 판정을 시키면 구독으로 처리된다.
+    이게 없으면 구독 사용자는 비전 검증을 아예 못 쓴다(초기 목적이었다).
+    """
+    import tempfile
+    from pathlib import Path
+    from .auth import claude_command
+    # 중립 임시 디렉토리에서 실행하므로 상대경로는 못 푼다 — 절대경로로 준다.
+    # "reply JSON only"를 경로 바로 뒤·질문 앞에 둔다 — 뒤에 두면 산문으로 답한다.
+    abs_path = str(Path(image_path).resolve())
+    prompt = (f"Read the image at {abs_path} and reply JSON only: "
+              '{"renders_ok": true/false, "issues": ["..."], "summary": "..."}. '
+              f"{question}")
+    command = claude_command(["-p", prompt, "--output-format", "text"])
+    if command is None:
+        return None
+    try:
+        with tempfile.TemporaryDirectory() as neutral:   # repo CLAUDE.md/git 오염 차단
+            result = subprocess.run(command, cwd=neutral, capture_output=True,
+                                    text=True, encoding="utf-8", errors="replace",
+                                    timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    match = re.search(r"\{.*\}", result.stdout, re.S)
+    if not match:
+        return None
+    try:
+        return json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return None
+
+
 def vision_judge(image_path: str, question: str,
                  model: str = "claude-sonnet-5", timeout: int = 60) -> dict | None:
     """스크린샷을 비전 LLM으로 판정 (Visual Feedback Loop 패턴).
 
-    Anthropic Messages API 이미지 블록 사용 — ANTHROPIC_API_KEY 필요. 없으면 None.
+    API 키가 있으면 Messages API로, 없으면 구독 로그인(claude CLI)으로 판정한다.
     반환 {"renders_ok": bool, "issues": [...], "summary": "..."} (JSON 강제).
     """
     import base64
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not api_key:
-        return None
+        return _vision_judge_cli(image_path, question, timeout)
     try:
         raw = open(image_path, "rb").read()
     except OSError:

@@ -77,14 +77,25 @@ class TestUiVerifyGuards(unittest.TestCase):
         self.assertTrue(r["skipped"])
         self.assertIn("미도달", r["reason"])
 
-    def test_vision_judge_none_without_key(self):
+    def test_vision_judge_uses_subscription_without_key(self):
+        """API 키가 없으면 구독(claude CLI) 경로로 넘어가야 한다.
+
+        예전엔 키가 없으면 무조건 None이었다 — 구독 사용자는 비전 검증을 아예 못 썼다.
+        이제 키가 없으면 _vision_judge_cli를 호출한다. CLI 자체는 여기서 스텁으로 막고,
+        '넘어가는가'만 확인한다(실제 CLI 판정은 통합 검증에서 실측했다).
+        """
         import os
+        from unittest import mock
         from xgen_maker import llm
         os.environ.pop("ANTHROPIC_API_KEY", None)
         with tempfile.TemporaryDirectory() as tmp:
             png = Path(tmp) / "x.png"
             png.write_bytes(b"\x89PNG\r\n")
-            self.assertIsNone(llm.vision_judge(str(png), "ok?"))
+            with mock.patch.object(llm, "_vision_judge_cli",
+                                   return_value={"renders_ok": True}) as cli:
+                result = llm.vision_judge(str(png), "ok?")
+            cli.assert_called_once()
+            self.assertEqual(result, {"renders_ok": True})
 
 
 if __name__ == "__main__":
@@ -100,3 +111,30 @@ class TestAuthedSnapshot(unittest.TestCase):
                 r = authed_snapshot("http://x", "e", "p", ["/"], Path(tmp))
         self.assertFalse(r["ok"])
         self.assertIn("미설치", r["reason"])
+
+
+class TestUiVerifyAutoRuns(unittest.TestCase):
+    """프리뷰 주소가 있으면 화면 검증이 자동으로 돈다 — 초기 목적이었다."""
+
+    def test_pipeline_gate_triggers_on_preview_base(self):
+        """게이트가 별도 boolean이 아니라 preview_base 존재로 열려야 한다."""
+        from pathlib import Path
+        src = Path(__file__).parent.parent.joinpath(
+            "xgen_maker", "loop", "pipeline.py").read_text(encoding="utf-8")
+        # ui_verify 진입 조건이 preview_base여야 한다(enable_ui_verify 하드게이트 제거)
+        self.assertIn("if not config.preview_base:", src)
+        self.assertNotIn('reason="enable_ui_verify=False"', src)
+
+    def test_unreachable_preview_skips_with_reason(self):
+        """주소가 있어도 스택이 안 떠 있으면 사유와 함께 건너뛴다(멈추지 않는다)."""
+        from xgen_maker.config import MakerConfig
+        from xgen_maker.kg.graph import Graph
+        from xgen_maker.loop.ui_verify import ui_verify
+        cfg = MakerConfig()
+        cfg.preview_base = "http://127.0.0.1:9"     # 아무도 안 듣는 포트
+        with tempfile.TemporaryDirectory() as tmp:
+            g = Graph()
+            g.add_node("r", "repo", "r", "r", "/r")
+            rep = ui_verify(cfg, g, ["a.tsx"], "r", Path(tmp))
+        self.assertTrue(rep["skipped"])
+        self.assertIn("미도달", rep["reason"])

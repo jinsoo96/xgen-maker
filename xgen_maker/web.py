@@ -1466,8 +1466,8 @@ class MakerWebHandler(BaseHTTPRequestHandler):
         ("verify", "로컬 환경 확인", "로컬 환경에서 동작을 확인합니다", "enable_verify"),
         # 게이트는 코드와 정확히 일치해야 한다 — pipeline은 config.enable_ui_verify로
         # 분기하고 preview_base는 그 안에서 쓰는 전제조건이다(둘을 혼동하면 UI가 거짓말).
-        ("ui_verify", "화면 검증", "변경 전후 화면을 비교합니다 "
-                                            "(preview_base 주소 필요)", "enable_ui_verify"),
+        ("ui_verify", "화면 검증", "바뀐 화면을 실제로 띄워 캡처하고, 깨졌는지 "
+                                            "AI가 판정합니다 (프리뷰 주소가 있으면 자동)", "preview_base"),
         ("deploy_test", "배포 렌더 검증", "배포 설정을 점검합니다", None),
         ("release", "릴리즈 경로", "배포 대상과 경로를 확인합니다", None),
         ("commit", "커밋", "변경 내용을 기록합니다", "allow_write"),

@@ -74,3 +74,21 @@ class TestAnchorLanding(unittest.TestCase):
         """지목이 없으면 앵커도 없다 — 그때는 검색이 할 일이다."""
         self.assertEqual(find_anchors(self.g, "버튼이 이상해요"), [])
         self.assertEqual(expand(self.g, []), [])
+
+class TestGenericNamesDoNotAnchor(unittest.TestCase):
+    """흔한 이름(page.tsx가 44곳)은 지목이 아니다 — 범위를 못 좁히면 검색에 맡긴다."""
+
+    def test_common_filename_is_ignored(self):
+        g = Graph()
+        g.add_node("r", "repo", "r", "r", "/r")
+        for i in range(6):                       # 같은 이름을 여러 곳에
+            g.add_node(f"r:a{i}/page.tsx", "file", "page.tsx", "r", f"a{i}/page.tsx")
+        self.assertEqual(find_anchors(g, "page.tsx 고쳐줘"), [])
+
+    def test_specific_filename_still_anchors(self):
+        g = Graph()
+        g.add_node("r", "repo", "r", "r", "/r")
+        g.add_node("r:svc/rag_service.py", "file", "rag_service.py", "r", "svc/rag_service.py")
+        anchors = find_anchors(g, "rag_service.py 임베딩")
+        self.assertEqual([a["name"] for a in anchors], ["rag_service.py"])
+
