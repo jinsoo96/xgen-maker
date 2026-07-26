@@ -13,6 +13,7 @@ from .extract_python import extract_python_file
 from .extract_typescript import extract_ts_file
 from .extract_rust import extract_rust_file, link_rust_routes, RUST_EXTS
 from .extract_gateway import extract_gateway_routes, link_gateway_routes
+from .calls import link_calls
 from .routes_nextjs import extract_routes
 from .crossrepo import link_api_calls, link_feature_packages
 from .workspaces import ImportResolver, scan_workspaces, scan_aliases
@@ -116,6 +117,7 @@ def build_repo(repo: str, repo_root: str | Path, scope: str | None = None,
 
     route_count = extract_routes(graph, repo, ts_files)
     link_rust_routes(graph, repo)  # 라우트→핸들러는 파일 간이라 추출이 끝난 뒤 연결
+    link_calls(graph, repo)        # 파일 간 호출 해소 — 중심성·체인·영향분석의 근간
     extract_gateway_routes(graph, repo, repo_root)  # 게이트웨이면 라우팅 테이블도(아니면 0)
     if resolver is not None:
         _attach_feature_members(graph, repo, rel_files, resolver.workspaces)
@@ -152,8 +154,12 @@ def refresh_files(graph: Graph, repo: str, repo_root: str | Path,
     dropped = {node_id for node_id, node in graph.nodes.items()
                if node["repo"] == repo and node["path"] in targets and node["kind"] != "repo"}
     graph.nodes = {nid: n for nid, n in graph.nodes.items() if nid not in dropped}
-    graph.edges = [e for e in graph.edges
-                   if e["src"] not in dropped and e["dst"] not in dropped]
+    # 나가는 엣지만 걷어낸다. 이 파일들은 곧 다시 추출되므로 그대로 되살아난다.
+    # 들어오는 엣지(다른 파일 → 이 파일의 심볼)까지 지우면 복구할 길이 없다 — 그 파일은
+    # 이번에 안 읽기 때문이다. 그러면 동기화할 때마다 호출 그래프가 닳아, 중심성도
+    # "이걸 고치면 누가 깨지나"도 조용히 무너진다. 노드 id는 결정적이라(저장소:경로#이름)
+    # 심볼이 그대로 되살아나면 그 엣지는 여전히 유효하다.
+    graph.edges = [e for e in graph.edges if e["src"] not in dropped]
     graph._edge_seen = {(e["src"], e["dst"], e["kind"]) for e in graph.edges}
 
     known = {n["path"] for n in graph.nodes.values()
@@ -177,7 +183,14 @@ def refresh_files(graph: Graph, repo: str, repo_root: str | Path,
             graph.add_edge(repo, f"{repo}:{rel}", "contains")
     extract_routes(graph, repo, ts_files)
     link_rust_routes(graph, repo)  # 라우트→핸들러는 파일 간이라 추출 후 연결
+    link_calls(graph, repo)        # 파일 간 호출 해소(증분 갱신분)
     link_api_calls(graph)
+    # 걷어낸 심볼 중 되살아나지 않은 것(이번 변경으로 삭제·개명됨)을 가리키는 엣지는 끊는다.
+    # 보존한 '들어오는 엣지' 가운데 대상이 사라진 것만 정확히 골라낸다.
+    gone = {node_id for node_id in dropped if node_id not in graph.nodes}
+    if gone:
+        graph.edges = [e for e in graph.edges if e["dst"] not in gone]
+        graph._edge_seen = {(e["src"], e["dst"], e["kind"]) for e in graph.edges}
     return len(targets)
 
 

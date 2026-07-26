@@ -185,15 +185,21 @@ def vision_judge(image_path: str, question: str,
         return None
 
 
-def json_chat(base: str, model: str, messages: list[dict], **kw) -> dict | None:
-    """응답에서 첫 JSON 오브젝트를 관대하게 파싱."""
-    text = chat(base, model, messages, **kw)
-    if not text:
-        return None
-    match = re.search(r"\{.*\}", text, re.S)
-    if not match:
-        return None
-    try:
-        return json.loads(match.group(0))
-    except json.JSONDecodeError:
-        return None
+def json_chat(base: str, model: str, messages: list[dict],
+              retries: int = 0, **kw) -> dict | None:
+    """응답에서 첫 JSON 오브젝트를 관대하게 파싱.
+
+    retries>0이면 빈 응답·파싱 실패 시 그만큼 다시 시도한다. claude CLI 구독은 가끔
+    빈 stdout을 돌려주는데, 한 번의 실패로 착지 어휘 변환이 통째로 날아가면 검색이
+    엉뚱한 서비스로 샌다 — 착지처럼 결과가 걸린 호출에서만 켠다.
+    """
+    for attempt in range(retries + 1):
+        text = chat(base, model, messages, **kw)
+        if text:
+            match = re.search(r"\{.*\}", text, re.S)
+            if match:
+                try:
+                    return json.loads(match.group(0))
+                except json.JSONDecodeError:
+                    pass
+    return None

@@ -203,6 +203,7 @@ class MakerLoop:
             # 프롬프트는 짧게. 규칙을 길게 늘어놓으면 claude CLI가 JSON을 못 내고 실패한다
             # (실측: 긴 프롬프트 → None, 짧은 프롬프트 → 깨끗한 단어). 지어낸 클래스명 대신
             # 요청의 도메인 단어를 영어로 — 그게 실제 코드와 훨씬 잘 맞는다.
+            # 착지가 이 변환에 걸려 있다 — CLI가 가끔 빈 응답을 내므로 한 번 더 시도한다.
             expanded = llm.json_chat(config.llm_base, config.llm_model, [
                 {"role": "system", "content":
                  'Extract 4-7 plain lowercase english search words from the dev request '
@@ -210,7 +211,7 @@ class MakerLoop:
                  'service name given (gateway, workflow, frontend, model). Do not invent '
                  'class names. Also give a 2-4 word hyphen branch slug for the work. '
                  'Reply JSON only: {"keywords": ["..."], "branch": "..."}'},
-                {"role": "user", "content": query}], max_tokens=200, timeout=45)
+                {"role": "user", "content": query}], max_tokens=200, timeout=45, retries=1)
             if expanded and expanded.get("keywords"):
                 keyword_query = " ".join(str(k) for k in expanded["keywords"])
                 journal.event("query_expand", "ok", keywords=keyword_query)

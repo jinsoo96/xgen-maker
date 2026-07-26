@@ -127,3 +127,8 @@ def extract_python_file(graph: Graph, repo: str, repo_root: Path, rel: str,
             callee = local_funcs.get(node.func.id)
             if callee:
                 graph.add_edge(file_id, callee, "calls", role="same_file")
+
+    # 파일 간 호출도 잇는다 — 위 AST 경로는 같은 파일 함수만 잡는다. 저장소의 함수가
+    # 다 들어온 뒤 link_calls가 다른 파일의 함수까지 이름으로 해소한다(유일할 때만).
+    from .calls import record_calls
+    record_calls(graph, file_id, source)

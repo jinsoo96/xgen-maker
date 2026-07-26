@@ -44,6 +44,16 @@ _KIND_BOOST = {
 # 테스트는 대개 고칠 대상이 아니라 고친 뒤 돌리는 것이다. 요청이 테스트를 지목하면 예외.
 _TEST_MARKERS = ("test", "spec", "__tests__", "conftest", "fixture")
 _TEST_PENALTY = 0.35
+# 요청이 특정 서비스/저장소를 지목하면(예: "게이트웨이", "프론트엔드") 그 저장소로 편향한다.
+# 서비스 이름 목록을 손으로 적지 않는다 — 저장소 이름 토큰을 그래프에서 그대로 뽑아,
+# 쿼리 토큰과 겹치는 저장소를 지목된 것으로 본다. 코드 어휘를 더 많이 가졌다는 이유만으로
+# 엉뚱한 서비스(대개 코퍼스를 지배하는 언어)가 이기던 문제를 바로잡는다.
+# 값은 강한 종류 가중(function 2.0)과 견줄 만하게 — 지목이 명시적일 때만 켜진다.
+_REPO_AFFINITY = 2.5
+# 그래프 중심성(PageRank) 가중 — 같은 말을 가진 함수가 여럿일 때, 코드에서 실제로
+# 중심인 것(다들 호출하는)을 앞세운다. 질의 관련도가 지배하도록 약하게(최대 +50%).
+# 기법 출처(웹 조사): RANGER·코드 중심성 랭킹 연구의 "PageRank로 함수 중요도".
+_CENTRALITY_WEIGHT = 0.5
 # 이름은 노드의 정체라 더 무겁게, 경로는 그 다음.
 _FIELD_WEIGHT = {"name": 3, "path": 2, "repo": 1, "kind": 1, "meta": 1}
 _META_KEYS = ("summary", "doc", "package", "route_path", "module", "service", "handler")
@@ -79,19 +89,27 @@ def node_terms(node: dict) -> list[str]:
 class Bm25Index:
     """노드 코퍼스의 역색인. 그래프가 바뀌면 다시 만든다."""
 
-    def __init__(self, nodes: list[dict]):
+    def __init__(self, nodes: list[dict], centrality: dict[str, float] | None = None):
         self.postings: dict[str, dict[str, int]] = {}
         self.length: dict[str, float] = {}
-        self.meta: dict[str, tuple[str, str]] = {}   # node_id → (종류, 경로소문자)
+        self.meta: dict[str, tuple[str, str, str]] = {}   # node_id → (종류, 경로소문자, 저장소)
+        self.centrality = centrality or {}                # node_id → 0..1 (PageRank 정규화)
+        self.repos: set[str] = set()
+        self.repo_tokens: dict[str, set[str]] = {}   # 저장소 → 이름 토큰(지목 판정용)
         for node in nodes:
             terms = node_terms(node)
             if not terms:
                 continue
             node_id = node["id"]
             self.length[node_id] = len(terms)
+            repo = node.get("repo", "")
             # 테스트 판정은 경로만으론 부족하다 — TestFooInline처럼 이름만 테스트인 것도 있다
             self.meta[node_id] = (node.get("kind", ""),
-                                  f"{node.get('path', '')} {node.get('name', '')}".lower())
+                                  f"{node.get('path', '')} {node.get('name', '')}".lower(),
+                                  repo)
+            if repo and repo not in self.repo_tokens:
+                self.repos.add(repo)
+                self.repo_tokens[repo] = set(tokenize(repo))
             counts: dict[str, int] = {}
             for term in terms:
                 counts[term] = counts.get(term, 0) + 1
@@ -155,13 +173,21 @@ class Bm25Index:
                     matched.setdefault(node_id, set()).add(token)
 
         wants_test = any(m in query.lower() for m in _TEST_MARKERS)
+        # 저장소 지목 — 쿼리 토큰이 특정 저장소 이름 토큰과 겹치면 그 저장소로 편향한다.
+        # 전부 걸리거나(변별력 0: 예 "xgen") 하나도 안 걸리면 적용하지 않는다.
+        qtokens = set(tokens)
+        targeted = {repo for repo, toks in self.repo_tokens.items() if toks & qtokens}
+        if not (0 < len(targeted) < len(self.repos)):
+            targeted = None
         total = len(tokens)
         for node_id, base in scores.items():
             coverage = len(matched[node_id]) / total
-            scores[node_id] = base * (1.0 + coverage ** 1.5 * 2.0) * self._prior(node_id, wants_test)
+            scores[node_id] = base * (1.0 + coverage ** 1.5 * 2.0) * self._prior(
+                node_id, wants_test, targeted)
         return scores
 
-    def _prior(self, node_id: str, wants_test: bool) -> float:
+    def _prior(self, node_id: str, wants_test: bool,
+               targeted: set[str] | None = None) -> float:
         """질의와 무관한 가중치 — 무엇이 '고칠 자리'로 알맞은가."""
         node = self.meta.get(node_id)
         if node is None:
@@ -169,4 +195,10 @@ class Bm25Index:
         boost = _KIND_BOOST.get(node[0], 1.0)
         if not wants_test and any(m in node[1] for m in _TEST_MARKERS):
             boost *= _TEST_PENALTY
+        if targeted and node[2] in targeted:   # 요청이 지목한 서비스/저장소로 편향
+            boost *= _REPO_AFFINITY
+        # 구조적으로 중심인 코드를 약하게 앞세운다(동점 가르기 — 질의 관련도가 지배)
+        cen = self.centrality.get(node_id)
+        if cen:
+            boost *= 1.0 + _CENTRALITY_WEIGHT * cen
         return boost

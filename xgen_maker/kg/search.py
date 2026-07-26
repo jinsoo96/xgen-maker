@@ -13,13 +13,16 @@ def _index(graph: Graph) -> Bm25Index:
     """그래프별 역색인. 노드 구성이 바뀌면 다시 만든다.
 
     색인은 그래프 객체 밖 속성에 둔다 — nodes 안에 넣으면 Graph.save가 통째로
-    직렬화하려다 깨진다.
+    직렬화하려다 깨진다. 중심성(PageRank)도 여기서 함께 계산해 색인에 넘긴다 —
+    질의와 무관한 구조 신호라 색인 수명과 같이 캐시하면 된다.
     """
     version = len(graph.nodes)
     cached = graph.__dict__.get("_bm25")
     if cached is not None and graph.__dict__.get("_bm25_ver") == version:
         return cached
-    index = Bm25Index(list(graph.nodes.values()))
+    from .centrality import centrality
+    nodes = list(graph.nodes.values())
+    index = Bm25Index(nodes, centrality=centrality(nodes, graph.edges))
     graph.__dict__["_bm25"] = index
     graph.__dict__["_bm25_ver"] = version
     return index
