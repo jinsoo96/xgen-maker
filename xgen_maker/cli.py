@@ -296,8 +296,28 @@ def cmd_run(args) -> None:
     # 기본은 MR 전단계까지(observe) — 모드를 나누지 않는다. --mode로만 바꾼다.
     config.mode = args.mode or "observe"
     config.allow_write = config.mode != "plan"
-    loop = MakerLoop(config)
-    report = loop.run(args.query)
+
+    # 기본 런타임은 하네스 엔진 — MAKER를 엔진 stage로 구동해 흐름을 엔진 이벤트로
+    # 흘린다(설계 의도: 하네스로 돈다). 엔진이 없거나 --no-engine이면 standalone.
+    if not getattr(args, "no_engine", False):
+        from .engine_stage import run_via_engine, _load_engine
+        if _load_engine() is not None:
+            r = run_via_engine(args.query, args.config,
+                               allow_write=config.allow_write, mode=config.mode)
+            if r.get("ok"):
+                report = r["report"]
+                stream = r.get("engine_state", {}).get("stream", [])
+                for step, status, detail in stream:            # 엔진이 흘린 흐름 그대로
+                    mark = {"ok": "✓", "pass": "✓", "fail": "✗", "skipped": "·"}.get(status, "▸")
+                    print(f"  {mark} {step:14} {detail}")
+                print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+                if report.get("outcome") in ("judge_failed", "branch_failed",
+                                             "implement_failed", "push_failed", "no_landing"):
+                    sys.exit(1)
+                return
+            print(f"[엔진 구동 실패 — standalone으로 폴백] {r.get('reason','')}")
+
+    report = MakerLoop(config).run(args.query)
     print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
     if report.get("outcome") in ("judge_failed", "branch_failed", "implement_failed",
                                  "push_failed", "no_landing"):
@@ -791,6 +811,8 @@ def main(argv: list[str] | None = None) -> None:
                         "observe=개발 — 브랜치·수정·검증·커밋(내 PC에만) · "
                         "act=브랜치 푸시·MR 생성(인가 검사 통과 필요). "
                         "미지정 시 설정값")
+    p.add_argument("--no-engine", action="store_true",
+                   help="하네스 엔진을 거치지 않고 standalone으로 실행(디버그용)")
     p.set_defaults(func=cmd_run)
 
     p = sub.add_parser("mcp", help="KG MCP 서버 (stdio) — kg_* 4툴 + maker_plan")

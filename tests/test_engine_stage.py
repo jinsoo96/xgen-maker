@@ -165,3 +165,140 @@ class TestEngineRunLevelB(unittest.TestCase):
         substeps = [e["substep"] for e in es["events"] if e["substep"]]
         self.assertIn("maker_start", substeps)
         self.assertIn("maker_done", substeps)
+
+
+class TestEngineWebPath(unittest.TestCase):
+    """웹 실행도 하네스(엔진) 경유 — 주입 저널로 실시간 스트리밍, 공유 그래프 재사용,
+    협조적 취소가 실패가 아닌 '중지'로 전파되는지 고정."""
+
+    @unittest.skipUnless(ENGINE is not None, "엔진 미설치")
+    def test_injected_journal_streams_and_reuses_graph(self):
+        import json
+        from xgen_maker.config import MakerConfig
+        from xgen_maker.kg.graph import Graph
+        from xgen_maker.loop.journal import Journal
+        from xgen_maker.engine_stage import run_via_engine
+        with tempfile.TemporaryDirectory() as tmp:
+            g = Graph(); g.add_node("r:a.py", "file", "a.py", "r", "a.py")
+            kg = Path(tmp) / "kg.json"; g.save(kg)
+            cfg = MakerConfig(kg_path=kg.as_posix(),
+                              worklogs_dir=f"{Path(tmp).as_posix()}/wl",
+                              llm_enabled=False, verbose=False, fetch_latest=False)
+            streamed = []
+
+            class _Spy:
+                def __init__(self, real): self._real = real; self.dir = real.dir; self.slug = real.slug
+                def event(self, step, status, **data):
+                    streamed.append(step); return self._real.event(step, status, **data)
+                def close(self, outcome): return self._real.close(outcome)
+
+            def factory(worklogs_dir, qtext, verbose=False):
+                return _Spy(Journal(worklogs_dir, qtext, verbose=False))
+
+            # 공유 그래프 객체를 그대로 주입 — 엔진이 디스크에서 다시 읽지 않는다
+            r = run_via_engine("a.py 어디 있어?", allow_write=False,
+                               journal_factory=factory, graph=g, config_obj=cfg)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(r["outcome"], "answered")
+        # 주입 저널이 실제로 단계별로 흘렀다(엔진 경유인데도 스트리밍 유지)
+        self.assertIn("intent", streamed)
+        self.assertIn("answer", streamed)
+
+    @unittest.skipUnless(ENGINE is not None, "엔진 미설치")
+    def test_code_change_runs_full_write_pipeline_via_engine(self):
+        """핵심 회귀 방지: 코드 변경 요청이 하네스(엔진) 경유로도 전 쓰기 파이프라인을
+        탄다 — branch→implement→checks→commit→MR초안까지. 질문형만 되는 게 아니다."""
+        import subprocess, sys
+        from xgen_maker.config import MakerConfig
+        from xgen_maker.kg.build import build_repo
+        from xgen_maker.loop.journal import Journal
+        from xgen_maker.engine_stage import run_via_engine
+
+        app_src = 'def greet(name):\n    return "hi " + name\n'
+        stub = ('import pathlib\n'
+                'p = pathlib.Path("app.py"); s = p.read_text(encoding="utf-8")\n'
+                's = s.replace(\'return "hi " + name\', \'return "hi, " + str(name)\')\n'
+                'p.write_text(s, encoding="utf-8"); print("patched")\n')
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp); repo = base / "demo"; repo.mkdir()
+            for a in (["init", "-b", "trunk"],
+                      ["config", "user.email", "m@t.local"],
+                      ["config", "user.name", "m"]):
+                subprocess.run(["git", *a], cwd=repo, capture_output=True, check=True)
+            (repo / "app.py").write_text(app_src, encoding="utf-8")
+            subprocess.run(["git", "add", "-A"], cwd=repo, capture_output=True, check=True)
+            subprocess.run(["git", "commit", "-m", "init"], cwd=repo, capture_output=True, check=True)
+
+            g = build_repo("demo", repo)
+            kg = base / "kg.json"; g.save(kg)
+            stub_path = base / "stub.py"; stub_path.write_text(stub, encoding="utf-8")
+            cfg = MakerConfig(repos={"demo": str(repo)}, kg_path=str(kg),
+                              mode="observe", allow_write=True, llm_enabled=False,
+                              verbose=False, fetch_latest=False,
+                              agent_cmd=f'"{sys.executable}" "{stub_path}"',
+                              worklogs_dir=str(base / "wl"))
+            streamed = []
+
+            class _Spy:
+                def __init__(self, real): self._real = real; self.dir = real.dir; self.slug = real.slug
+                def event(self, step, status, **d):
+                    streamed.append(step); return self._real.event(step, status, **d)
+                def close(self, o): return self._real.close(o)
+
+            def factory(wd, qt, verbose=False):
+                return _Spy(Journal(wd, qt, verbose=False))
+
+            r = run_via_engine("greet 함수가 이름 처리에서 에러 나는 버그 고쳐줘",
+                               allow_write=True, mode="observe",
+                               journal_factory=factory, graph=g, config_obj=cfg)
+            branch = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                                    cwd=repo, capture_output=True, text=True).stdout.strip()
+            report = r.get("report", {})
+            # 파일 존재는 임시디렉토리 정리 전에 확인해야 한다
+            mr_exists = bool(report.get("session_dir")) and \
+                Path(report["session_dir"], "MR-DRAFT.md").exists()
+        self.assertTrue(r["ok"], r)
+        # 질문이 아니라 실제 커밋까지 갔다(로컬), 브랜치는 fix/, MR 초안 생성
+        self.assertEqual(report["outcome"], "committed_local", report)
+        self.assertTrue(report["branch"].startswith("fix/"), report)
+        self.assertEqual(branch, report["branch"])
+        self.assertTrue(mr_exists, "MR 초안이 세션 디렉토리에 생성돼야 함")
+        # 엔진 경유인데도 쓰기 단계들이 실제로 흘렀다
+        for step in ("branch", "implement", "checks", "commit", "mr_ready"):
+            self.assertIn(step, streamed, f"{step} 단계가 엔진 경유 스트림에 없음")
+
+    @unittest.skipUnless(ENGINE is not None, "엔진 미설치")
+    def test_cooperative_cancel_reports_cancelled(self):
+        import threading
+        from xgen_maker.config import MakerConfig
+        from xgen_maker.kg.graph import Graph
+        from xgen_maker.loop.journal import Journal
+        from xgen_maker.engine_stage import run_via_engine
+
+        class _Cancelled(Exception):
+            pass
+
+        with tempfile.TemporaryDirectory() as tmp:
+            g = Graph(); g.add_node("r:a.py", "file", "a.py", "r", "a.py")
+            kg = Path(tmp) / "kg.json"; g.save(kg)
+            cfg = MakerConfig(kg_path=kg.as_posix(),
+                              worklogs_dir=f"{Path(tmp).as_posix()}/wl",
+                              llm_enabled=False, verbose=False, fetch_latest=False)
+            flag = threading.Event(); flag.set()
+
+            class _Cancelling:
+                def __init__(self, real): self._real = real; self.dir = real.dir; self.slug = real.slug
+                def event(self, step, status, **data):
+                    if flag.is_set():
+                        raise _Cancelled()
+                    return self._real.event(step, status, **data)
+                def close(self, outcome): return self._real.close(outcome)
+
+            def factory(worklogs_dir, qtext, verbose=False):
+                return _Cancelling(Journal(worklogs_dir, qtext, verbose=False))
+
+            r = run_via_engine("a.py 어디 있어?", journal_factory=factory,
+                               graph=g, config_obj=cfg)
+        # 취소는 실패가 아니라 정상 중지 — cancelled 플래그로 구분되어야 한다
+        self.assertFalse(r["ok"])
+        self.assertTrue(r.get("cancelled"), r)

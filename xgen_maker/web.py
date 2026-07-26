@@ -1077,13 +1077,28 @@ def _run_query(config: MakerConfig, graph: Graph, query: str, q: queue.Queue,
                cancel=None) -> None:
     from .loop.pipeline import MakerLoop
     from .loop.journal import Journal
+    # journal 팩토리 주입 — 전역 몽키패치 없이 이 요청만 SSE로 스트리밍(동시 요청 안전).
+    # 매 단계에서 취소를 확인하고, describe()로 사람 말 한 줄을 큐에 흘린다.
+    def factory(worklogs_dir, qtext, verbose=False):
+        return _SSEJournal(Journal(worklogs_dir, qtext, verbose=False), q, cancel)
     try:
-        # journal 팩토리 주입 — 전역 몽키패치 없이 이 요청만 SSE로 스트리밍(동시 요청 안전)
-        def factory(worklogs_dir, qtext, verbose=False):
-            return _SSEJournal(Journal(worklogs_dir, qtext, verbose=False), q, cancel)
-        loop = MakerLoop(config, graph=graph, journal_factory=factory)
-        report = loop.run(query)  # 락 없이 — 대시보드 프리즈 방지(파일은 원자적 저장으로 안전)
-        q.put({"type": "result", "report": report})
+        # 기획 원칙: MAKER는 하네스(엔진) 위에서 돈다. 엔진이 있으면 웹 실행도 엔진
+        # 스테이지로 구동하되, 위 SSE 저널·공유 그래프·협조적 취소를 그대로 주입한다.
+        # 엔진이 없으면 standalone MakerLoop로 폴백(동일 파이프라인).
+        from .engine_stage import run_via_engine, _load_engine
+        if _load_engine() is not None:
+            r = run_via_engine(query, allow_write=config.allow_write, mode=config.mode,
+                               journal_factory=factory, graph=graph, config_obj=config)
+            if r.get("cancelled"):
+                q.put({"type": "stopped", "message": "작업을 중지했습니다"})
+            elif r.get("ok"):
+                q.put({"type": "result", "report": r["report"]})
+            else:
+                q.put({"type": "error", "message": r.get("reason", "엔진 실행 실패")[:300]})
+        else:
+            loop = MakerLoop(config, graph=graph, journal_factory=factory)
+            report = loop.run(query)  # 락 없이 — 프리즈 방지(파일은 원자적 저장으로 안전)
+            q.put({"type": "result", "report": report})
     except _Cancelled:
         q.put({"type": "stopped", "message": "작업을 중지했습니다"})
     except Exception as error:  # noqa: BLE001

@@ -84,20 +84,81 @@ def build_maker_stage(engine, order: int = 99, phase: str = "loop"):
                 pass
 
         async def execute(self, state) -> dict:
-            """엔진 계약(async). 동기 MAKER 루프는 to_thread로 이벤트 루프 블로킹 방지."""
+            """엔진 계약(async). 동기 MAKER 루프는 to_thread로 이벤트 루프 블로킹 방지.
+
+            MAKER의 26단계를 엔진 substep 이벤트로 하나씩 흘린다 — 그래야 하네스
+            스트림에서 착지→구현→검증 흐름이 그대로 보인다(웹 SSE와 같은 브리지).
+            """
+            import queue as _queue
             from .config import MakerConfig
             from .loop.pipeline import MakerLoop
+            from .loop.journal import Journal
+            from .loop.narrate import describe
             query = getattr(state, "user_input", "") or ""
             meta = getattr(state, "metadata", {}) or {}
-            cfg_path = meta.get("maker_config")
-            config = MakerConfig.from_file(cfg_path) if cfg_path else MakerConfig()
-            config.allow_write = bool(meta.get("maker_allow_write", False))  # 기본 plan-only
+            # config: 호출자가 미리 만든 객체(웹)를 주면 그대로, 아니면 경로에서 로드.
+            config = getattr(state, "maker_config_obj", None)
+            if config is None:
+                cfg_path = meta.get("maker_config")
+                config = MakerConfig.from_file(cfg_path) if cfg_path else MakerConfig()
+            # 모드를 존중한다 — 하드코딩 plan-only가 아니라 호출자가 정한 대로.
+            config.allow_write = bool(meta.get("maker_allow_write", config.allow_write))
+            config.mode = meta.get("maker_mode") or config.mode
             config.verbose = False
+            # 외부 저널 팩토리(웹 SSE)·공유 그래프를 주면 하네스 경유로도 실시간 스트리밍·
+            # KG 재사용·협조적 취소를 그대로 유지한다.
+            injected = getattr(state, "maker_journal_factory", None)
+            shared_graph = getattr(state, "maker_graph", None)
+
+            step_q: _queue.Queue = _queue.Queue()
+
+            class _BridgeJournal:
+                """저널 이벤트를 엔진 substep 큐로 흘리는 래퍼. 내부 저널을 감싸므로
+                취소(_Cancelled) 등 예외는 감싼 저널에서 그대로 위로 전파된다."""
+                def __init__(self, real):
+                    self._real = real
+                    self.dir = real.dir
+                    self.slug = real.slug
+
+                def event(self, step, status, **data):
+                    self._real.event(step, status, **data)
+                    step_q.put((step, status, describe(step, status, data)))
+
+                def close(self, outcome):
+                    step_q.put(None)
+                    return self._real.close(outcome)
+
+            def _factory(worklogs_dir, q, verbose=False):
+                real = (injected(worklogs_dir, q, verbose) if injected
+                        else Journal(worklogs_dir, q, verbose=False))
+                return _BridgeJournal(real)
+
             await self._emit(state, "maker_start", query=query[:80],
-                             allow_write=config.allow_write)
+                             mode=config.mode, allow_write=config.allow_write)
+
+            loop = (MakerLoop(config, graph=shared_graph, journal_factory=_factory)
+                    if shared_graph is not None
+                    else MakerLoop(config, journal_factory=_factory))
+            task = asyncio.create_task(asyncio.to_thread(loop.run, query))
+            # 스텝 큐를 비동기로 비워 가며 엔진 substep으로 방출(흐름을 실시간으로 보이게)
+            while True:
+                try:
+                    item = step_q.get_nowait()
+                except _queue.Empty:
+                    if task.done():
+                        break
+                    await asyncio.sleep(0.1)
+                    continue
+                if item is None:
+                    continue
+                step, status, detail = item
+                await self._emit(state, step, status=status, detail=detail[:160])
             try:
-                report = await asyncio.to_thread(MakerLoop(config).run, query)
+                report = await task
             except Exception as error:  # noqa: BLE001 — 스테이지가 파이프라인을 깨지 않게
+                # 호출자가 저널을 주입했다면(웹) 취소·오류를 직접 처리하므로 삼키지 않는다.
+                if injected is not None:
+                    raise
                 report = {"outcome": "error", "error": str(error)[:300]}
             state.workflow_data["maker_report"] = report
             state.final_output = (f"[MAKER] outcome={report.get('outcome')} "
@@ -128,22 +189,38 @@ def register(engine=None) -> dict:
 
 
 async def _run_via_engine_async(query: str, config_path: str | None,
-                                allow_write: bool, engine) -> dict:
-    """엔진 기계장치로 MAKER 스테이지를 구동 — 이벤트 스트림 + 세션 영속."""
+                                allow_write: bool, engine, mode: str | None = None,
+                                journal_factory=None, graph=None,
+                                config_obj=None) -> dict:
+    """엔진 기계장치로 MAKER 스테이지를 구동 — 이벤트 스트림 + 세션 영속.
+
+    journal_factory·graph·config_obj를 주면(웹) 하네스 경유로도 실시간 SSE 스트리밍·
+    KG 재사용·협조적 취소를 유지한다(런타임 state 속성으로 전달 — 세션 직렬화 대상 아님).
+    """
     events: list[dict] = []
-    emitter = engine.EventEmitter()
+    stream: list[tuple] = []          # 단계 흐름(step, status, detail) — 엔진이 흘린 그대로
 
     async def _capture(event):  # subscribe 콜백은 async 계약
         events.append({"type": type(event).__name__,
                        "stage": getattr(event, "stage_id", ""),
                        "substep": getattr(event, "substep", "")})
+        meta = getattr(event, "meta", None) or {}
+        sub = getattr(event, "substep", "")
+        if sub and sub not in ("maker_start", "maker_done"):
+            stream.append((sub, meta.get("status", ""), meta.get("detail", "")))
 
+    emitter = engine.EventEmitter()
     token = emitter.subscribe(_capture)
 
     state = engine.PipelineState(user_input=query)
     state.metadata["maker_config"] = config_path
     state.metadata["maker_allow_write"] = allow_write
+    state.metadata["maker_mode"] = mode
     state.event_emitter = emitter
+    # 런타임 전용(직렬화 안 함): 웹이 주는 SSE 저널·공유 그래프·미리 만든 config
+    state.maker_journal_factory = journal_factory
+    state.maker_graph = graph
+    state.maker_config_obj = config_obj
     session_id = getattr(state, "execution_id", "") or "maker-session"
 
     stage = build_maker_stage(engine)()
@@ -190,7 +267,7 @@ async def _run_via_engine_async(query: str, config_path: str | None,
                 "loop_decision": getattr(state, "loop_decision", "?"),
                 "final_output": getattr(state, "final_output", ""),
                 "session_id": session_id, "session_saved": session_saved,
-                "events": events}}
+                "events": events, "stream": stream}}
 
 
 _CLI_PROVIDER_KEY_ENV = "XGEN_MAKER_CLI_PROVIDER_KEY"
@@ -297,7 +374,8 @@ async def _run_full_pipeline_async(query: str, config_path: str | None,
 
 def run_via_engine(query: str, config_path: str | None = None,
                    allow_write: bool = False, engine=None,
-                   full_pipeline: bool = False) -> dict:
+                   full_pipeline: bool = False, mode: str | None = None,
+                   journal_factory=None, graph=None, config_obj=None) -> dict:
     """R3 Level B — 엔진이 MAKER를 구동한다(동기 진입점, 내부 asyncio).
 
     full_pipeline=False(기본): 엔진 Stage/EventEmitter/SessionStore 기계장치로 MAKER
@@ -313,6 +391,11 @@ def run_via_engine(query: str, config_path: str | None = None,
     try:
         if full_pipeline:
             return asyncio.run(_run_full_pipeline_async(query, config_path, allow_write, engine))
-        return asyncio.run(_run_via_engine_async(query, config_path, allow_write, engine))
+        return asyncio.run(_run_via_engine_async(
+            query, config_path, allow_write, engine, mode,
+            journal_factory=journal_factory, graph=graph, config_obj=config_obj))
     except Exception as error:  # noqa: BLE001
+        # 웹의 협조적 취소 신호(_Cancelled)는 실패가 아니라 정상 중지 — 구분해 알린다.
+        if type(error).__name__ == "_Cancelled":
+            return {"ok": False, "cancelled": True}
         return {"ok": False, "reason": f"엔진 구동 실패: {error}"[:200]}
