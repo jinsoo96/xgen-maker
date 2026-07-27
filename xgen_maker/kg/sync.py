@@ -117,6 +117,7 @@ def repair_dangling(graph: Graph, sources: list[dict]) -> dict:
     before = len(graph.edges)
     graph.edges = [e for e in graph.edges if e["src"] in ids and e["dst"] in ids]
     graph._edge_seen = {(e["src"], e["dst"], e["kind"]) for e in graph.edges}
+    graph.touch()
     return {"repaired": repaired, "dropped": before - len(graph.edges)}
 
 
@@ -140,6 +141,7 @@ def _resync_gateway(graph: Graph, sources: list[dict]) -> dict | None:
     graph.edges = [e for e in graph.edges
                    if e["src"] not in stale and e["dst"] not in stale]
     graph._edge_seen = {(e["src"], e["dst"], e["kind"]) for e in graph.edges}
+    graph.touch()
     for source in owners:
         extract_gateway_routes(graph, source["repo"], Path(source["root"]))
     links = link_gateway_routes(graph)

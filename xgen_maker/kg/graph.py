@@ -18,6 +18,15 @@ class Graph:
         self.edges: list[dict] = []
         self._edge_seen: set[tuple] = set()
         self.meta: dict = {}
+        # 내용이 바뀔 때마다 오르는 번호. 파생 캐시(검색 색인·중심성·인접리스트)는
+        # 이것으로 무효화한다. 노드 '개수'로 판단하면 이름만 바뀐 경우(개명, 심볼
+        # 하나 추가+하나 삭제)를 못 잡아, 갱신했는데도 옛 색인이 계속 쓰인다
+        # — 재착지가 조용히 빈 결과를 내던 실제 원인.
+        self.rev: int = 0
+
+    def touch(self) -> None:
+        """nodes/edges를 메서드 밖에서 직접 갈아끼웠을 때 파생 캐시를 무효화한다."""
+        self.rev += 1
 
     # ---- 구성 ----
     def add_node(self, node_id: str, kind: str, name: str, repo: str,
@@ -26,10 +35,12 @@ class Graph:
         if existing is not None:
             if meta:
                 existing["meta"].update(meta)
+                self.rev += 1
             return existing
         node = {"id": node_id, "kind": kind, "name": name, "repo": repo,
                 "path": path, "line": line, "meta": meta}
         self.nodes[node_id] = node
+        self.rev += 1
         return node
 
     def add_edge(self, src: str, dst: str, kind: str, **meta) -> None:
@@ -38,6 +49,7 @@ class Graph:
             return
         self._edge_seen.add(key)
         self.edges.append({"src": src, "dst": dst, "kind": kind, "meta": meta})
+        self.rev += 1
 
     def merge(self, other: "Graph") -> None:
         for node in other.nodes.values():

@@ -10,6 +10,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 import urllib.request
 import urllib.error
 
@@ -58,15 +59,24 @@ def _chat_anthropic(model: str, messages: list[dict], max_tokens: int,
         return None
 
 
-def _chat_claude_cli(messages: list[dict], timeout: int) -> str | None:
+def _chat_claude_cli(messages: list[dict], timeout: int,
+                     diag: dict | None = None) -> str | None:
     """claude CLI 구독 로그인으로 단발 완성 — API 키 불필요.
 
     순수 LLM 완성으로 쓰려면 프로젝트 컨텍스트(CLAUDE.md·git·MCP)를 끊어야 한다:
     - system 역할은 --system-prompt 로 전체 override(기본 에이전트 프롬프트 대체)
     - 중립 임시 디렉토리에서 실행(repo cwd의 CLAUDE.md/git 오염 차단)
+
+    diag를 주면 실패 사유를 담아 준다. 이걸 안 하면 호출자는 None만 받고, 화면에는
+    "변환 실패"만 남아 왜 실패했는지 영영 알 수 없다(실측: 간헐 실패인데 진단 불가).
     """
     import tempfile
     from .auth import claude_command
+
+    def _note(reason: str) -> None:
+        if diag is not None:
+            diag["reason"] = reason
+
     system = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
     user = "\n\n".join(m["content"] for m in messages if m["role"] != "system")
     args = ["-p", user, "--output-format", "text"]
@@ -74,23 +84,35 @@ def _chat_claude_cli(messages: list[dict], timeout: int) -> str | None:
         args += ["--system-prompt", system]
     command = claude_command(args)
     if command is None:
+        _note("claude CLI를 찾지 못했습니다")
         return None
     try:
         with tempfile.TemporaryDirectory() as neutral:
             result = subprocess.run(
                 command, cwd=neutral, capture_output=True, text=True,
                 encoding="utf-8", errors="replace", timeout=timeout)
-    except (subprocess.TimeoutExpired, OSError):
+    except subprocess.TimeoutExpired:
+        _note(f"{timeout}초 안에 응답이 없었습니다")
+        return None
+    except OSError as error:
+        _note(f"실행 실패: {str(error)[:120]}")
         return None
     if result.returncode != 0:
+        _note(f"종료코드 {result.returncode}: "
+              f"{(result.stderr or '').strip()[:160] or '(stderr 없음)'}")
         return None
-    return (result.stdout or "").strip() or None
+    text = (result.stdout or "").strip()
+    if not text:
+        _note(f"빈 응답(stderr: {(result.stderr or '').strip()[:120] or '없음'})")
+        return None
+    return text
 
 
 def chat(base: str, model: str, messages: list[dict], max_tokens: int = 800,
-         temperature: float = 0.2, timeout: int = 60) -> str | None:
+         temperature: float = 0.2, timeout: int = 60,
+         diag: dict | None = None) -> str | None:
     if base == "claude_cli":
-        return _chat_claude_cli(messages, timeout)
+        return _chat_claude_cli(messages, timeout, diag)
     if base.startswith("anthropic"):
         return _chat_anthropic(model, messages, max_tokens, temperature, timeout)
     return _chat_openai(base, model, messages, max_tokens, temperature, timeout)
@@ -185,21 +207,63 @@ def vision_judge(image_path: str, question: str,
         return None
 
 
+def _first_json_object(text: str) -> dict | None:
+    """응답에서 첫 JSON 오브젝트. 중괄호 균형을 세어 정확히 한 개만 떼어낸다.
+
+    `\\{.*\\}` 하나로 잡으면 탐욕적이라 첫 `{`부터 마지막 `}`까지 삼킨다. 모델이 JSON
+    앞뒤에 중괄호가 섞인 설명을 붙이는 순간 통째로 파싱 실패가 된다 — 그러면 착지
+    어휘가 없는 채로 검색이 돌아 엉뚱한 서비스로 샌다.
+    """
+    for start in range(len(text)):
+        if text[start] != "{":
+            continue
+        depth = 0
+        in_str = escaped = False
+        for i in range(start, len(text)):
+            ch = text[i]
+            if in_str:
+                if escaped:
+                    escaped = False
+                elif ch == "\\":
+                    escaped = True
+                elif ch == '"':
+                    in_str = False
+                continue
+            if ch == '"':
+                in_str = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        parsed = json.loads(text[start:i + 1])
+                    except json.JSONDecodeError:
+                        break          # 이 후보는 실패 — 다음 '{'부터 다시
+                    return parsed if isinstance(parsed, dict) else None
+        # 균형이 안 맞으면(잘린 응답) 다음 '{' 후보로
+    return None
+
+
 def json_chat(base: str, model: str, messages: list[dict],
-              retries: int = 0, **kw) -> dict | None:
+              retries: int = 0, diag: dict | None = None, **kw) -> dict | None:
     """응답에서 첫 JSON 오브젝트를 관대하게 파싱.
 
     retries>0이면 빈 응답·파싱 실패 시 그만큼 다시 시도한다. claude CLI 구독은 가끔
     빈 stdout을 돌려주는데, 한 번의 실패로 착지 어휘 변환이 통째로 날아가면 검색이
-    엉뚱한 서비스로 샌다 — 착지처럼 결과가 걸린 호출에서만 켠다.
+    엉뚱한 서비스로 샌다 — 착지처럼 결과가 걸린 호출에서만 켠다. 실패는 간헐적이라
+    시도 사이를 조금 띄운다(즉시 재시도는 같은 순간의 장애를 그대로 다시 맞는다).
     """
+    last = {}
     for attempt in range(retries + 1):
-        text = chat(base, model, messages, **kw)
+        if attempt:
+            time.sleep(min(2.0, 0.5 * attempt))
+        text = chat(base, model, messages, diag=last, **kw)
         if text:
-            match = re.search(r"\{.*\}", text, re.S)
-            if match:
-                try:
-                    return json.loads(match.group(0))
-                except json.JSONDecodeError:
-                    pass
+            parsed = _first_json_object(text)
+            if parsed is not None:
+                return parsed
+            last = {"reason": f"JSON을 찾지 못했습니다(응답 {len(text)}자)"}
+    if diag is not None and last.get("reason"):
+        diag["reason"] = last["reason"]
     return None

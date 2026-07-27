@@ -23,8 +23,11 @@ def _action_from_events(session_name: str, events: list[dict]) -> dict | None:
     pushed = any(e.get("step") == "push" and e.get("status") == "ok" for e in events)
     mr = next((e.get("url") for e in events if e.get("step") == "mr_create" and e.get("url")), "")
     committed = any(e.get("step") == "commit" and e.get("status") == "ok" for e in events)
+    # base는 화면용이라 "develop(최신)" 같은 꾸민 문자열이 들어온다 — 그걸 git에 넘기면
+    # checkout이 실패하고, 이어지는 브랜치 삭제도 "아직 체크아웃 중"이라 함께 실패해
+    # 되돌리기가 통째로 죽는다. 실제 체크아웃했던 이름(checked_out)을 먼저 쓴다.
     return {"session": session_name, "branch": branch_ev.get("branch"),
-            "base": branch_ev.get("base", ""), "repo": repo,
+            "base": branch_ev.get("checked_out") or branch_ev.get("base", ""), "repo": repo,
             "pushed": pushed, "mr": mr, "committed": committed}
 
 

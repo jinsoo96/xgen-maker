@@ -16,7 +16,9 @@ def _index(graph: Graph) -> Bm25Index:
     직렬화하려다 깨진다. 중심성(PageRank)도 여기서 함께 계산해 색인에 넘긴다 —
     질의와 무관한 구조 신호라 색인 수명과 같이 캐시하면 된다.
     """
-    version = len(graph.nodes)
+    # 노드 '개수'로 무효화하면 개명처럼 수가 그대로인 변경을 놓쳐 옛 색인이 남는다
+    # (실측: 갱신 뒤 새 심볼이 검색에 아예 안 잡히고 재착지가 빈 결과였다).
+    version = getattr(graph, "rev", len(graph.nodes))
     cached = graph.__dict__.get("_bm25")
     if cached is not None and graph.__dict__.get("_bm25_ver") == version:
         return cached

@@ -203,7 +203,10 @@ class MakerLoop:
             # 프롬프트는 짧게. 규칙을 길게 늘어놓으면 claude CLI가 JSON을 못 내고 실패한다
             # (실측: 긴 프롬프트 → None, 짧은 프롬프트 → 깨끗한 단어). 지어낸 클래스명 대신
             # 요청의 도메인 단어를 영어로 — 그게 실제 코드와 훨씬 잘 맞는다.
-            # 착지가 이 변환에 걸려 있다 — CLI가 가끔 빈 응답을 내므로 한 번 더 시도한다.
+            # 착지가 이 변환에 걸려 있다 — 실패하면 한글 원문만으로 검색해 엉뚱한
+            # 서비스로 샌다(실측). CLI가 간헐적으로 빈 응답을 내므로 여러 번 시도하고,
+            # 그래도 실패하면 이유를 화면에 남긴다(전엔 이유 없이 "실패"만 떴다).
+            expand_diag: dict = {}
             expanded = llm.json_chat(config.llm_base, config.llm_model, [
                 {"role": "system", "content":
                  'Extract 4-7 plain lowercase english search words from the dev request '
@@ -211,7 +214,8 @@ class MakerLoop:
                  'service name given (gateway, workflow, frontend, model). Do not invent '
                  'class names. Also give a 2-4 word hyphen branch slug for the work. '
                  'Reply JSON only: {"keywords": ["..."], "branch": "..."}'},
-                {"role": "user", "content": query}], max_tokens=200, timeout=45, retries=1)
+                {"role": "user", "content": query}], max_tokens=200, timeout=45,
+                retries=3, diag=expand_diag)
             if expanded and expanded.get("keywords"):
                 keyword_query = " ".join(str(k) for k in expanded["keywords"])
                 journal.event("query_expand", "ok", keywords=keyword_query)
@@ -222,7 +226,9 @@ class MakerLoop:
                 landing = _prefer(search(self.graph, keyword_query, k=8), landing, k=8)
             else:
                 journal.event("query_expand", "fail",
-                              note="코드 어휘 변환 실패 — 원문 검색 결과만 사용합니다")
+                              note="코드 어휘 변환 실패 — 원문 검색 결과만 사용합니다"
+                                   + (f" ({expand_diag['reason']})"
+                                      if expand_diag.get("reason") else ""))
 
         # 요청이 화면 주소·파일·심볼을 직접 지목했다면 그건 추측할 필요가 없다.
         # 그래프에서 그대로 찾아 관계를 타고 나가면 범위가 정확히 좁혀진다.
@@ -417,7 +423,11 @@ class MakerLoop:
         # base는 '어디서 분기했는가'다. 체크아웃돼 있던 브랜치 이름을 적으면, 최신
         # target에서 딴 경우에도 사람의 작업 브랜치에서 딴 것처럼 읽힌다.
         journal.event("branch", "ok", branch=branch, repo=repo,
-                      base=(f"{config.target_branch}(최신)" if base_ref else base_branch),
+                      # base는 기계가 쓰는 값이다(되돌리기가 이걸로 checkout 한다).
+                      # 꾸민 문자열은 base_label에 따로 담는다 — 섞으면 되돌리기가
+                      # "develop(최신)"을 체크아웃하려다 실패한다.
+                      base=base_branch,
+                      base_label=(f"{config.target_branch}(최신)" if base_ref else base_branch),
                       checked_out=base_branch)
         report["branch"] = branch  # 재착지로 top이 바뀌어도 브랜치명은 최초 결정 유지
 

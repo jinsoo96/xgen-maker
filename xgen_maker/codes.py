@@ -66,6 +66,20 @@ class Outcome(str, Enum):
     MR_PREPARED = "mr_prepared"       # 정상 — MR 준비(observe) 또는 MR 생성(act)
 
 
+# 종료코드 1로 다뤄야 하는 결과 — CLI/CI가 성공으로 오인하면 안 되는 것들.
+# 여기 한 곳에서만 센다. 호출부가 문자열을 각자 나열하면 새 실패 결과가 생겼을 때
+# 조용히 빠진다(실측: checks_failed·unauthorized가 빠져 테스트 실패에도 exit 0이었다).
+FAILURE_OUTCOMES = frozenset({
+    Outcome.NO_LANDING.value,
+    Outcome.BRANCH_FAILED.value,
+    Outcome.IMPLEMENT_FAILED.value,
+    Outcome.CHECKS_FAILED.value,
+    Outcome.JUDGE_FAILED.value,
+    Outcome.PUSH_FAILED.value,
+    Outcome.UNAUTHORIZED.value,
+})
+
+
 class ErrorCode(str, Enum):
     """실패 원인의 안정 식별자 — maker.<component>.<reason>. 로그 그룹핑·재시도 분기용."""
     GIT_DIRTY = "maker.git.dirty_worktree"

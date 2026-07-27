@@ -124,6 +124,13 @@ def build_maker_stage(engine, order: int = 99, phase: str = "loop"):
                     self._real.event(step, status, **data)
                     step_q.put((step, status, describe(step, status, data)))
 
+                def cancelled(self) -> bool:
+                    # 수렴 루프가 getattr(journal, "cancelled", None)로 집어간다.
+                    # 이걸 빼먹으면 중지 버튼이 단계 경계에서만 듣고, 오래 도는
+                    # 에이전트는 타임아웃까지 레포를 계속 고친다(엔진 경유 회귀).
+                    inner = getattr(self._real, "cancelled", None)
+                    return bool(inner()) if callable(inner) else False
+
                 def close(self, outcome):
                     step_q.put(None)
                     return self._real.close(outcome)

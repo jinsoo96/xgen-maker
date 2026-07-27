@@ -178,6 +178,7 @@ def refresh_files(graph: Graph, repo: str, repo_root: str | Path,
     # 심볼이 그대로 되살아나면 그 엣지는 여전히 유효하다.
     graph.edges = [e for e in graph.edges if e["src"] not in dropped]
     graph._edge_seen = {(e["src"], e["dst"], e["kind"]) for e in graph.edges}
+    graph.touch()          # 파생 캐시(검색 색인·중심성) 무효화
 
     known = {n["path"] for n in graph.nodes.values()
              if n["repo"] == repo and n["kind"] == "file"} | targets
@@ -188,6 +189,14 @@ def refresh_files(graph: Graph, repo: str, repo_root: str | Path,
     if src is not None and not getattr(src, "ref", ""):
         src = None                     # ref를 못 열면 워킹트리로 폴백(open_source 계약)
     available = set(src.list_files()) if src is not None else None
+
+    # 워크스페이스·별칭 해석기. 빌드는 이걸 쓰는데 증분 갱신이 안 쓰면, 파일이 바뀔 때마다
+    # `@scope/pkg`·`@/alias` import 엣지가 지워지고 다시 안 생긴다(상대경로만 해석되므로).
+    # 동기화할수록 프론트엔드 패키지 간 연결이 닳는다.
+    resolver = None
+    if any(Path(f).suffix in TS_EXTS for f in targets):
+        resolver = ImportResolver(repo_root, known,
+                                  scan_workspaces(repo_root), scan_aliases(repo_root))
 
     ts_files: list[str] = []
     for rel in sorted(targets):
@@ -201,7 +210,8 @@ def refresh_files(graph: Graph, repo: str, repo_root: str | Path,
             if suffix in PY_EXTS:
                 extract_python_file(graph, repo, repo_root, rel, known, src=src)
             elif suffix in TS_EXTS:
-                extract_ts_file(graph, repo, repo_root, rel, known, src=src)
+                extract_ts_file(graph, repo, repo_root, rel, known,
+                                resolver=resolver, src=src)
                 ts_files.append(rel)      # Next.js 라우트(page.tsx)는 TS 파일에서만 나온다
             elif suffix in RUST_EXTS:
                 extract_rust_file(graph, repo, repo_root, rel, known, src=src)
@@ -219,6 +229,7 @@ def refresh_files(graph: Graph, repo: str, repo_root: str | Path,
     if gone:
         graph.edges = [e for e in graph.edges if e["dst"] not in gone]
         graph._edge_seen = {(e["src"], e["dst"], e["kind"]) for e in graph.edges}
+        graph.touch()
     return len(targets)
 
 

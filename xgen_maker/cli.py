@@ -16,6 +16,7 @@ import json
 import sys
 from pathlib import Path
 
+from .codes import FAILURE_OUTCOMES
 from .config import MakerConfig
 from .kg.graph import Graph
 from .kg.build import build_repo, merge_and_link
@@ -302,8 +303,12 @@ def cmd_run(args) -> None:
     if not getattr(args, "no_engine", False):
         from .engine_stage import run_via_engine, _load_engine
         if _load_engine() is not None:
+            # 이미 완성된 config 객체를 그대로 넘긴다. 경로만 넘기면 엔진이 파일에서
+            # 다시 읽어 --kg·--verbose 같은 명령행 인자가 조용히 무시된다
+            # (실측: --kg를 줘도 다른 지식그래프로 돌았다).
             r = run_via_engine(args.query, args.config,
-                               allow_write=config.allow_write, mode=config.mode)
+                               allow_write=config.allow_write, mode=config.mode,
+                               config_obj=config)
             if r.get("ok"):
                 report = r["report"]
                 stream = r.get("engine_state", {}).get("stream", [])
@@ -311,16 +316,14 @@ def cmd_run(args) -> None:
                     mark = {"ok": "✓", "pass": "✓", "fail": "✗", "skipped": "·"}.get(status, "▸")
                     print(f"  {mark} {step:14} {detail}")
                 print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
-                if report.get("outcome") in ("judge_failed", "branch_failed",
-                                             "implement_failed", "push_failed", "no_landing"):
+                if report.get("outcome") in FAILURE_OUTCOMES:
                     sys.exit(1)
                 return
             print(f"[엔진 구동 실패 — standalone으로 폴백] {r.get('reason','')}")
 
     report = MakerLoop(config).run(args.query)
     print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
-    if report.get("outcome") in ("judge_failed", "branch_failed", "implement_failed",
-                                 "push_failed", "no_landing"):
+    if report.get("outcome") in FAILURE_OUTCOMES:
         sys.exit(1)
 
 

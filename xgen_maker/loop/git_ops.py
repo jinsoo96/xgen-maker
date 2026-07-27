@@ -95,16 +95,37 @@ class GitRepo:
     def checkout(self, name: str) -> None:
         self._run("checkout", name)
 
+    # 검증(테스트 실행)이 스스로 만들어 내는 부산물. 요청과 무관하고, MR에 들어가면
+    # 리뷰어가 먼저 보는 것이 바이트코드가 된다. 레포에 .gitignore가 있으면 git이
+    # 알아서 걸러 주지만, 없는 레포에서는 우리가 만든 쓰레기를 우리가 커밋하게 된다.
+    _OWN_BUILD_ARTIFACTS = ("__pycache__/", ".pytest_cache/")
+
+    @classmethod
+    def _is_own_artifact(cls, rel: str) -> bool:
+        path = rel.replace("\\", "/")
+        return (path.endswith((".pyc", ".pyo"))
+                or any(part in path for part in cls._OWN_BUILD_ARTIFACTS))
+
     def changed_files(self, base: str = "HEAD") -> list[str]:
         tracked = self._run("diff", "--name-only", base).splitlines()
         untracked = self._run("ls-files", "--others", "--exclude-standard").splitlines()
-        return sorted({f.strip() for f in tracked + untracked if f.strip()})
+        return sorted({f.strip() for f in tracked + untracked
+                       if f.strip() and not self._is_own_artifact(f.strip())})
 
     def diff(self, base: str = "HEAD") -> str:
         return self._run("diff", base)
 
     def stage_all(self) -> None:
-        self._run("add", "-A")
+        """변경으로 인정한 파일만 스테이징한다.
+
+        `add -A`로 워킹트리를 통째로 담으면, 요청과 무관하게 굴러다니던 파일과
+        검증이 만들어 낸 부산물까지 MR에 들어간다 — 화면에는 "N개 파일 수정"이라
+        떠 있는데 실제 커밋은 그보다 많아진다(실측: 바이트코드 2개가 딸려 들어갔다).
+        """
+        paths = self.changed_files()
+        if not paths:
+            return
+        self._run("add", "--", *paths)
 
     def staged_files(self, base: str = "HEAD") -> list[str]:
         lines = self._run("diff", "--cached", "--name-only", base).splitlines()
@@ -115,7 +136,7 @@ class GitRepo:
 
     def commit_all(self, title: str, body: str,
                    author_name: str = "", author_email: str = "") -> str:
-        self._run("add", "-A")
+        self.stage_all()          # 인정한 변경만 — 워킹트리를 통째로 쓸어담지 않는다
         message = f"{title}\n\n{body}" if body else title
         # 저자 지정 시 대상 레포 git config와 무관하게 강제(-c 로 저자·커미터 동시 고정)
         ident: list[str] = []

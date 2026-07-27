@@ -71,7 +71,8 @@ def describe(step: str, status: str, data: dict) -> str:
     if step == "branch":
         if status == "fail":
             return get("error", "브랜치를 만들지 못했습니다")
-        return f"{get('branch', '')} 생성 (기준 {get('base', '')})"
+        # 화면에는 꾸민 이름(base_label)을, 없으면 실제 기준(base)을
+        return f"{get('branch', '')} 생성 (기준 {get('base_label') or get('base', '')})"
     if step == "implement":
         if status == "start":
             phase = "다시 시도" if get("phase") == "retry" else "첫 시도"

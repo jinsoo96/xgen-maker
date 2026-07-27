@@ -1515,15 +1515,20 @@ class MakerWebHandler(BaseHTTPRequestHandler):
             g = self.graph
             meta = g.meta or {}
             heads = meta.get("repo_heads", {}) or {}
-            # 1) 신선도 — 기록된 HEAD vs 현재 git HEAD
+            # 1) 신선도 — 기록된 커밋 vs 그래프를 만든 기준의 현재 커밋.
+            # 기준(ref)이 있는데 로컬 HEAD와 비교하면, 사람이 작업 브랜치를 체크아웃해
+            # 둔 것만으로 늘 "낡음"이 뜬다. 그러면 진짜 낡았을 때를 구별할 수 없다.
             fresh = []
             for s in meta.get("sources", []):
                 repo, root = s.get("repo"), s.get("root")
                 if not repo or not root:
                     continue
+                ref = s.get("ref") or ""
                 rec = (heads.get(repo) or "")[:12]
-                cur = (git_head(root) or "")[:12]
+                cur = (git_head(root, ref) if ref else git_head(root) or "")
+                cur = (cur or "")[:12]
                 fresh.append({"repo": repo, "recorded": rec, "current": cur,
+                              "basis": ref or "워킹트리",
                               "stale": bool(cur and rec != cur), "no_head": not rec})
             # 2) 무결성
             ids = set(g.nodes)
