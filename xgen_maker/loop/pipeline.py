@@ -475,7 +475,7 @@ class MakerLoop:
         report["checks"] = checks["summary"]
         report["sandbox"] = sandbox["status"]
         report["sandbox_isolated"] = bool(sandbox.get("isolated"))
-        report["regression"] = checks.get("regression")  # verified|unverified|failed|none
+        report["regression"] = checks.get("regression")  # verified|partial|unverified|failed|none
 
         if not conv["converged"]:
             # 수렴 실패 — 마지막 실패 원인으로 분기(브랜치는 조사용 보존)
@@ -593,10 +593,16 @@ class MakerLoop:
                                      regression=checks.get("regression", ""),
                                      sandbox_isolated=bool(sandbox.get("isolated")))
         # 정직성 신호 — 레거시가 미검증인 채 MR이 준비되면 명시(오해 방지)
+        # 정직성 신호 — 검증이 온전하지 않은 채 MR이 준비되면 명시(오해 방지)
         if checks.get("regression") == "unverified":
             journal.event("mr_ready", "warn", regression="unverified",
                           note="레거시 회귀 미검증(테스트 환경 없음)")
             report["regression_warning"] = "레거시 회귀 미검증 — 테스트 환경에서 재검증 필요"
+        elif checks.get("regression") == "partial":
+            journal.event("mr_ready", "warn", regression="partial",
+                          note="변경 관련 테스트만 통과 — 전체 스위트는 미실행")
+            report["regression_warning"] = ("부분 검증 — 관련 테스트만 통과, "
+                                            "안 돌린 영역의 회귀는 미보증")
         draft = save_draft(journal.dir, title, body)
         commit = repo_git.commit_all(title, body,
                                      author_name=config.git_author_name,

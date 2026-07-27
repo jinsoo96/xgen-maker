@@ -62,8 +62,10 @@ def related_tests(repo_root: Path, py_changed: list[str]) -> list[str]:
     modules = {Path(f).stem for f in py_changed} | {
         Path(f).as_posix().replace("/", ".")[:-3] for f in py_changed}
     found: set[str] = set()
+    every: set[str] = set()
     for test in tests_dir.rglob("test_*.py"):
         rel = test.relative_to(repo_root).as_posix()
+        every.add(rel)
         if any(s and s in test.stem for s in stems):
             found.add(rel); continue
         try:
@@ -72,6 +74,9 @@ def related_tests(repo_root: Path, py_changed: list[str]) -> list[str]:
             continue
         if any(m and m in text for m in modules):
             found.add(rel)
+    if found == every:
+        # 고른 것이 곧 전체다 — 굳이 좁혔다고 말하면 그것도 사실이 아니다.
+        return []
     return sorted(found)
 
 def run_pytest_with_deps(repo: str, repo_root: str | Path, changed: list[str],
@@ -124,9 +129,9 @@ def run_pytest_with_deps(repo: str, repo_root: str | Path, changed: list[str],
                 installed.append(pkg)
                 continue
             # 설치 실패(사설 등) — 더 시도해도 같으니 그대로 판정으로 넘어간다
-        return _classify(proc, out, installed)
+        return _classify(proc, out, installed, targets)
 
-    return _classify(proc, out, installed)
+    return _classify(proc, out, installed, targets)
 
 
 def _next_installable(output: str, tried: set[str]) -> str | None:
@@ -143,18 +148,25 @@ def _collected_count(output: str) -> int:
     return int(m.group(1)) if m else 0
 
 
-def _classify(proc, output: str, installed: list[str]) -> dict:
+def _classify(proc, output: str, installed: list[str],
+              targets: list[str] | None = None) -> dict:
     tail = output[-1500:]
     code = proc.returncode
     passed = re.search(r"(\d+) passed", output)
     failed = re.search(r"(\d+) failed", output)
     npass = int(passed.group(1)) if passed else 0
     nfail = int(failed.group(1)) if failed else 0
-    base = {"name": "pytest", "installed": installed, "passed": npass, "failed": nfail}
+    # 어느 범위를 돌렸는지 결과에 남긴다. 관련 테스트만 돌고서 "스위트 통과"라고
+    # 적으면 과대 주장이 된다 — 안 돌린 곳이 깨졌을 수 있다.
+    base = {"name": "pytest", "installed": installed, "passed": npass, "failed": nfail,
+            "scope": ("related" if targets else "full"),
+            "scope_files": list(targets or [])}
     if nfail:
         return {**base, "status": "failed", "output": tail}
     if npass:
-        return {**base, "status": "passed", "output": tail[-400:]}
+        note = (f"변경 관련 테스트 {len(targets)}개만 실행(전체 스위트 아님)" if targets
+                else "전체 스위트 실행")
+        return {**base, "status": "passed", "reason": note, "output": tail[-400:]}
     if code == 5:                                   # pytest: 수집된 테스트 없음
         return {**base, "status": "skipped", "kind": "na", "reason": "수집된 테스트 없음"}
     # 통과도 실패도 아니고(수집 자체가 사설 의존성으로 다 깨진 경우) — 정직하게 남긴다

@@ -513,3 +513,34 @@ class TestOnlyRelatedTestsRun(unittest.TestCase):
             (root / "tests" / "test_x.py").write_text("def test(): pass\n", encoding="utf-8")
             self.assertEqual(related_tests(root, ["totally/unrelated.py"]), [],
                              "못 찾으면 빈 리스트여야 전체 스위트로 폴백한다")
+
+
+class TestPartialVerificationIsNotClaimedAsFull(unittest.TestCase):
+    """회귀: 관련 테스트만 돌리도록 바꾸면서 결과 라벨은 'verified'로 두었다.
+
+    MR 초안에는 "레포 테스트 스위트가 실제로 통과(레거시 안 깨짐 확인)"이라 적힌다 —
+    실제로는 몇 개만 돌았는데 전체를 보증하는 문장이 나간다. 과대 주장이다.
+    """
+
+    def test_related_only_is_partial_not_verified(self):
+        from xgen_maker.loop.testing import regression_verdict
+        self.assertEqual(regression_verdict(
+            [{"name": "pytest", "status": "passed", "scope": "related"}]), "partial")
+
+    def test_full_suite_is_verified(self):
+        from xgen_maker.loop.testing import regression_verdict
+        self.assertEqual(regression_verdict(
+            [{"name": "pytest", "status": "passed", "scope": "full"}]), "verified")
+
+    def test_failure_still_wins(self):
+        from xgen_maker.loop.testing import regression_verdict
+        self.assertEqual(regression_verdict(
+            [{"name": "pytest", "status": "failed", "scope": "related"}]), "failed")
+
+    def test_mr_draft_says_partial_is_not_a_guarantee(self):
+        from xgen_maker.loop.mr import build_mr_draft
+        _, body = build_mr_draft("q", "refactor", "b", "develop", ["a.py"], "",
+                                 [], {"score": 1.0, "theta": 0.7, "source": "heuristic"},
+                                 regression="partial")
+        self.assertIn("부분 검증", body)
+        self.assertIn("보증하지 않음", body)

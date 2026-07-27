@@ -147,6 +147,7 @@ def regression_verdict(results: list[dict]) -> str:
 
     - failed    : 회귀 테스트가 실제로 실패(레거시 개박살) → 차단
     - unverified: 돌릴 테스트가 있는데 환경 탓 못 돌림(kind=env) → 미검증 구멍
+    - partial   : 변경 관련 테스트만 통과(전체 스위트는 안 돌림) — 안 돌린 곳은 미보증
     - verified  : 회귀 테스트가 실제로 통과
     - none      : 돌릴 회귀 테스트 자체가 없음(비대상)
     """
@@ -155,7 +156,12 @@ def regression_verdict(results: list[dict]) -> str:
         return "failed"
     if any(r["status"] == "skipped" and r.get("kind") == "env" for r in tests):
         return "unverified"
-    if any(r["status"] == "passed" for r in tests):
+    passed = [r for r in tests if r["status"] == "passed"]
+    if passed:
+        # 관련 테스트만 돌았으면 "스위트 통과"라고 말할 수 없다. 안 돌린 곳이
+        # 깨졌을 수 있으므로 그 사실을 결과 자체에 남긴다.
+        if any(r.get("scope") == "related" for r in passed):
+            return "partial"
         return "verified"
     return "none"
 
