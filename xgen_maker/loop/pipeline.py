@@ -357,6 +357,11 @@ class MakerLoop:
             # 켠다 — 사람 체크아웃을 건드리지 않고 별도 worktree에서 작업한다.
             # "auto"가 이 판단을 하고, True/False는 명시적 강제다.
             iso_cfg = getattr(config, "isolate_worktree", "auto")
+            # 설정 파일·JSON·화면 어디서 와도 같게 읽는다. 문자열 "false"는 비어 있지
+            # 않아 bool()로는 참이 된다 — 끄려고 한 설정이 켜진 채로 도는 조용한 함정.
+            if isinstance(iso_cfg, str):
+                token = iso_cfg.strip().lower()
+                iso_cfg = "auto" if token == "auto" else token in ("1", "true", "on", "yes")
             clean = repo_git.is_clean()
             if iso_cfg == "auto":
                 isolate = not clean
@@ -504,7 +509,12 @@ class MakerLoop:
         # ⑦-3 UI/UX 검증 — 영향 라우트 스냅샷 + 픽셀diff + 비전판정 (Visual Feedback Loop)
         # 프리뷰 주소가 있으면 돈다 — 렌더할 곳이 있다는 게 곧 검증하라는 뜻이다.
         # (도달 불가·비UI 변경은 ui_verify 안에서 사유와 함께 건너뛴다)
-        if not config.preview_base:
+        if not getattr(config, "enable_ui_verify", True):
+            # 설정에 스위치를 두고 코드가 안 읽으면, 화면의 토글은 아무것도 하지 않는
+            # 장식이 된다(꺼도 스냅샷·비전 호출이 계속 돌았다).
+            journal.event("ui_verify", "skipped",
+                          reason="설정에서 화면 검증이 꺼져 있습니다")
+        elif not config.preview_base:
             journal.event("ui_verify", "skipped",
                           reason="프리뷰 주소(preview_base) 미설정 — 렌더할 화면이 없습니다")
         else:
@@ -611,6 +621,14 @@ class MakerLoop:
         # ⑩ 사후: KG 증분 갱신 + journal
         try:
             refreshed = refresh_files(self.graph, repo, repo_path, changed)
+            # 재추출은 노드를 새로 만든다 — 사람이 손으로 단 것(요약·메모·deprecated)이
+            # 함께 날아간다. 다른 갱신 경로는 모두 오버레이를 다시 씌우는데 여기만
+            # 빠져 있었다. 그러면 "여기 쓰지 마라"고 표시해 둔 노드가 표시를 잃고,
+            # 바로 다음 질의가 그 자리로 착지한다.
+            from ..kg.overlay import load_overlay, apply_overlay
+            overlay = load_overlay(Path(config.kg_path).parent / "overlay.json")
+            if overlay["node_overrides"] or overlay["custom_edges"]:
+                apply_overlay(self.graph, overlay)
             # repo_heads 전진 — 반드시 **메인 클론**의 HEAD로. worktree의 feature HEAD를 넣으면
             # 다음 kg sync가 메인 클론에서 그 sha를 못 봐 역방향 diff로 KG를 되돌려버린다.
             # 그래프가 ref(origin/develop) 기준으로 만들어졌다면 그 기준을 유지한다 —

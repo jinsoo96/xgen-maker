@@ -962,7 +962,7 @@ document.getElementById('f').addEventListener('submit',e=>{
    if(e.landing)showLanding(e.landing);}
   else if(e.type==='result'){const r=e.report; let html='<b>결과: '+esc(outcomeLabel(r.outcome))+'</b>';
    if(r.landing&&r.landing.length)showLanding(r.landing);
-   if(r.branch)html+='<br>'+(r.outcome==='plan_only'?'제안 브랜치명(아직 만들지 않음): ':'브랜치: ')+esc(r.branch); if(r.iterations)html+=' · 수렴 '+r.iterations+'회';
+   if(r.branch)html+='<br>'+(r.outcome==='planned'?'제안 브랜치명(아직 만들지 않음): ':'브랜치: ')+esc(r.branch); if(r.iterations)html+=' · 수렴 '+r.iterations+'회';
    if(r.mr_draft&&r.session_dir)html+='<br><button class="draftbtn ghost" data-sid="'+esc(r.session_dir.split(/[\\/]/).pop())+'">📄 병합 요청 초안 보기</button>';
    if(r.mr&&r.mr.url)html+='<br>MR: <a href="'+esc(r.mr.url)+'" target=_blank>'+esc(r.mr.url)+'</a>';
    if(r.answer)html+='<br>'+esc(r.answer).replace(/\\n/g,'<br>');
@@ -1494,7 +1494,9 @@ class MakerWebHandler(BaseHTTPRequestHandler):
         "target_branch": ("대상 브랜치", "str"),
         "mode": ("모드", "choice:observe,act"),
         "fetch_latest": ("작업 전 최신 코드 받기", "bool"),
-        "isolate_worktree": ("별도 작업 공간 사용", "bool"),
+        # 3상태다(auto/on/off). bool로 편집하면 auto가 사라지고, 되돌릴 값이 화면에
+        # 없어 재시작해야 복구된다 — off로 둔 채 워킹트리가 더러우면 실행이 그냥 실패한다.
+        "isolate_worktree": ("별도 작업 공간 사용", "choice:auto,true,false"),
         "enable_verify": ("로컬 환경 확인", "bool"),
         "enable_ui_verify": ("화면 검증", "bool"),
         "ui_converge": ("화면 문제 시 다시 시도", "bool"),

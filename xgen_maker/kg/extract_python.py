@@ -105,7 +105,11 @@ def extract_python_file(graph: Graph, repo: str, repo_root: Path, rel: str,
                                        node.lineno, method=method, route_path=path,
                                        handler=qualname)
                         graph.add_edge(file_id, ep_id, "contains")
-                        graph.add_edge(ep_id, symbol_id, "calls", role="handler")
+                        # 라우트→핸들러는 route_of다(Rust 추출기와 같은 이름).
+                        # 여기만 "calls"로 부르면, 라우트를 지목한 요청이 앵커 확장에서
+                        # 핸들러에 못 닿는다 — 앵커는 route_of를 타고 calls는 안 탄다.
+                        # 같은 관계를 언어마다 다르게 부르면 착지가 언어에 따라 달라진다.
+                        graph.add_edge(ep_id, symbol_id, "route_of", role="handler")
 
     walk_body(tree.body, file_id)
 

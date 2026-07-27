@@ -1,6 +1,7 @@
-"""⑦ 로컬 검증(T4) — 스택 프로파일 제안 + Playwright 스냅샷 + 리소스 가드.
+"""⑦ 로컬 검증(T4) — 스택 프로파일 제안 + Playwright 스냅샷.
 
-리소스 가드(RAM 16GB): 다른 docker 스택이 떠 있으면 추가 기동을 거부한다.
+스택을 자동으로 띄우지 않는다(RAM 16GB 머신이라 남의 스택을 밀어낼 수 있다).
+이미 떠 있는 프리뷰만 재사용하고, 없으면 어떤 프로파일로 띄우면 되는지 알려준다.
 enable_verify=False(기본)면 전 과정을 스킵하고 사유를 보고한다.
 """
 from __future__ import annotations
@@ -18,21 +19,6 @@ def suggest_profiles(repos_touched: list[str], config=None) -> list[str]:
     return sorted({mapping.get(r, r) for r in repos_touched if r})
 
 
-def docker_guard(max_running: int = 0) -> dict:
-    if not shutil.which("docker"):
-        return {"ok": False, "reason": "docker 미발견"}
-    try:
-        # encoding 미지정이면 Windows 기본 코드페이지(cp949 등)로 디코드해, docker가
-        # 지역화된 오류를 뱉는 순간 UnicodeDecodeError로 터진다(except 밖이라 전파).
-        result = subprocess.run(["docker", "ps", "-q"], capture_output=True,
-                                text=True, encoding="utf-8", errors="replace", timeout=15)
-    except (subprocess.TimeoutExpired, OSError):
-        return {"ok": False, "reason": "docker ps 실패"}
-    running = len([line for line in result.stdout.splitlines() if line.strip()])
-    if running > max_running:
-        return {"ok": False, "reason": f"기존 컨테이너 {running}개 가동 중 — 추가 기동 거부(RAM 가드)",
-                "running": running}
-    return {"ok": True, "running": running}
 
 
 def _shim_command(exe_name: str, args: list[str]) -> list[str] | None:

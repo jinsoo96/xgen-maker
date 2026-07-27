@@ -60,7 +60,11 @@ def read_sessions(worklogs_dir: str | Path, limit: int = 20) -> list[dict]:
             continue
         query = next((e.get("query") for e in events if e.get("step") == "session_start"), "")
         outcome = next((e.get("status") for e in events if e.get("step") == "session_end"), "?")
-        branch = next((e.get("branch") for e in events if e.get("step") == "branch"), "")
+        # 성공한 branch 이벤트만. 실패 이벤트에는 branch가 없어 None이 잡히고,
+        # next()의 기본값은 '값을 못 찾았을 때'만 쓰이므로 None이 그대로 남는다.
+        branch = next((e.get("branch") for e in events
+                       if e.get("step") == "branch" and e.get("status") == "ok"
+                       and e.get("branch")), "")
         mr = next((e.get("url") for e in events if e.get("step") == "mr_create" and e.get("url")), "")
         env = next((e.get("env") for e in events if e.get("step") == "release"), "")
         sessions.append({"session": session_dir.name, "query": query,

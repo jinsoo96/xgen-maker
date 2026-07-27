@@ -232,3 +232,78 @@ class TestCommitContainsOnlyWhatWeReported(unittest.TestCase):
         self.assertIn("M", out); self.assertIn("keep.py", out)
         self.assertIn("A", out); self.assertIn("new.py", out)
         self.assertIn("D", out); self.assertIn("gone.py", out)
+
+
+class TestRemainingAuditFixes(unittest.TestCase):
+    """감사 2차 — 화면·설정·그래프 순회에서 조용히 어긋나던 것들."""
+
+    def test_ui_verify_switch_is_actually_read(self):
+        """회귀: 대시보드의 '화면 검증' 토글이 장식이었다(코드가 안 읽어 항상 돌았다)."""
+        source = Path("xgen_maker/loop/pipeline.py").read_text(encoding="utf-8")
+        self.assertIn('getattr(config, "enable_ui_verify", True)', source)
+
+    def test_isolate_worktree_is_tristate_everywhere(self):
+        """회귀: 3상태(auto/on/off)를 웹이 bool로 편집해 auto를 복구할 수 없었고,
+        문자열 "false"가 bool()로 참이 되어 꺼도 켜진 채 돌았다."""
+        web = Path("xgen_maker/web.py").read_text(encoding="utf-8")
+        self.assertIn('"choice:auto,true,false"', web)
+        pipe = Path("xgen_maker/loop/pipeline.py").read_text(encoding="utf-8")
+        self.assertIn('token in ("1", "true", "on", "yes")', pipe)
+
+    def test_python_endpoint_links_handler_as_route_of(self):
+        """회귀: 같은 관계를 Python은 calls, Rust는 route_of로 불러 앵커 확장이
+        언어에 따라 달랐다(Python 라우트는 핸들러에 못 닿았다)."""
+        from xgen_maker.kg.build import build_repo
+        from xgen_maker.kg.anchor import find_anchors, expand
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "api.py").write_text(
+                'from fastapi import APIRouter\nrouter = APIRouter()\n\n'
+                '@router.get("/users/profile")\ndef read_profile():\n    return {}\n',
+                encoding="utf-8")
+            subprocess.run(["git", "init", "-q"], cwd=root, capture_output=True)
+            g = build_repo("svc", root)
+            kinds = {e["kind"] for e in g.edges if "#EP GET /users/profile" in e["src"]}
+            self.assertIn("route_of", kinds)
+            anchors = find_anchors(g, "/users/profile 고쳐줘")
+            scope = expand(g, anchors)
+            names = {(n.get("name") if isinstance(n, dict) else str(n)) for n in scope}
+        self.assertTrue(any("read_profile" in str(x) for x in names),
+                        "라우트를 지목했는데 핸들러가 확장 범위에 없다")
+
+    def test_impact_crosses_package_boundary(self):
+        """회귀: same_package를 안 타서 프론트 스코프 간 사용처가 안 보였다 —
+        에이전트에게 건네는 '여기가 깨진다' 목록에서 통째로 빠졌다."""
+        from xgen_maker.kg.search import impact
+        g = Graph()
+        g.add_node("lib:feature:@x/ui", "feature", "@x/ui", "lib", "")
+        g.add_node("app:feature:@x/ui", "feature", "@x/ui", "app", "")
+        g.add_node("lib:btn.ts#Button", "function", "Button", "lib", "btn.ts", 1)
+        g.add_edge("lib:feature:@x/ui", "lib:btn.ts#Button", "contains")
+        g.add_edge("app:feature:@x/ui", "lib:feature:@x/ui", "same_package")
+        found = {d["id"] for d in impact(g, "lib:btn.ts#Button", depth=3)}
+        self.assertTrue(any(i.startswith("app:") for i in found),
+                        "다른 스코프의 사용처에 도달하지 못했다")
+
+    def test_loop_reapplies_overlay_after_refresh(self):
+        """회귀: 루프 사후 갱신이 오버레이를 다시 안 씌워, 사람이 단 deprecated
+        표시가 사라지고 바로 다음 질의가 그 자리로 착지할 수 있었다."""
+        source = Path("xgen_maker/loop/pipeline.py").read_text(encoding="utf-8")
+        after = source.split("⑩ 사후", 1)[1][:900]
+        self.assertIn("apply_overlay", after, "사후 갱신 뒤 오버레이 재적용이 없다")
+
+    def test_retry_feedback_includes_veto_reason(self):
+        """회귀: veto(빈 diff·인프라 파일)는 reasons와 별도 필드라, 재시도 프롬프트에
+        사유가 빈 채로 나가 에이전트가 같은 실수를 반복했다."""
+        source = Path("xgen_maker/loop/converge.py").read_text(encoding="utf-8")
+        self.assertIn('judge_result.get("veto")', source)
+
+    def test_history_ignores_failed_branch_event(self):
+        source = Path("xgen_maker/loop/history.py").read_text(encoding="utf-8")
+        self.assertIn('e.get("status") == "ok"', source)
+
+    def test_no_phantom_resource_guard(self):
+        """회귀: 스택을 자동 기동하지 않는데 '가드가 막는다'고 적힌 죽은 함수가 있었다."""
+        import xgen_maker.loop.verify as verify_mod
+        self.assertFalse(hasattr(verify_mod, "docker_guard"))
+        self.assertNotIn("추가 기동을 거부한다", verify_mod.__doc__ or "")

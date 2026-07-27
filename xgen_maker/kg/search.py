@@ -67,7 +67,11 @@ def _dependents_index(graph: Graph) -> dict[str, set[str]]:
     index: dict[str, set[str]] = {}
     for edge in graph.edges:
         src, dst, kind = edge["src"], edge["dst"], edge["kind"]
-        if kind in ("imports", "calls", "resolves_to", "route_of", "contains"):
+        # same_package는 프론트엔드 스코프(app/lib/features)를 잇는 유일한 다리다.
+        # 빼면 "이걸 고치면 누가 깨지나"가 스코프 안에서만 보여, 에이전트에게 건네는
+        # 의존자 목록에서 다른 패키지의 사용처가 통째로 빠진다.
+        if kind in ("imports", "calls", "resolves_to", "route_of", "contains",
+                    "same_package"):
             index.setdefault(dst, set()).add(src)
     return index
 

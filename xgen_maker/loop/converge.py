@@ -92,7 +92,10 @@ def _feedback(checks: dict, sandbox: dict, judge_result: dict | None,
         if row["status"] == "failed":
             lines.append(f"● {row['name']} 실패: {str(row.get('output',''))[:600]}")
     if judge_result is not None and not judge_result["passed"]:
-        reasons = "; ".join(judge_result.get("reasons", []))
+        # veto(빈 diff·인프라 파일 등)는 reasons와 별도 필드로 온다. 빼면 재시도
+        # 프롬프트에 사유가 빈 채로 나가 에이전트가 같은 실수를 반복한다.
+        reasons = "; ".join([*judge_result.get("reasons", []),
+                             *([str(judge_result["veto"])] if judge_result.get("veto") else [])])
         lines.append(f"● 품질 게이트 미달(judge {judge_result.get('score')} < "
                      f"{judge_result.get('theta')}): {reasons}")
     if ui and ui.get("status") == "failed":
