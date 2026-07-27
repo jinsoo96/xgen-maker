@@ -371,11 +371,20 @@ class MakerLoop:
                     raise GitOpsError(
                         "워킹트리에 커밋 안 된 변경이 있습니다 — isolate_worktree를 auto나 "
                         "true로 두면 사람 체크아웃을 건드리지 않고 진행합니다")
+            # 저장소마다 통합 브랜치가 다르다(develop / main). 설정값을 그대로 밀면
+            # 그 브랜치가 없는 저장소에서 최신 받기가 실패하고, MR 초안이 존재하지도
+            # 않는 브랜치를 대상으로 적힌다. 이 저장소에서 실제로 쓰는 이름으로 푼다.
+            target_branch = repo_git.resolve_target_branch(config.target_branch)
+            if target_branch != config.target_branch:
+                journal.event("target_branch", "ok", resolved=target_branch,
+                              configured=config.target_branch,
+                              reason=f"이 저장소엔 {config.target_branch}가 없어 {target_branch}를 씁니다")
             base_ref, changed_since = "", []
             fetch_sha = ""
             if getattr(config, "fetch_latest", False):
                 try:
-                    fetch_sha = repo_git.fetch(config.target_branch, token=config.gitlab_token)
+                    fetch_sha = repo_git.fetch(target_branch, token=config.gitlab_token,
+                                               token_host=config.gitlab_url)
                     base_ref = "FETCH_HEAD"
                     changed_since = repo_git.diff_names(base_branch, "FETCH_HEAD")[:200]
                 except GitOpsError as fe:
@@ -417,7 +426,7 @@ class MakerLoop:
                 # 최신화는 '가져온 것이 있을 때'만 기록하면 안 된다. 이미 최신이어도 이 단계는
                 # 돈 것이고, 흔적이 없으면 화면에서 영영 진행 중으로 남아 멈춘 것처럼 보인다.
                 journal.event("fetch_latest", "ok" if changed_since else "already_latest",
-                              target=config.target_branch, sha=fetch_sha[:12],
+                              target=target_branch, sha=fetch_sha[:12],
                               kg_refreshed=len(changed_since), relanded=relanded_ok)
         except GitOpsError as error:
             journal.event("branch", "fail", error=str(error))
@@ -432,7 +441,7 @@ class MakerLoop:
                       # 꾸민 문자열은 base_label에 따로 담는다 — 섞으면 되돌리기가
                       # "develop(최신)"을 체크아웃하려다 실패한다.
                       base=base_branch,
-                      base_label=(f"{config.target_branch}(최신)" if base_ref else base_branch),
+                      base_label=(f"{target_branch}(최신)" if base_ref else base_branch),
                       checked_out=base_branch)
         report["branch"] = branch  # 재착지로 top이 바뀌어도 브랜치명은 최초 결정 유지
 
@@ -564,13 +573,17 @@ class MakerLoop:
 
         # ⑨ MR 준비 — 릴리즈 사다리(develop→stg→main) 뷰 포함
         from .release import release_view, render_ladder_md
-        rel_view = release_view(self.graph, repo, config.target_branch, config)
+        rel_view = release_view(self.graph, repo, target_branch, config)
+        on_ladder = rel_view.get("on_ladder", True)
         report["release"] = {"lands_on_env": rel_view["lands_on_env"],
-                             "promotion_remaining": rel_view["promotion_remaining"]}
-        journal.event("release", "ok", env=rel_view["lands_on_env"],
-                      promotion=rel_view["promotion_remaining"])
+                             "promotion_remaining": rel_view["promotion_remaining"],
+                             "on_ladder": on_ladder}
+        journal.event("release", "ok" if on_ladder else "skipped",
+                      env=rel_view["lands_on_env"],
+                      promotion=rel_view["promotion_remaining"],
+                      reason=("" if on_ladder else rel_view.get("note", "")))
         diff_stat = "\n".join(diff_text.splitlines()[:60])
-        title, body = build_mr_draft(query, intent, branch, config.target_branch,
+        title, body = build_mr_draft(query, intent, branch, target_branch,
                                      changed, diff_stat, impact_nodes, judge_result,
                                      agent_summary=conv.get("agent_summary", ""),
                                      checks=checks["checks"] + [sandbox, deploy_test],
@@ -595,7 +608,8 @@ class MakerLoop:
             journal.event("mr_create", "skipped", reason=reason)
         else:
             try:
-                repo_git.push(branch, token=config.gitlab_token)
+                repo_git.push(branch, token=config.gitlab_token,
+                              token_host=config.gitlab_url)
                 journal.event("push", "ok", branch=branch)
             except GitOpsError as error:
                 journal.event("push", "fail", error=str(error))
@@ -612,11 +626,16 @@ class MakerLoop:
         journal.event("mr_ready",
                       "observe" if config.mode != "act" else "act",
                       draft=str(draft),
-                      next_manual=[f"MR 리뷰·머지 → {config.target_branch}",
-                                   f"Jenkins 빌드({rel_view['lands_on_env']})",
-                                   "ArgoCD 수동 sync → k3s"],
+                      # 사다리에 없는 저장소에 Jenkins·ArgoCD를 적으면, MR을 보는 사람이
+                      # 있지도 않은 파이프라인을 기다린다.
+                      next_manual=([f"MR 리뷰·머지 → {target_branch}",
+                                    f"Jenkins 빌드({rel_view['lands_on_env']})",
+                                    "ArgoCD 수동 sync → k3s"] if on_ladder else
+                                   [f"MR 리뷰·머지 → {target_branch}",
+                                    "배포 경로는 이 저장소 규칙을 따릅니다(알려진 사다리 없음)"]),
                       note="MAKER는 MR 준비까지. 배포는 사용자 몫(로그/상태는 maker status로 관측)")
-        report["next_manual"] = "머지 → Jenkins 빌드 → ArgoCD sync (사용자 수동)"
+        report["next_manual"] = ("머지 → Jenkins 빌드 → ArgoCD sync (사용자 수동)" if on_ladder
+                                 else f"머지 → {target_branch} (배포 경로는 저장소 규칙에 따름)")
 
         # ⑩ 사후: KG 증분 갱신 + journal
         try:

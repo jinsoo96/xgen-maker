@@ -27,7 +27,8 @@ class TestTokenRedaction(unittest.TestCase):
             subprocess.run(["git", "commit", "-m", "i"], cwd=r, capture_output=True)
             g = GitRepo(r); g.create_branch("fix/leak-demo")
             with self.assertRaises(GitOpsError) as ctx:
-                g.push("fix/leak-demo", token="glpat-SUPERSECRET")
+                g.push("fix/leak-demo", token="glpat-SUPERSECRET",
+                       token_host="https://gitlab.invalid")
             self.assertNotIn("glpat-SUPERSECRET", str(ctx.exception))
             self.assertIn(":***@", str(ctx.exception))
 

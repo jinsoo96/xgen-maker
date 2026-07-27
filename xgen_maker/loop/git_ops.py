@@ -54,6 +54,24 @@ class GitRepo:
     def is_clean(self) -> bool:
         return not self._run("status", "--porcelain").strip()
 
+    def resolve_target_branch(self, preferred: str) -> str:
+        """이 저장소에서 실제로 쓸 통합 브랜치.
+
+        저장소마다 기본 브랜치가 다르다(develop 쓰는 곳, main 쓰는 곳). 설정 하나를
+        모든 저장소에 강요하면, 그 브랜치가 없는 저장소에서 최신 받기가 실패하고
+        MR 초안이 존재하지도 않는 브랜치를 대상으로 적는다 — 사람이 그대로 MR을
+        올리면 대상이 틀린다. 지식그래프가 origin/HEAD로 폴백하는 것과 같은 규칙.
+        """
+        if preferred and self._run("rev-parse", "--verify", "--quiet",
+                                   f"origin/{preferred}^{{commit}}",
+                                   check=False).strip():
+            return preferred
+        head = self._run("symbolic-ref", "--quiet", "refs/remotes/origin/HEAD",
+                         check=False).strip()
+        if head:
+            return head.rsplit("/", 1)[-1]
+        return preferred
+
     def create_branch(self, name: str, base_ref: str = "") -> str:
         issue = branch_name_issue(name)
         if issue:
@@ -64,11 +82,31 @@ class GitRepo:
             self._run("checkout", "-b", name)
         return name
 
+    def token_host_matches(self, token_host: str, remote: str = "origin") -> bool:
+        """이 저장소의 원격이 그 토큰이 속한 호스트인가.
+
+        확인 없이 토큰을 붙이면, 다른 호스트에 있는 저장소로 **시크릿이 전송된다**
+        (실측: GitLab 토큰이 github.com 원격으로 나갔고 인증도 당연히 실패했다).
+        인증 실패는 눈에 띄지만 토큰이 남의 서버에 남는 건 안 보인다.
+        """
+        if not token_host:
+            return False
+        url = self._run("remote", "get-url", remote, check=False).strip()
+        if not url:
+            return False
+        host = url.split("://", 1)[-1].split("@")[-1].split("/", 1)[0].lower()
+        want = token_host.split("://", 1)[-1].split("/", 1)[0].lower()
+        return bool(host) and bool(want) and host == want
+
     def fetch(self, branch: str, remote: str = "origin", token: str = "",
-              user: str = "oauth2") -> str:
-        """origin/<branch> 최신 가져오기. 토큰 있으면 인증 URL 사용. 반환 origin/<branch> SHA."""
+              user: str = "oauth2", token_host: str = "") -> str:
+        """origin/<branch> 최신 가져오기. 반환 origin/<branch> SHA.
+
+        토큰은 그 토큰이 속한 호스트의 원격일 때만 쓴다. 아니면 원격에 이미 붙어 있는
+        자격(또는 credential helper)으로 그냥 받는다 — 대개 그쪽이 맞는 자격이다.
+        """
         args = ["fetch", "--quiet", remote, branch]
-        if token:
+        if token and self.token_host_matches(token_host, remote):
             remote_url = self._run("remote", "get-url", remote).strip()
             if remote_url.startswith("https://"):
                 host_path = remote_url.split("://", 1)[1].split("@")[-1]
@@ -146,7 +184,7 @@ class GitRepo:
         return self._run("rev-parse", "HEAD").strip()
 
     def push(self, branch: str, remote: str = "origin",
-             token: str = "", user: str = "oauth2") -> None:
+             token: str = "", user: str = "oauth2", token_host: str = "") -> None:
         if is_protected_branch(branch):
             raise GitOpsError(f"보호 브랜치 '{branch}' 푸시는 설계상 불가")
         if not is_allowed_branch(branch):
@@ -154,7 +192,8 @@ class GitRepo:
         current = self.current_branch()
         if current != branch:
             raise GitOpsError(f"현재 브랜치({current})와 푸시 대상({branch}) 불일치")
-        if token:
+        # 토큰은 그 토큰이 속한 호스트에서만 쓴다 — 아니면 남의 서버로 시크릿이 나간다
+        if token and self.token_host_matches(token_host, remote):
             # 저장된 로그인으로 인증 URL 구성 — remote 자격 미설정이어도 push 성공
             remote_url = self._run("remote", "get-url", remote).strip()
             if remote_url.startswith("https://"):

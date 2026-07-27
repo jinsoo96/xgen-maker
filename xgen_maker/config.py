@@ -67,7 +67,10 @@ class MakerConfig:
         {"branch": "main", "env": "prd", "role": "운영 배포"},
     ])
     enable_verify: bool = False                            # 로컬 스택+Playwright 검증 (리소스 가드로 기본 off)
-    enable_ui_verify: bool = False                         # UI/UX 검증(라우트 스냅샷+픽셀diff+비전판정)
+    # UI/UX 검증(라우트 스냅샷+픽셀diff+비전판정). 기본 on — 볼 화면이 없으면
+    # (preview_base 미설정·프리뷰 미도달·비UI 변경) ui_verify가 사유를 남기고 알아서
+    # 건너뛴다. 기본 off로 두면 "화면도 봐야 한다"는 요구가 조용히 안 지켜진다.
+    enable_ui_verify: bool = True
     ui_converge: bool = False                              # UI 문제를 수렴 retry 신호로(브랜치 렌더 프리뷰 필요)
     preview_base: str = ""
     check_timeout: int = 600                               # 자동 테스트(checks) 타임아웃

@@ -29,6 +29,7 @@ class Event(str, Enum):
     LEGACY_CHECK = "legacy_check"
     LEARNINGS = "learnings"
     PLAN_ONLY = "plan_only"
+    TARGET_BRANCH = "target_branch"   # 저장소마다 통합 브랜치가 달라 해소했을 때만 발행
     FETCH_LATEST = "fetch_latest"
     WORKTREE = "worktree"
     BRANCH = "branch"

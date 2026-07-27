@@ -69,10 +69,16 @@ def release_view(graph, repo: str, target_branch: str, config=None) -> dict:
         stages.append({**stage, "targets": by_env.get(stage["env"], []),
                        "current": stage["branch"] == target_branch})
     remaining = promotion_path(target_branch, config)
+    # 이 저장소가 우리가 아는 배포 토폴로지에 있는가. 없는 저장소(사내 사다리를 안 타는
+    # 것, 다른 호스트에 있는 것)에도 "환경 prd · Jenkins 빌드"를 적으면, MR을 보는
+    # 사람이 있지도 않은 파이프라인을 기다린다.
+    on_ladder = bool(by_env)
     return {"ladder": stages, "target_branch": target_branch,
             "lands_on_env": env_for_branch(target_branch, config),
             "promotion_remaining": [s["branch"] for s in remaining],
-            "note": "main 직접 머지 금지 — develop→stg→main 순차 승격"}
+            "on_ladder": on_ladder,
+            "note": ("main 직접 머지 금지 — develop→stg→main 순차 승격" if on_ladder
+                     else "이 저장소는 알려진 배포 사다리에 없습니다 — 배포 경로는 사람이 확인")}
 
 
 def render_ladder_md(view: dict) -> str:

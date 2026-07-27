@@ -307,3 +307,99 @@ class TestRemainingAuditFixes(unittest.TestCase):
         import xgen_maker.loop.verify as verify_mod
         self.assertFalse(hasattr(verify_mod, "docker_guard"))
         self.assertNotIn("추가 기동을 거부한다", verify_mod.__doc__ or "")
+
+
+class TestTokenNeverLeavesItsHost(unittest.TestCase):
+    """회귀: 저장소 원격이 어느 호스트인지 보지 않고 토큰을 붙였다.
+
+    실측 — GitLab 토큰이 github.com 원격으로 전송됐다. 인증 실패는 눈에 띄지만
+    (fetch가 조용히 skip됐다) 시크릿이 남의 서버에 남는 건 아무도 못 본다.
+    """
+
+    def _repo(self, tmp: str, origin: str):
+        from xgen_maker.loop.git_ops import GitRepo
+        root = Path(tmp)
+        for args in (["init", "-q", "-b", "main"],
+                     ["config", "user.email", "t@t.local"],
+                     ["config", "user.name", "t"],
+                     ["remote", "add", "origin", origin]):
+            subprocess.run(["git", *args], cwd=root, capture_output=True, check=True)
+        (root / "f.txt").write_text("x", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=root, capture_output=True, check=True)
+        subprocess.run(["git", "commit", "-qm", "i"], cwd=root, capture_output=True, check=True)
+        return GitRepo(root)
+
+    def test_matching_host_uses_token(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self._repo(tmp, "https://git.example.com/g/p.git")
+            self.assertTrue(repo.token_host_matches("https://git.example.com"))
+
+    def test_other_host_never_gets_the_token(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self._repo(tmp, "https://github.com/org/p.git")
+            self.assertFalse(repo.token_host_matches("https://git.example.com"),
+                             "다른 호스트 원격에 토큰을 붙이면 시크릿이 새어 나간다")
+
+    def test_push_to_other_host_builds_no_auth_url(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self._repo(tmp, "https://github.com/org/p.git")
+            repo.create_branch("fix/host-check")
+            seen = []
+            original = repo._run
+
+            def spy(*args, **kw):
+                seen.append(args)
+                return "" if "push" in args else original(*args, **kw)
+
+            repo._run = spy
+            repo.push("fix/host-check", token="SECRET", token_host="https://git.example.com")
+        joined = " ".join(" ".join(c) for c in seen if "push" in c)
+        self.assertNotIn("SECRET", joined, "다른 호스트로 가는 명령에 토큰이 들어갔다")
+
+
+class TestPerRepoTargetBranch(unittest.TestCase):
+    """회귀: 통합 브랜치를 전역 설정 하나로 강요해, 그 브랜치가 없는 저장소에서
+    최신 받기가 실패하고 MR 초안이 존재하지 않는 브랜치를 대상으로 적혔다."""
+
+    def _repo(self, tmp: str, default_branch: str):
+        from xgen_maker.loop.git_ops import GitRepo
+        root = Path(tmp) / "r"
+        origin = Path(tmp) / "origin"
+        for args in (["init", "-q", "-b", default_branch, str(origin)],):
+            subprocess.run(["git", *args], capture_output=True, check=True)
+        subprocess.run(["git", "config", "user.email", "t@t"], cwd=origin, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "t"], cwd=origin, capture_output=True)
+        (origin / "a.txt").write_text("x", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=origin, capture_output=True, check=True)
+        subprocess.run(["git", "commit", "-qm", "i"], cwd=origin, capture_output=True, check=True)
+        subprocess.run(["git", "clone", "-q", str(origin), str(root)], capture_output=True, check=True)
+        return GitRepo(root)
+
+    def test_falls_back_to_repo_default_when_preferred_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self._repo(tmp, "main")
+            self.assertEqual(repo.resolve_target_branch("develop"), "main")
+
+    def test_keeps_preferred_when_it_exists(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self._repo(tmp, "develop")
+            self.assertEqual(repo.resolve_target_branch("develop"), "develop")
+
+    def test_pipeline_uses_resolved_branch_everywhere(self):
+        source = Path("xgen_maker/loop/pipeline.py").read_text(encoding="utf-8")
+        body = source.split("resolve_target_branch", 1)[1]
+        self.assertNotIn("config.target_branch, config)", body,
+                         "릴리즈 뷰가 아직 설정값을 그대로 쓴다")
+        self.assertIn("build_mr_draft(query, intent, branch, target_branch", source)
+
+
+class TestUiVerifyDefaultsOn(unittest.TestCase):
+    """회귀: 스위치를 읽게 고치면서 기본값이 off라 화면 검증이 통째로 꺼졌다.
+
+    볼 화면이 없으면 ui_verify가 알아서 사유를 남기고 건너뛰므로, 기본은 켜 두는 게
+    "화면도 봐야 한다"는 요구에 맞다.
+    """
+
+    def test_default_is_on(self):
+        from xgen_maker.config import MakerConfig
+        self.assertTrue(MakerConfig().enable_ui_verify)

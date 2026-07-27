@@ -88,7 +88,8 @@ class TestPushAuthUrl(unittest.TestCase):
                     return ""  # 실제 push 안 함(네트워크 차단)
                 return orig(*args, **kw)
             repo._run = spy
-            repo.push("fix/demo-push-url", token="SECRET")
+            repo.push("fix/demo-push-url", token="SECRET",
+                      token_host="https://gitlab.example.com")
             push_calls = [c for c in calls if "push" in c]
             joined = " ".join(push_calls[0])
             self.assertIn("oauth2:SECRET@gitlab.example.com/grp/demo.git", joined)
