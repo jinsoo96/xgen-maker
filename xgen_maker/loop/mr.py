@@ -90,15 +90,30 @@ def save_draft(session_dir: Path, title: str, body: str) -> Path:
 
 
 def create_gitlab_mr(config: MakerConfig, repo: str, branch: str,
-                     title: str, body: str) -> dict:
-    """act 모드 전용. 반환 {ok, url|error}."""
+                     title: str, body: str, target_branch: str = "",
+                     repo_root: str = "") -> dict:
+    """act 모드 전용. 반환 {ok, url|error}.
+
+    저장소가 실제로 이 GitLab에 있는지 먼저 본다. 설정에 매핑이 있다는 것만으로
+    MR을 만들려 들면, 다른 호스트(GitHub 등)에 사는 저장소에 대해 GitLab에 요청이
+    가고 토큰까지 함께 나간다. 같은 이름의 프로젝트가 거기 있으면 엉뚱한 저장소에
+    MR이 열린다 — 실패보다 나쁘다.
+    """
     project = config.gitlab_projects.get(repo)
     if not project:
         return {"ok": False, "error": f"gitlab_projects에 '{repo}' 매핑 없음"}
+    root = repo_root or (config.repos or {}).get(repo, "")
+    if root:
+        from .git_ops import GitRepo
+        if not GitRepo(root).token_host_matches(config.gitlab_url):
+            return {"ok": False,
+                    "error": f"'{repo}'의 원격은 이 GitLab이 아닙니다 — MR을 만들지 않습니다"}
     if not config.gitlab_token:
         return {"ok": False, "error": "XGEN_MAKER_GITLAB_TOKEN 미설정"}
     encoded = urllib.parse.quote_plus(project)
-    payload = {"source_branch": branch, "target_branch": config.target_branch,
+    # 저장소마다 통합 브랜치가 다르다. 전역 설정값을 그대로 쓰면 없는 브랜치를 대상으로 연다.
+    payload = {"source_branch": branch,
+               "target_branch": target_branch or config.target_branch,
                "title": title, "description": body, "remove_source_branch": False}
     request = urllib.request.Request(
         f"{config.gitlab_url}/api/v4/projects/{encoded}/merge_requests",

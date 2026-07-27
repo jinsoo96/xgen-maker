@@ -115,6 +115,21 @@ class Bm25Index:
                 counts[term] = counts.get(term, 0) + 1
             for term, tf in counts.items():
                 self.postings.setdefault(term, {})[node_id] = tf
+        # 저장소 이름 토큰의 '배타성' — 그 단어를 가진 노드 중 그 이름의 저장소 몫.
+        # "frontend"는 98.9%(그 말을 하면 그 저장소를 뜻함), "mcp"는 25.8%(여러 곳에
+        # 퍼진 도메인 용어). 지목 가중을 배타성만큼만 주면, 흔한 도메인 단어가
+        # 우연히 저장소 이름과 겹쳤다는 이유로 검색이 그 저장소로 쏠리지 않는다.
+        self.token_exclusivity: dict[str, float] = {}
+        all_repo_tokens = set()
+        for toks in self.repo_tokens.values():
+            all_repo_tokens |= toks
+        for tok in all_repo_tokens:
+            owners = self.postings.get(tok, {})
+            if not owners:
+                continue
+            mine = sum(1 for nid in owners
+                       if tok in self.repo_tokens.get(self.meta.get(nid, ("", "", ""))[2], ()))
+            self.token_exclusivity[tok] = mine / len(owners)
         self.total = len(self.length) or 1
         self.avg_len = sum(self.length.values()) / self.total
         self.vocab = sorted(self.postings)
@@ -150,6 +165,9 @@ class Bm25Index:
         return hits
 
     def search(self, query: str) -> dict[str, float]:
+        return self.search_with_coverage(query)[0]
+
+    def search_with_coverage(self, query: str) -> tuple[dict[str, float], dict[str, int]]:
         """쿼리 → {node_id: 점수}. 임계값으로 자르지 않는다 — 순위는 호출자가 정한다.
 
         점수 = BM25 × 폭넓게 맞은 정도 × 종류 가중치.
@@ -177,17 +195,28 @@ class Bm25Index:
         # 전부 걸리거나(변별력 0: 예 "xgen") 하나도 안 걸리면 적용하지 않는다.
         qtokens = set(tokens)
         targeted = {repo for repo, toks in self.repo_tokens.items() if toks & qtokens}
+        # 지목에 쓰인 단어 자체도 기억한다. 그 단어를 '경로·이름에 직접 가진' 코드는,
+        # 다른 저장소에 있더라도 똑같이 그 도메인의 코드다("harness"를 물었는데
+        # harness_bridge/ 아래 코드가 이름만 겹친 저장소에 밀리면 안 된다).
+        # 산문(요약·docstring)에만 언급한 노드는 해당 없다 — 그건 "이 코드가 그것"이
+        # 아니라 "그것을 언급한다"에 불과하다.
+        named = set()
+        if targeted:
+            for repo in targeted:
+                named |= (self.repo_tokens[repo] & qtokens)
         if not (0 < len(targeted) < len(self.repos)):
             targeted = None
+            named = set()
         total = len(tokens)
         for node_id, base in scores.items():
             coverage = len(matched[node_id]) / total
             scores[node_id] = base * (1.0 + coverage ** 1.5 * 2.0) * self._prior(
-                node_id, wants_test, targeted)
-        return scores
+                node_id, wants_test, targeted, named)
+        return scores, {nid: len(hit) for nid, hit in matched.items()}
 
     def _prior(self, node_id: str, wants_test: bool,
-               targeted: set[str] | None = None) -> float:
+               targeted: set[str] | None = None,
+               named: set[str] | None = None) -> float:
         """질의와 무관한 가중치 — 무엇이 '고칠 자리'로 알맞은가."""
         node = self.meta.get(node_id)
         if node is None:
@@ -195,8 +224,13 @@ class Bm25Index:
         boost = _KIND_BOOST.get(node[0], 1.0)
         if not wants_test and any(m in node[1] for m in _TEST_MARKERS):
             boost *= _TEST_PENALTY
-        if targeted and node[2] in targeted:   # 요청이 지목한 서비스/저장소로 편향
-            boost *= _REPO_AFFINITY
+        # 지목한 저장소에 있거나, 지목한 단어를 자기 경로·이름에 직접 가진 코드.
+        # 가중은 그 단어의 배타성만큼만 — 도메인 용어(mcp·backend 등)는 거의 안 걸린다.
+        if targeted and (node[2] in targeted
+                         or (named and any(tok in node[1] for tok in named))):
+            excl = max((self.token_exclusivity.get(tok, 0.0) for tok in (named or ())),
+                       default=0.0)
+            boost *= 1.0 + (_REPO_AFFINITY - 1.0) * excl
         # 구조적으로 중심인 코드를 약하게 앞세운다(동점 가르기 — 질의 관련도가 지배)
         cen = self.centrality.get(node_id)
         if cen:

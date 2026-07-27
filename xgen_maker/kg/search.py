@@ -37,7 +37,7 @@ def search(graph: Graph, query: str, k: int = 10,
     점수 임계값을 두지 않는다. "몇 점 이상"은 코퍼스마다 달라 임의로 자르면 작은
     저장소에서 다 잘리거나 큰 저장소에서 쓰레기가 통과한다. 순위만 매기고 k로 자른다.
     """
-    scores = _index(graph).search(query)
+    scores, matched = _index(graph).search_with_coverage(query)
     if not scores:
         return []
     # 사람이 식별자를 그대로 쳤다면 그 노드를 지목한 것이다. 그 신호를 점수에 상수로

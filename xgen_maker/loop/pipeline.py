@@ -388,7 +388,9 @@ class MakerLoop:
                     base_ref = "FETCH_HEAD"
                     changed_since = repo_git.diff_names(base_branch, "FETCH_HEAD")[:200]
                 except GitOpsError as fe:
-                    journal.event("fetch_latest", "skipped", reason=str(fe)[:100])
+                    # 100자면 명령줄만 담기고 정작 원인(인증 거부·없는 브랜치)이 잘린다.
+                    # 최신을 못 받으면 엉뚱한 기준에서 분기하므로, 이유는 끝까지 남긴다.
+                    journal.event("fetch_latest", "skipped", reason=str(fe)[-400:])
             else:
                 journal.event("fetch_latest", "skipped", reason="설정에서 꺼져 있습니다")
             worktree_path = None
@@ -618,7 +620,9 @@ class MakerLoop:
                                "code": ErrorCode.GIT_PROTECTED_PUSH.value,
                                "error": str(error)})
                 return report
-            mr_result = create_gitlab_mr(config, repo, branch, title, body)
+            mr_result = create_gitlab_mr(config, repo, branch, title, body,
+                                         target_branch=target_branch,
+                                         repo_root=str(repo_path))
             journal.event("mr_create", "ok" if mr_result["ok"] else "fail", **mr_result)
             report["mr"] = mr_result
 

@@ -403,3 +403,113 @@ class TestUiVerifyDefaultsOn(unittest.TestCase):
     def test_default_is_on(self):
         from xgen_maker.config import MakerConfig
         self.assertTrue(MakerConfig().enable_ui_verify)
+
+
+class TestMrNeverGoesToTheWrongHost(unittest.TestCase):
+    """회귀: MR 생성이 설정 매핑만 보고 호스트를 안 봤다.
+
+    저장소 하나가 다른 호스트(GitHub)에 살고 있었는데 gitlab_projects에는 들어 있어,
+    act 모드였다면 GitLab에 그 이름으로 MR을 만들려 하고 토큰까지 함께 나갔을 것이다.
+    같은 이름의 프로젝트가 거기 있으면 엉뚱한 저장소에 MR이 열린다 — 실패보다 나쁘다.
+    """
+
+    def _repo(self, tmp: str, origin: str):
+        root = Path(tmp)
+        for args in (["init", "-q", "-b", "main"],
+                     ["config", "user.email", "t@t"], ["config", "user.name", "t"],
+                     ["remote", "add", "origin", origin]):
+            subprocess.run(["git", *args], cwd=root, capture_output=True, check=True)
+        return root
+
+    def test_other_host_repo_is_refused_before_any_request(self):
+        from xgen_maker.config import MakerConfig
+        from xgen_maker.loop.mr import create_gitlab_mr
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._repo(tmp, "https://github.com/org/p.git")
+            cfg = MakerConfig(gitlab_url="https://git.example.com",
+                              gitlab_projects={"p": "grp/p"},
+                              repos={"p": str(root)})
+            result = create_gitlab_mr(cfg, "p", "fix/x", "t", "b",
+                                      target_branch="main", repo_root=str(root))
+        self.assertFalse(result["ok"])
+        self.assertIn("이 GitLab이 아닙니다", result["error"])
+
+    def test_mr_targets_the_resolved_branch(self):
+        source = Path("xgen_maker/loop/mr.py").read_text(encoding="utf-8")
+        self.assertIn('"target_branch": target_branch or config.target_branch', source,
+                      "MR 대상이 전역 설정값으로 고정되면 develop 없는 저장소에서 틀린다")
+        pipe = Path("xgen_maker/loop/pipeline.py").read_text(encoding="utf-8")
+        self.assertIn("target_branch=target_branch", pipe)
+
+
+class TestDomainWordDoesNotHijackRepo(unittest.TestCase):
+    """회귀: 질의 단어가 저장소 이름과 겹치면 그 저장소로 검색이 쏠렸다.
+
+    실측 — "harness bridge judge"가 6/6 xgen-harness-executor로 나오고, 정작 경로가
+    harness_bridge/ 인 다른 저장소 코드는 하나도 안 나왔다. 도메인 용어가 우연히
+    저장소 이름이라는 이유로 진짜 답이 통째로 가려진다.
+    """
+
+    def _graph(self) -> Graph:
+        g = Graph()
+        # 이름에 'widget'이 든 저장소 — 관련 코드가 많다
+        for i in range(12):
+            g.add_node(f"widget-svc:core/w{i}.py#widget_helper_{i}", "function",
+                       f"widget_helper_{i}", "widget-svc", f"core/w{i}.py", 1)
+        # 다른 저장소인데 경로가 바로 widget_bridge/ — 질의 세 단어를 다 가진다
+        g.add_node("app-svc:widget_bridge/relay.py#widget_bridge_relay", "function",
+                   "widget_bridge_relay", "app-svc", "widget_bridge/relay.py", 1)
+        return g
+
+    def test_path_carrier_beats_name_only_repo(self):
+        g = self._graph()
+        top = search(g, "widget bridge relay", k=1)[0]
+        self.assertEqual(top["repo"], "app-svc",
+                         "경로에 그 단어를 직접 가진 코드가 이름만 겹친 저장소에 밀렸다")
+
+    def test_exclusivity_is_measured_from_the_graph(self):
+        from xgen_maker.kg.search import _index
+        g = self._graph()
+        idx = _index(g)
+        # 'widget'은 두 저장소에 걸쳐 있으므로 배타성이 1.0보다 작아야 한다
+        self.assertLess(idx.token_exclusivity.get("widget", 1.0), 1.0)
+        self.assertGreater(idx.token_exclusivity.get("widget", 0.0), 0.0)
+
+
+class TestOnlyRelatedTestsRun(unittest.TestCase):
+    """회귀: 큰 저장소는 전체 스위트가 타임아웃돼 검증이 통째로 안 돌았다.
+
+    한 파일 주석 정리에 600초를 쓰고도 'unverified'로 끝났다 — 검증했다고 말할 수
+    없는 상태가 조용히 지나간다.
+    """
+
+    def test_picks_tests_by_name_and_by_import(self):
+        from xgen_maker.loop.testenv import related_tests
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "pkg").mkdir(parents=True)
+            (root / "tests").mkdir()
+            (root / "pkg" / "payments.py").write_text("def charge(): pass\n", encoding="utf-8")
+            (root / "pkg" / "unrelated.py").write_text("x = 1\n", encoding="utf-8")
+            # 이름으로 닮은 것
+            (root / "tests" / "test_payments.py").write_text("def test_a(): pass\n",
+                                                             encoding="utf-8")
+            # import 로 실제로 쓰는 것(이름은 안 닮았다)
+            (root / "tests" / "test_flow.py").write_text(
+                "from pkg.payments import charge\ndef test_b(): pass\n", encoding="utf-8")
+            # 무관한 것
+            (root / "tests" / "test_other.py").write_text("def test_c(): pass\n",
+                                                          encoding="utf-8")
+            got = related_tests(root, ["pkg/payments.py"])
+        self.assertIn("tests/test_payments.py", got)
+        self.assertIn("tests/test_flow.py", got)
+        self.assertNotIn("tests/test_other.py", got)
+
+    def test_no_match_falls_back_to_whole_suite(self):
+        from xgen_maker.loop.testenv import related_tests
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "tests").mkdir(parents=True)
+            (root / "tests" / "test_x.py").write_text("def test(): pass\n", encoding="utf-8")
+            self.assertEqual(related_tests(root, ["totally/unrelated.py"]), [],
+                             "못 찾으면 빈 리스트여야 전체 스위트로 폴백한다")

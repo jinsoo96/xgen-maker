@@ -69,8 +69,10 @@ class TestActMrRegression(unittest.TestCase):
     def test_act_calls_push_and_mr(self):
         pushes, mrs = [], []
         def fake_push(self_git, branch, **kw): pushes.append(branch)
-        def fake_mr(cfg, repo, branch, title, body):
-            mrs.append((repo, branch)); return {"ok": True, "url": "http://gl/mr/1"}
+        def fake_mr(cfg, repo, branch, title, body, target_branch="", repo_root=""):
+            # target_branch·repo_root는 저장소마다 통합 브랜치·호스트가 달라 넘긴다
+            mrs.append((repo, branch, target_branch))
+            return {"ok": True, "url": "http://gl/mr/1"}
         ok_authz = lambda cfg, repo, **kw: {"ok": True, "user": "tester",
                                             "project": "grp/demo", "level": 40}
         with patch("xgen_maker.loop.git_ops.GitRepo.push", fake_push), \

@@ -48,6 +48,32 @@ def _pip_install(target: Path, package: str, timeout: int) -> bool:
     return r.returncode == 0
 
 
+def related_tests(repo_root: Path, py_changed: list[str]) -> list[str]:
+    """변경된 모듈과 관련된 테스트 파일. 못 찾으면 빈 리스트(=전체 스위트).
+
+    두 가지로 찾는다. 이름이 닮은 테스트(`foo.py` → `test_foo.py`)와, 그 모듈을
+    실제로 import 하는 테스트. 전자는 관례, 후자는 사실이다 — 관례를 안 따르는
+    저장소에서도 후자가 잡아 준다.
+    """
+    tests_dir = repo_root / "tests"
+    if not tests_dir.is_dir():
+        return []
+    stems = {Path(f).stem for f in py_changed}
+    modules = {Path(f).stem for f in py_changed} | {
+        Path(f).as_posix().replace("/", ".")[:-3] for f in py_changed}
+    found: set[str] = set()
+    for test in tests_dir.rglob("test_*.py"):
+        rel = test.relative_to(repo_root).as_posix()
+        if any(s and s in test.stem for s in stems):
+            found.add(rel); continue
+        try:
+            text = test.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        if any(m and m in text for m in modules):
+            found.add(rel)
+    return sorted(found)
+
 def run_pytest_with_deps(repo: str, repo_root: str | Path, changed: list[str],
                          timeout: int = 600, max_installs: int = 8) -> dict:
     """pytest를 돌리되, 빠진 PyPI 의존성은 캐시에 깔아 가며 실제로 실행한다.
@@ -67,17 +93,22 @@ def run_pytest_with_deps(repo: str, repo_root: str | Path, changed: list[str],
     env["PYTHONPATH"] = str(deps) + os.pathsep + env.get("PYTHONPATH", "")
     installed: list[str] = []
     tried: set[str] = set()
+    # 변경과 관련된 테스트만 고른다. 큰 저장소는 전체 스위트가 10분을 넘겨 통째로
+    # 타임아웃되고, 그러면 "검증했다"가 아니라 아무것도 검증하지 못한 채 지나간다
+    # (실측: 한 파일 주석 정리에 600초 타임아웃 → regression=unverified).
+    targets = related_tests(repo_root, py_changed)
+    scope_note = ("변경 관련 테스트만" if targets else "전체 스위트")
 
     for _ in range(max_installs + 1):
         try:
             proc = subprocess.run(
                 [sys.executable, "-m", "pytest", "-q", "--continue-on-collection-errors",
-                 "-p", "no:cacheprovider"],
+                 "-p", "no:cacheprovider", *targets],
                 cwd=str(repo_root), env=env, capture_output=True, text=True,
                 encoding="utf-8", errors="replace", timeout=timeout)
         except subprocess.TimeoutExpired:
             return {"name": "pytest", "status": "skipped", "kind": "env",
-                    "reason": f"타임아웃({timeout}s) — 스위트가 너무 큽니다",
+                    "reason": f"타임아웃({timeout}s) — {scope_note}로도 다 못 돌렸습니다",
                     "installed": installed}
         except (OSError, subprocess.SubprocessError) as e:
             return {"name": "pytest", "status": "skipped", "kind": "env",
