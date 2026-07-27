@@ -603,7 +603,11 @@ class MakerLoop:
             refreshed = refresh_files(self.graph, repo, repo_path, changed)
             # repo_heads 전진 — 반드시 **메인 클론**의 HEAD로. worktree의 feature HEAD를 넣으면
             # 다음 kg sync가 메인 클론에서 그 sha를 못 봐 역방향 diff로 KG를 되돌려버린다.
-            new_head = git_head(main_git.path)
+            # 그래프가 ref(origin/develop) 기준으로 만들어졌다면 그 기준을 유지한다 —
+            # 여기서 로컬 HEAD를 넣으면 다음 sync가 ref와 로컬 사이를 diff해 엉뚱한 범위를 본다.
+            graph_ref = next((s.get("ref") or "" for s in self.graph.meta.get("sources", [])
+                              if s.get("repo") == repo), "")
+            new_head = git_head(main_git.path, graph_ref) if graph_ref else git_head(main_git.path)
             if new_head:
                 self.graph.meta.setdefault("repo_heads", {})[repo] = new_head
             self.graph.save(config.kg_path)

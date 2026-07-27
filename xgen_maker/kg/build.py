@@ -26,14 +26,24 @@ TS_EXTS = {".ts", ".tsx", ".js", ".jsx"}
 # Rust — 게이트웨이처럼 전 요청이 지나는 서비스가 여기 있다(추출기 없으면 통째로 안 보임)
 
 
-def git_head(repo_root: str | Path) -> str | None:
+def git_head(repo_root: str | Path, rev: str = "HEAD") -> str | None:
     try:
-        result = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo_root,
+        result = subprocess.run(["git", "rev-parse", f"{rev}^{{commit}}"], cwd=repo_root,
                                 capture_output=True, text=True, encoding="utf-8",
                                 errors="replace", timeout=30)
     except (OSError, subprocess.TimeoutExpired):
         return None
     return result.stdout.strip() if result.returncode == 0 else None
+
+
+def content_head(repo_root: str | Path, ref: str = "") -> str | None:
+    """그래프 '내용'이 나온 커밋. 증분 sync의 diff 기준이 되므로 반드시 이것이어야 한다.
+
+    ref 기준으로 추출했는데 로컬 HEAD를 기록하면, 다음 sync가 로컬 범위를 보고
+    "변경 없음"이라 판단해 그래프가 origin에 대해 영영 낡는다(실측: 기록 HEAD와
+    추출 기준이 서로 다른 커밋이었다).
+    """
+    return git_head(repo_root, ref) if ref else git_head(repo_root)
 
 
 def collect_from_ref(source, scope: str | None, max_files: int) -> list[str]:
@@ -124,7 +134,8 @@ def build_repo(repo: str, repo_root: str | Path, scope: str | None = None,
     graph.meta = {"repo": repo, "root": str(repo_root), "scope": scope or "",
                   "ref": used_ref, "source": src.describe(),
                   "files": len(rel_files), "routes": route_count,
-                  "git_head": git_head(repo_root),
+                  # 로컬 HEAD가 아니라 '내용이 나온 커밋' — sync의 diff 기준
+                  "git_head": content_head(repo_root, used_ref),
                   "build_seconds": round(time.time() - started, 2)}
     return graph
 
@@ -147,8 +158,14 @@ def _attach_feature_members(graph: Graph, repo: str, rel_files: list[str],
 
 
 def refresh_files(graph: Graph, repo: str, repo_root: str | Path,
-                  rel_files: list[str]) -> int:
-    """증분 갱신(⑩) — 변경 파일의 노드/엣지를 걷어내고 재추출, 크로스레포 재링크."""
+                  rel_files: list[str], ref: str | None = None) -> int:
+    """증분 갱신(⑩) — 변경 파일의 노드/엣지를 걷어내고 재추출, 크로스레포 재링크.
+
+    ref를 주면 그 커밋에서 읽는다. 그래프를 origin/develop 기준으로 만들어 놓고
+    갱신만 워킹트리에서 읽으면, 한 그래프 안에 두 시점의 코드가 섞인다(사람이
+    체크아웃해 둔 작업 브랜치는 통합 브랜치보다 한참 뒤처져 있다). 만든 기준과
+    갱신 기준은 같아야 한다.
+    """
     repo_root = Path(repo_root)
     targets = {f.replace("\\", "/") for f in rel_files}
     dropped = {node_id for node_id, node in graph.nodes.items()
@@ -164,19 +181,30 @@ def refresh_files(graph: Graph, repo: str, repo_root: str | Path,
 
     known = {n["path"] for n in graph.nodes.values()
              if n["repo"] == repo and n["kind"] == "file"} | targets
+    # ref 기준이면 그 커밋에서 읽는다. '파일이 있나'도 워킹트리가 아니라 그 커밋 기준으로
+    # 판단해야 한다 — 아니면 그 커밋엔 없는 로컬 파일이 그래프에 섞인다.
+    from .source import open_source
+    src = open_source(repo_root, ref) if ref else None
+    if src is not None and not getattr(src, "ref", ""):
+        src = None                     # ref를 못 열면 워킹트리로 폴백(open_source 계약)
+    available = set(src.list_files()) if src is not None else None
+
     ts_files: list[str] = []
     for rel in sorted(targets):
-        file_path = repo_root / rel
-        if not file_path.is_file():
+        if available is not None:
+            if rel not in available:
+                continue                # 그 커밋에 없는 파일 = 삭제된 것
+        elif not (repo_root / rel).is_file():
             continue
         try:
-            if file_path.suffix in PY_EXTS:
-                extract_python_file(graph, repo, repo_root, rel, known)
-            elif file_path.suffix in TS_EXTS:
-                extract_ts_file(graph, repo, repo_root, rel, known)
+            suffix = Path(rel).suffix
+            if suffix in PY_EXTS:
+                extract_python_file(graph, repo, repo_root, rel, known, src=src)
+            elif suffix in TS_EXTS:
+                extract_ts_file(graph, repo, repo_root, rel, known, src=src)
                 ts_files.append(rel)      # Next.js 라우트(page.tsx)는 TS 파일에서만 나온다
-            elif file_path.suffix in RUST_EXTS:
-                extract_rust_file(graph, repo, repo_root, rel, known)
+            elif suffix in RUST_EXTS:
+                extract_rust_file(graph, repo, repo_root, rel, known, src=src)
         except (OSError, RecursionError):
             continue
         if f"{repo}:{rel}" in graph.nodes:

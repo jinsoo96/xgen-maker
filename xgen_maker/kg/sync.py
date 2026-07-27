@@ -11,7 +11,7 @@ import subprocess
 from pathlib import Path
 
 from .graph import Graph
-from .build import PY_EXTS, TS_EXTS, git_head, refresh_files
+from .build import PY_EXTS, TS_EXTS, RUST_EXTS, git_head, refresh_files
 
 
 def _git_lines(repo_root: str | Path, *args: str) -> list[str]:
@@ -22,30 +22,40 @@ def _git_lines(repo_root: str | Path, *args: str) -> list[str]:
     return [line for line in result.stdout.splitlines() if line.strip()]
 
 
-def changed_files(repo_root: str | Path, old_sha: str | None) -> set[str] | None:
-    """old_sha 이후 커밋 변경 + 워킹트리 변경. old_sha가 없거나 유효하지 않으면 None(풀리빌드 신호)."""
+def changed_files(repo_root: str | Path, old_sha: str | None,
+                  ref: str = "") -> set[str] | None:
+    """old_sha 이후 변경 파일. 없거나 유효하지 않으면 None(풀리빌드 신호).
+
+    ref를 주면 그 커밋까지의 차이만 본다 — 워킹트리 변경은 그 커밋에 없는 코드이므로
+    섞지 않는다. 그래프를 만든 기준과 갱신 기준이 어긋나면 한 그래프에 두 시점이 섞인다.
+    ref가 없을 때만(워킹트리 기반 그래프) 미커밋 변경까지 반영한다.
+    """
     if not old_sha:
         return None
-    committed = _git_lines(repo_root, "diff", "--name-only", old_sha, "HEAD")
-    if not committed and git_head(repo_root) != old_sha:
+    target = ref or "HEAD"
+    committed = _git_lines(repo_root, "diff", "--name-only", old_sha, target)
+    if not committed and git_head(repo_root, target) != old_sha:
         # diff 실패(rebase로 sha 소실 등) — 풀리빌드로 폴백
         probe = subprocess.run(["git", "cat-file", "-e", old_sha], cwd=repo_root,
                                capture_output=True, timeout=30)
         if probe.returncode != 0:
             return None
     changed = set(committed)
-    for line in _git_lines(repo_root, "status", "--porcelain"):
-        path = line[3:].strip().strip('"')
-        if " -> " in path:  # rename: 새 경로 채택
-            path = path.split(" -> ", 1)[1].strip().strip('"')
-        changed.add(path)
+    if not ref:
+        for line in _git_lines(repo_root, "status", "--porcelain"):
+            path = line[3:].strip().strip('"')
+            if " -> " in path:  # rename: 새 경로 채택
+                path = path.split(" -> ", 1)[1].strip().strip('"')
+            changed.add(path)
     return {p.replace("\\", "/") for p in changed}
 
 
 def _relevant(files: set[str], scope: str | None) -> list[str]:
+    # 빌드가 수집하는 확장자와 같아야 한다. Rust가 빠져 있어 게이트웨이(.rs) 변경이
+    # 증분 반영되지 않았다 — 빌드엔 있고 sync엔 없는 언어는 조용히 낡는다.
     out = []
     for rel in files:
-        if Path(rel).suffix not in PY_EXTS | TS_EXTS:
+        if Path(rel).suffix not in PY_EXTS | TS_EXTS | RUST_EXTS:
             continue
         if scope and not rel.startswith(scope.rstrip("/") + "/"):
             continue
@@ -57,19 +67,22 @@ def sync_source(graph: Graph, source: dict) -> dict:
     """소스(빌드 당시 repo/root/scope 기록) 하나를 증분 동기화."""
     repo, root = source["repo"], source["root"]
     scope = source.get("scope") or None
+    # 그래프를 만든 기준으로 갱신한다(빌드가 origin/develop을 봤으면 sync도 그것을).
+    ref = source.get("ref") or ""
     old_sha = graph.meta.get("repo_heads", {}).get(repo)
-    new_sha = git_head(root)
-    changed = changed_files(root, old_sha)
+    new_sha = git_head(root, ref) if ref else git_head(root)
+    changed = changed_files(root, old_sha, ref)
     if changed is None:
         return {"repo": repo, "action": "full_rebuild_needed",
                 "reason": "기준 HEAD 없음/소실 — kg build로 재빌드 필요"}
     relevant = _relevant(changed, scope)
     if relevant:
-        refresh_files(graph, repo, root, relevant)
+        refresh_files(graph, repo, root, relevant, ref=ref or None)
     if new_sha:
         graph.meta.setdefault("repo_heads", {})[repo] = new_sha
     return {"repo": repo, "scope": scope or "-", "changed": len(relevant),
-            "files": relevant[:20], "head": (new_sha or "")[:12]}
+            "files": relevant[:20], "head": (new_sha or "")[:12],
+            "basis": ref or "워킹트리"}
 
 
 def repair_dangling(graph: Graph, sources: list[dict]) -> dict:
@@ -80,6 +93,7 @@ def repair_dangling(graph: Graph, sources: list[dict]) -> dict:
     (예: BOM 때문에 파싱이 실패해 통째로 누락됐던 파일).
     """
     roots = {s["repo"]: s["root"] for s in sources if s.get("repo") and s.get("root")}
+    refs = {s["repo"]: (s.get("ref") or "") for s in sources if s.get("repo")}
     ids = set(graph.nodes)
     missing = {e["dst"] for e in graph.edges if e["dst"] not in ids}
     missing |= {e["src"] for e in graph.edges if e["src"] not in ids}
@@ -93,9 +107,11 @@ def repair_dangling(graph: Graph, sources: list[dict]) -> dict:
     repaired = 0
     for repo, rels in by_repo.items():
         root = Path(roots[repo])
-        real = [r for r in rels if (root / r).is_file()]
+        # 복구도 그래프를 만든 기준에서 읽는다(refresh_files가 ref 기준 존재 여부를 판정).
+        ref = refs.get(repo) or ""
+        real = rels if ref else [r for r in rels if (root / r).is_file()]
         if real:
-            refresh_files(graph, repo, root, real)
+            refresh_files(graph, repo, root, real, ref=ref or None)
             repaired += sum(1 for r in real if f"{repo}:{r}" in graph.nodes)
     ids = set(graph.nodes)
     before = len(graph.edges)

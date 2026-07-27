@@ -197,3 +197,87 @@ class TestBomAndDanglingRepair(unittest.TestCase):
             ids = set(g.nodes)
             self.assertEqual([e for e in g.edges if e["dst"] not in ids], [])
             self.assertEqual(r["dropped"], 1)
+
+
+class TestRefBasedSyncStaysOnRef(unittest.TestCase):
+    """그래프를 만든 기준과 갱신 기준은 같아야 한다.
+
+    회귀: 빌드는 origin/develop에서 뽑고 sync는 워킹트리를 읽어, 한 그래프 안에 두
+    시점의 코드가 섞였다. 게다가 빌드가 '로컬 HEAD'를 기준으로 기록해, 다음 sync가
+    로컬 범위를 diff하고 "변경 없음"이라 판단 — origin이 앞서가도 영영 안 갱신됐다.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / "r"
+        self.root.mkdir()
+        init_repo(self.root)
+        git(self.root, "tag", "v1")          # 고정 기준(origin/develop 대역)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_build_records_the_commit_the_content_came_from(self):
+        from xgen_maker.kg.build import git_head
+        # v1에서 뽑았으면 기록도 v1의 sha여야 한다(로컬 HEAD가 아니라)
+        git(self.root, "commit", "--allow-empty", "-m", "moves local head")
+        g = build_repo("demo", self.root, ref="v1")
+        self.assertEqual(g.meta["git_head"], git_head(self.root, "v1"))
+        self.assertNotEqual(g.meta["git_head"], git_head(self.root, "HEAD"))
+
+    def test_worktree_edit_does_not_leak_into_ref_graph(self):
+        from xgen_maker.kg.build import refresh_files
+        g = build_repo("demo", self.root, ref="v1")
+        # 워킹트리에만 있는 심볼 — v1 기준 그래프에 들어오면 안 된다
+        (self.root / "alpha.py").write_text(
+            "def alpha():\n    return 1\n\ndef only_in_worktree():\n    return 9\n",
+            encoding="utf-8")
+        refresh_files(g, "demo", self.root, ["alpha.py"], ref="v1")
+        names = {n["name"] for n in g.nodes.values()}
+        self.assertIn("alpha", names)
+        self.assertNotIn("only_in_worktree", names, "ref 기준 그래프에 워킹트리 심볼이 샜다")
+        # ref 없이 부르면(워킹트리 기반 그래프) 그때는 반영돼야 한다
+        refresh_files(g, "demo", self.root, ["alpha.py"])
+        self.assertIn("only_in_worktree", {n["name"] for n in g.nodes.values()})
+
+    def test_ref_sync_ignores_uncommitted_and_follows_the_ref(self):
+        merged, _ = merge_and_link([build_repo("demo", self.root, ref="trunk")])
+        source = merged.meta["sources"][0]
+        self.assertEqual(source["ref"], "trunk")
+        # 미커밋 변경만 있으면 ref는 안 움직였으므로 0건
+        (self.root / "beta.py").write_text("def beta():\n    return 99\n", encoding="utf-8")
+        self.assertEqual(sync_source(merged, source)["changed"], 0)
+        # 커밋하면 ref(trunk)가 전진하므로 반영된다
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-m", "beta changed")
+        result = sync_source(merged, source)
+        self.assertEqual(result["changed"], 1)
+        self.assertEqual(result["basis"], "trunk")
+
+
+class TestRustIsSynced(unittest.TestCase):
+    """회귀: sync가 py/ts만 걸러 Rust(.rs) 변경이 증분 반영되지 않았다 — 게이트웨이가 Rust다."""
+
+    def test_rust_file_is_relevant(self):
+        from xgen_maker.kg.sync import _relevant
+        got = _relevant({"src/main.rs", "a.py", "b.tsx", "readme.md"}, None)
+        self.assertIn("src/main.rs", got)
+
+    def test_rust_change_reaches_the_graph(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "r"
+            (root / "src").mkdir(parents=True)
+            git_init = ["init", "-b", "trunk"]
+            subprocess.run(["git", *git_init], cwd=root, capture_output=True, check=True)
+            git(root, "config", "user.email", "t@t.local")
+            git(root, "config", "user.name", "t")
+            (root / "src" / "main.rs").write_text("pub fn serve() {}\n", encoding="utf-8")
+            git(root, "add", "-A"); git(root, "commit", "-m", "init")
+            merged, _ = merge_and_link([build_repo("gw", root)])
+            source = merged.meta["sources"][0]
+            (root / "src" / "main.rs").write_text(
+                "pub fn serve() {}\n\npub fn validate_token() {}\n", encoding="utf-8")
+            git(root, "add", "-A"); git(root, "commit", "-m", "add validate")
+            result = sync_source(merged, source)
+        self.assertEqual(result["changed"], 1, "Rust 변경이 sync 대상에 안 잡힘")
+        self.assertIn("validate_token", {n["name"] for n in merged.nodes.values()})
