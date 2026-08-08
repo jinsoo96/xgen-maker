@@ -87,6 +87,14 @@ def load_auth() -> Auth:
         except (json.JSONDecodeError, OSError):
             data = {}
     auth = Auth(**{k: v for k, v in data.items() if k in Auth.__dataclass_fields__})
+    # 환경변수가 있으면 그것이 정본이다. 이걸 안 보면 저장소가 둘로 갈린다 —
+    # config는 env를 먼저 보는데 load_auth는 파일만 봐서, save_auth가 파일의 옛 값으로
+    # .env를 덮어써 방금 넣은 토큰이 조용히 되돌아간다(실측: 실제로 되돌아갔다).
+    for field, key in (("gitlab_token", "XGEN_MAKER_GITLAB_TOKEN"),
+                       ("gitlab_url", "XGEN_MAKER_GITLAB_URL")):
+        value = os.environ.get(key, "")
+        if value:
+            setattr(auth, field, value)
     # 환경변수 오버라이드 (CI/일회성)
     if os.environ.get("ANTHROPIC_API_KEY") and auth.provider == "claude_cli" and not AUTH_FILE.exists():
         pass  # claude_cli가 이미 있으면 유지 — 키가 있어도 로그인 우선

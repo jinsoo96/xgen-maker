@@ -43,3 +43,6 @@ maker.*.local.json
 REQUIREMENTS.md
 XGEN-MAKER-PLAN.md
 .mcp.json
+
+# 실제 MR로 만든 검색 벤치마크 — 제목·경로가 조직 정보라 로컬에만 둔다
+bench/

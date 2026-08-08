@@ -44,6 +44,41 @@ def _prefer(primary: list[dict], fallback: list[dict], k: int = 8) -> list[dict]
     return out
 
 
+def _fuse(primary: list[dict], secondary: list[dict], k: int = 8,
+          head: int = 2, c: int = 60) -> list[dict]:
+    """코드 용어 검색과 원문 검색을 합친다 — 앞은 믿는 쪽, 뒤는 융합.
+
+    한쪽을 앞세우고 "남는 자리를 채운다"고 하면, 앞선 쪽이 k개를 다 채워 뒤쪽은 한
+    자리도 못 들어간다. 말은 병합인데 실제로는 대체다(실측: 실제 머지된 MR 79건에서
+    원문 결과가 통째로 버려지고 있었다).
+
+    그렇다고 전부 융합하면 착지점(1위)이 흔들린다. 착지점은 코드 용어 검색이 가장
+    정확했다. 그래서 앞 head개는 그쪽을 그대로 두고, 나머지는 순위 융합(RRF)으로
+    양쪽의 다양성을 담는다 — 에이전트가 보는 근거 목록이 넓어진다.
+
+    실측(머지된 MR 79건 정답 기준):
+      대체(_prefer)  R@1 0.304 · R@10 0.582 · MRR 0.390
+      전부 융합       R@1 0.278 · R@10 0.658 · MRR 0.386
+      앞 2개+융합     R@1 0.304 · R@10 0.658 · MRR 0.399  ← 둘 다 최고
+    """
+    if not secondary:
+        return primary[:k]
+    if not primary:
+        return secondary[:k]
+    kept = primary[:head]
+    seen = {hit["id"] for hit in kept}
+    score: dict[str, float] = {}
+    node: dict[str, dict] = {}
+    for ranked in (primary, secondary):
+        for i, hit in enumerate(ranked):
+            if hit["id"] in seen:
+                continue
+            score[hit["id"]] = score.get(hit["id"], 0.0) + 1.0 / (c + i + 1)
+            node[hit["id"]] = hit
+    tail = [node[i] for i in sorted(score, key=lambda x: -score[x])]
+    return (kept + tail)[:k]
+
+
 class MakerLoop:
     def __init__(self, config: MakerConfig, graph: Graph | None = None,
                  journal_factory=None):
@@ -223,7 +258,10 @@ class MakerLoop:
                 # 브랜치 이름은 키워드를 이어붙이지 않는다 — 중복되고 길기만 하다.
                 # "무엇을 하는 작업인지"를 한 마디로 받아 쓴다.
                 report["branch_slug"] = str(expanded.get("branch") or "").strip()
-                landing = _prefer(search(self.graph, keyword_query, k=8), landing, k=8)
+                # 원문·코드용어 두 결과를 융합한다(한쪽으로 대체하지 않는다).
+                # 재료는 넉넉히 뽑아야 융합할 것이 생긴다.
+                landing = _fuse(search(self.graph, keyword_query, k=24),
+                                search(self.graph, query, k=24), k=8)
             else:
                 journal.event("query_expand", "fail",
                               note="코드 어휘 변환 실패 — 원문 검색 결과만 사용합니다"

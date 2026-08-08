@@ -544,3 +544,39 @@ class TestPartialVerificationIsNotClaimedAsFull(unittest.TestCase):
                                  regression="partial")
         self.assertIn("부분 검증", body)
         self.assertIn("보증하지 않음", body)
+
+
+class TestFusionActuallyMerges(unittest.TestCase):
+    """회귀: '병합'이라 부르면서 실제로는 한쪽이 다른 쪽을 통째로 대체했다.
+
+    _prefer(primary, fallback, k)는 primary가 k개를 채우면 fallback이 한 자리도
+    못 들어간다. 실제 머지된 MR 79건으로 재 보니 원문 검색 결과가 통째로 버려지고
+    있었고, 그 결과 R@10이 0.582에 머물렀다(융합 시 0.658).
+    """
+
+    def _hits(self, prefix, n):
+        return [{"id": f"{prefix}{i}", "name": f"{prefix}{i}"} for i in range(n)]
+
+    def test_both_sides_appear(self):
+        from xgen_maker.loop.pipeline import _fuse
+        got = _fuse(self._hits("a", 8), self._hits("b", 8), k=8)
+        ids = [h["id"] for h in got]
+        self.assertTrue(any(i.startswith("a") for i in ids))
+        self.assertTrue(any(i.startswith("b") for i in ids),
+                        "두 번째 목록이 한 자리도 못 들어갔다 — 병합이 아니라 대체다")
+
+    def test_head_is_preserved_for_landing(self):
+        """착지점(1위)은 코드 용어 검색이 가장 정확했다 — 앞은 그대로 둔다."""
+        from xgen_maker.loop.pipeline import _fuse
+        got = _fuse(self._hits("kw", 8), self._hits("raw", 8), k=8, head=2)
+        self.assertEqual([h["id"] for h in got[:2]], ["kw0", "kw1"])
+
+    def test_empty_side_is_safe(self):
+        from xgen_maker.loop.pipeline import _fuse
+        self.assertEqual(len(_fuse(self._hits("a", 3), [], k=8)), 3)
+        self.assertEqual(len(_fuse([], self._hits("b", 3), k=8)), 3)
+
+    def test_pipeline_uses_fusion_not_replacement(self):
+        source = Path("xgen_maker/loop/pipeline.py").read_text(encoding="utf-8")
+        self.assertIn("_fuse(search(self.graph, keyword_query", source,
+                      "확장어 병합이 다시 대체 방식으로 돌아갔다")
