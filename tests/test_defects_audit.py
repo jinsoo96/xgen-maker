@@ -578,8 +578,23 @@ class TestFusionActuallyMerges(unittest.TestCase):
 
     def test_pipeline_uses_fusion_not_replacement(self):
         source = Path("xgen_maker/loop/pipeline.py").read_text(encoding="utf-8")
-        self.assertIn("_fuse(search(self.graph, keyword_query", source,
+        self.assertIn("landing = _fuse(search(self.graph, query", source,
                       "확장어 병합이 다시 대체 방식으로 돌아갔다")
+        self.assertIn("search(self.graph, keyword_query", source,
+                      "확장어 결과가 융합 재료에서 빠졌다")
+
+    def test_landing_head_comes_from_the_users_own_words(self):
+        """착지점은 사람이 쓴 말로 잡는다.
+
+        큰 표본(머지된 MR 256건)에서 재 보니 1위 정확도는 원문이 확실히 낫고
+        (R@1 0.371 vs 확장어 0.312), 확장어는 상위 10 안에 정답을 넣어 주는 쪽에서
+        값을 한다(R@10 0.633 → 0.715). 작은 표본에서는 이게 뒤집혀 보였다.
+        """
+        source = Path("xgen_maker/loop/pipeline.py").read_text(encoding="utf-8")
+        head = source.index("landing = _fuse(search(self.graph, query")
+        tail = source.index("k=8)", head)
+        self.assertIn("keyword_query", source[head:tail],
+                      "융합 재료가 원문 하나뿐이면 확장어의 회수 이득이 사라진다")
 
 
 class TestGatewayConfigIsAddressable(unittest.TestCase):

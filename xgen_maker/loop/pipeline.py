@@ -269,9 +269,13 @@ class MakerLoop:
                     journal.event("query_expand", "ok", keywords=keyword_query,
                                   learned=bridged)
                 # 원문·코드용어 두 결과를 융합한다(한쪽으로 대체하지 않는다).
+                # 머리(착지점)는 원문 쪽이다 — 큰 표본에서 재 보니 1위 정확도는 원문이
+                # 확실히 낫고(R@1 0.371 vs 0.312), 확장어는 상위 10 안에 정답을
+                # 넣어 주는 쪽에서 값을 한다(R@10 0.633 → 0.715). 그래서 착지점은
+                # 사람이 쓴 말로 잡고, 나머지 자리를 확장어가 채운다.
                 # 재료는 넉넉히 뽑아야 융합할 것이 생긴다.
-                landing = _fuse(search(self.graph, keyword_query, k=24),
-                                search(self.graph, query, k=24), k=8)
+                landing = _fuse(search(self.graph, query, k=24),
+                                search(self.graph, keyword_query, k=24), k=8)
             else:
                 journal.event("query_expand", "fail",
                               note="코드 어휘 변환 실패 — 원문 검색 결과만 사용합니다"

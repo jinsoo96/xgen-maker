@@ -71,6 +71,11 @@ def build_lexicon(nodes: list[dict]) -> dict[str, list[str]]:
     return {k: [w for _, w in sorted(v, reverse=True)] for k, v in scored.items()}
 
 
+# 조사를 떼고(접두사로) 찾는 것도 재 봤지만 이득이 없었다 — 짧은 어간이 엉뚱한 말에
+# 걸려 오히려 나빠졌고("정제를"→string, "이유를"→int), 4자 이상으로 막으면 완전일치와
+# 같아졌다(R@1 2자 0.410 · 3자 0.410 · 4자 0.423 = 완전일치 0.423). 그래서 안 넣는다.
+
+
 def bridge_terms(lexicon: dict[str, list[str]], query: str,
                  per_word: int = _PER_WORD) -> str:
     """질의의 한글어를 이 코드베이스가 쓰는 말로 바꿔 붙인다(원문은 그대로 둔다)."""
