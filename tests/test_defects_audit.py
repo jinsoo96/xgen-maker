@@ -1234,3 +1234,103 @@ class CostCountsEveryLlmCallTest(unittest.TestCase):
         source = Path("xgen_maker/loop/pipeline.py").read_text(encoding="utf-8")
         self.assertIn("cost.add_llm", source, "어휘 변환 호출이 비용에 안 잡힌다")
         self.assertIn("cost=cost", source)
+
+
+class RepoHintGuidesButDoesNotFilterTest(unittest.TestCase):
+    """바깥 라우팅 신호(LLM이 고른 저장소)는 절반쯤만 맞다 — 거르면 안 된다.
+
+    실측(실제 머지된 MR 265건): 검색 1위 저장소 적중 52.1% · LLM 47.9%.
+    서로 다르게 틀린다(LLM만 맞힘 19.6% · 검색만 맞힘 23.8%)는 게 값의 원천이라,
+    고르는 데 쓰면 그 값이 사라진다.
+    """
+
+    def _graph(self):
+        g = Graph()
+        for repo in ("alpha", "beta"):
+            g.add_node(repo, "repo", repo, repo, "")
+            g.add_node(f"{repo}:svc/upload.py#upload_document", "function",
+                       "upload_document", repo, "svc/upload.py", 1)
+        return g
+
+    def test_wrong_hint_does_not_hide_the_answer(self):
+        g = self._graph()
+        hits = search(g, "upload document", k=10, hint_repo="alpha")
+        self.assertIn("beta", {h["repo"] for h in hits},
+                      "추측이 틀린 저장소를 가리켰을 때 정답이 사라지면 안 된다")
+
+    def test_hint_actually_moves_the_ranking(self):
+        g = self._graph()
+        top = search(g, "upload document", k=1, hint_repo="beta")
+        self.assertEqual(top[0]["repo"], "beta", "가중이 순위에 반영되지 않는다")
+
+    def test_hint_weight_is_evidence_backed(self):
+        from xgen_maker.kg import search as search_mod
+        self.assertEqual(search_mod._REPO_HINT, 1.5)
+        source = Path("xgen_maker/kg/search.py").read_text(encoding="utf-8")
+        self.assertIn("네 분할", source, "근거 없이 상수를 두지 않는다")
+
+
+class RepoProfilesComeFromTheGraphTest(unittest.TestCase):
+    """프로필을 손으로 적으면 저장소가 늘 때마다 조용히 낡는다."""
+
+    def test_profile_lists_paths_and_symbols(self):
+        from xgen_maker.kg.profiles import repo_profiles, profile_block
+        g = Graph()
+        for repo, path in (("alpha", "service/audio/stt.py"), ("beta", "src/routes/proxy.rs")):
+            g.add_node(repo, "repo", repo, repo, "")
+            g.add_node(f"{repo}:{path}#handle_request", "function", "handle_request",
+                       repo, path, 1)
+        profiles = repo_profiles(g)
+        self.assertIn("service/audio", profiles["alpha"]["dirs"])
+        self.assertIn("handle_request", profiles["alpha"]["names"])
+        self.assertIn("alpha", profile_block(g))
+
+    def test_single_repo_has_nothing_to_choose(self):
+        from xgen_maker.kg.profiles import profile_block
+        g = Graph()
+        g.add_node("only", "repo", "only", "only", "")
+        g.add_node("only:a.py#f", "function", "f", "only", "a.py", 1)
+        self.assertEqual(profile_block(g), "", "고를 것이 없으면 프롬프트를 늘리지 않는다")
+
+
+class ShellMetacharactersNeverReachTheShellTest(unittest.TestCase):
+    """회귀: cmd /c 경유라 프롬프트의 `|`가 파이프로 해석됐다.
+
+    의도 분류 프롬프트에 "bug|feature|refactor|question"이 들어 있어 cmd가
+    'feature'를 명령으로 실행하려다 종료코드 255로 죽었다. 그 LLM 보정은 줄곧
+    죽어 있었고, 애매한 변경 요청이 전부 '질문'으로 빠져 답만 하고 끝났다.
+    """
+
+    def test_claude_command_avoids_cmd_when_real_exe_exists(self):
+        from xgen_maker.auth import claude_command
+        command = claude_command(["-p"])
+        if command is None:
+            self.skipTest("claude CLI 없음")
+        self.assertNotEqual(command[0].lower(), "cmd",
+                            "셸을 거치면 인자가 셸 문법으로 해석된다")
+
+    def test_resolve_shim_reads_the_target_from_the_shim(self):
+        from xgen_maker.auth import resolve_shim
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "node_modules" / "pkg" / "bin").mkdir(parents=True)
+            real = root / "node_modules" / "pkg" / "bin" / "tool.exe"
+            real.write_bytes(b"x")
+            shim = root / "tool.cmd"
+            shim.write_text('@ECHO off\n'
+                            + r'"%dp0%\node_modules\pkg\bin\tool.exe"   %*' + '\n',
+                            encoding="utf-8")
+            self.assertEqual(resolve_shim(shim), real)
+
+    def test_resolve_shim_returns_none_when_target_missing(self):
+        """없는 경로를 지어내면 조용히 못 찾는 실행이 된다 — 그때는 cmd로 폴백한다."""
+        from xgen_maker.auth import resolve_shim
+        with tempfile.TemporaryDirectory() as tmp:
+            shim = Path(tmp) / "tool.cmd"
+            shim.write_text(r'"%dp0%\nope\tool.exe" %*' + '\n', encoding="utf-8")
+            self.assertIsNone(resolve_shim(shim))
+
+    def test_intent_prompt_still_contains_the_pipe(self):
+        """이 결함의 진입점이 그대로 있음을 못박는다 — 프롬프트를 바꿔 가리지 말 것."""
+        source = Path("xgen_maker/loop/intent.py").read_text(encoding="utf-8")
+        self.assertIn("bug|feature|refactor|question", source)

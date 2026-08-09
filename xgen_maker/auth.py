@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass, asdict
@@ -27,13 +28,40 @@ DEFAULT_VLLM_BASE = os.environ.get("XGEN_MAKER_LLM_BASE", "http://localhost:8000
 DEFAULT_VLLM_MODEL = os.environ.get("XGEN_MAKER_LLM_MODEL", "local-model")
 
 
+def resolve_shim(shim: str | Path) -> Path | None:
+    """npm .cmd 심이 실제로 부르는 실행 파일. 없으면 None.
+
+    cmd를 거치는 순간 인자가 셸 문법으로 해석된다. 줄바꿈에서 잘리고, `|`는 파이프가
+    되고, `&`·`>`도 마찬가지다. 에러가 나면 차라리 낫다 — 실제로는 그럴듯한 실패로
+    조용히 끝난다(실측: 의도 분류 프롬프트의 "bug|feature|refactor|question" 때문에
+    cmd가 'feature'를 명령으로 실행하려 해 종료코드 255. 그 LLM 보정은 줄곧 죽어
+    있었고, 애매한 변경 요청이 전부 '질문'으로 빠져 답만 하고 끝났다).
+
+    심이 부르는 실제 exe를 직접 실행하면 셸이 개입하지 않는다. 심 내용에서 경로를
+    읽어 낸다 — 규약을 가정해 경로를 지어내면 npm 레이아웃이 바뀔 때 조용히 깨진다.
+    """
+    shim = Path(shim)
+    try:
+        text = shim.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    for match in re.finditer(r'"%dp0%\\?([^"]+\.exe)"', text, re.I):
+        target = shim.parent / match.group(1)
+        if target.is_file():
+            return target
+    return None
+
+
 def claude_command(args: list[str]) -> list[str] | None:
-    """claude CLI 호출 명령 생성. Windows .cmd/.ps1 심은 cmd /c 경유(CreateProcess 직접실행 불가)."""
+    """claude CLI 호출 명령 생성. 심이면 실제 exe를 찾아 셸을 건너뛴다."""
     exe = shutil.which("claude")
     if not exe:
         return None
     if exe.lower().endswith((".cmd", ".bat", ".ps1")):
         base = exe[:-4] + ".cmd" if exe.lower().endswith(".ps1") else exe
+        real = resolve_shim(base)
+        if real is not None:
+            return [str(real), *args]
         return ["cmd", "/c", base, *args]
     return [exe, *args]
 

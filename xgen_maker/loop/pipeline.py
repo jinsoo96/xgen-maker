@@ -243,15 +243,28 @@ class MakerLoop:
             # 착지가 이 변환에 걸려 있다 — 실패하면 한글 원문만으로 검색해 엉뚱한
             # 서비스로 샌다(실측). CLI가 간헐적으로 빈 응답을 내므로 여러 번 시도하고,
             # 그래도 실패하면 이유를 화면에 남긴다(전엔 이유 없이 "실패"만 떴다).
+            # 같은 호출에서 "어느 저장소 일인가"도 함께 받는다. 검색은 노드는 잘 보는데
+            # 저장소는 잘 못 고르고(1위 저장소 적중 52.1%), 그 실패는 어휘로 못 고친다.
+            # LLM은 47.9%로 정확도가 더 낮지만 서로 다르게 틀린다 — LLM만 맞힘 19.6%,
+            # 검색만 맞힘 23.8%. 그래서 고르는 데 쓰지 않고 가중으로만 쓴다.
+            # 호출을 새로 만들지 않는다 — 이 변환은 어차피 매번 돈다.
+            from ..kg.profiles import profile_block
+            repos_block = profile_block(self.graph)
             expand_diag: dict = {}
+            system = (
+                'Extract 4-7 plain lowercase english search words from the dev request '
+                '(the domain nouns/verbs, e.g. gateway, login, token, validate). Keep any '
+                'service name given (gateway, workflow, frontend, model). Do not invent '
+                'class names. Also give a 2-4 word hyphen branch slug for the work. '
+                'Reply JSON only: {"keywords": ["..."], "branch": "..."}')
+            user = query
+            if repos_block:
+                system = system[:-1] + ', "repo": "..."}'
+                user = (f"{query}\n\n[repositories — pick the one whose code must change, "
+                        f'exact name, or "" if unsure]\n{repos_block}')
             expanded = llm.json_chat(config.llm_base, config.llm_model, [
-                {"role": "system", "content":
-                 'Extract 4-7 plain lowercase english search words from the dev request '
-                 '(the domain nouns/verbs, e.g. gateway, login, token, validate). Keep any '
-                 'service name given (gateway, workflow, frontend, model). Do not invent '
-                 'class names. Also give a 2-4 word hyphen branch slug for the work. '
-                 'Reply JSON only: {"keywords": ["..."], "branch": "..."}'},
-                {"role": "user", "content": query}], max_tokens=200, timeout=45,
+                {"role": "system", "content": system},
+                {"role": "user", "content": user}], max_tokens=200, timeout=45,
                 retries=3, diag=expand_diag)
             # 이 호출도 비용이다. 안 세면 화면의 비용이 코딩 에이전트분만 보여준다.
             cost.add_llm(len(query) + 400, len(str(expanded or "")))
@@ -278,8 +291,18 @@ class MakerLoop:
                 # 넣어 주는 쪽에서 값을 한다(R@10 0.633 → 0.715). 그래서 착지점은
                 # 사람이 쓴 말로 잡고, 나머지 자리를 확장어가 채운다.
                 # 재료는 넉넉히 뽑아야 융합할 것이 생긴다.
-                landing = _fuse(search(self.graph, query, k=24),
-                                search(self.graph, keyword_query, k=24), k=8, head=1)
+                # 라우팅 추측은 거르는 데 쓰지 않고 가중으로만 준다 — 틀렸을 때
+                # 정답을 아예 못 보게 되면 안 된다. 그래프에 없는 이름이면 버린다.
+                hint = str((expanded or {}).get("repo") or "").strip()
+                if hint and hint not in {n.get("repo") for n in self.graph.nodes.values()}:
+                    hint = ""
+                if hint:
+                    report["repo_hint"] = hint
+                    journal.event("query_expand", "ok", keywords=keyword_query,
+                                  repo_hint=hint)
+                landing = _fuse(search(self.graph, query, k=24, hint_repo=hint),
+                                search(self.graph, keyword_query, k=24, hint_repo=hint),
+                                k=8, head=1)
             else:
                 journal.event("query_expand", "fail",
                               note="코드 어휘 변환 실패 — 원문 검색 결과만 사용합니다"

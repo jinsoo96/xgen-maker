@@ -22,13 +22,18 @@ def suggest_profiles(repos_touched: list[str], config=None) -> list[str]:
 
 
 def _shim_command(exe_name: str, args: list[str]) -> list[str] | None:
-    """Windows .cmd/.ps1 심은 cmd /c 경유(CreateProcess 직접실행 불가)."""
+    """Windows 심은 실제 exe를 찾아 직접 실행 — cmd를 거치면 인자가 셸 문법이 된다.
+
+    여기 인자는 URL이다. `&`가 들어간 주소를 cmd에 넘기면 거기서 명령이 쪼개진다.
+    """
     exe = shutil.which(exe_name)
     if not exe:
         return None
     if exe.lower().endswith((".cmd", ".bat", ".ps1")):
         base = exe[:-4] + ".cmd" if exe.lower().endswith(".ps1") else exe
-        return ["cmd", "/c", base, *args]
+        from ..auth import resolve_shim
+        real = resolve_shim(base)
+        return [str(real), *args] if real is not None else ["cmd", "/c", base, *args]
     return [exe, *args]
 
 

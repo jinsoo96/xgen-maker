@@ -43,16 +43,35 @@ def lexicon(graph: Graph) -> dict[str, list[str]]:
     return built
 
 
+# 바깥 라우팅 신호(LLM이 고른 저장소)에 줄 가중. 거르지 않고 밀어주기만 한다.
+# 실제 머지된 MR 265건, 홀짝·전후 네 분할로 검증:
+#   1.0(끔) R@10 0.777 | A 0.789 B 0.765 C 0.864 D 0.692
+#   1.2     R@10 0.796 | A 0.789 B 0.803 C 0.871 D 0.722
+#   1.5     R@10 0.800 | A 0.789 B 0.811 C 0.871 D 0.729   ← 채택(전 분할 개선/유지)
+#   2.0     R@10 0.740 | 전 분할 하락
+# 세게 주면 안 되는 이유가 숫자에 그대로 있다 — 이 신호는 절반쯤만 맞다(47.9%).
+# 값은 "틀려도 검색 근거가 이길 수 있는 크기"여야 한다.
+_REPO_HINT = 1.5
+
+
 def search(graph: Graph, query: str, k: int = 10,
-           kinds: tuple[str, ...] | None = None) -> list[dict]:
+           kinds: tuple[str, ...] | None = None, hint_repo: str = "") -> list[dict]:
     """쿼리와 관련된 노드 상위 k개(BM25).
 
     점수 임계값을 두지 않는다. "몇 점 이상"은 코퍼스마다 달라 임의로 자르면 작은
     저장소에서 다 잘리거나 큰 저장소에서 쓰레기가 통과한다. 순위만 매기고 k로 자른다.
+
+    hint_repo는 "이 저장소일 것 같다"는 바깥 신호(예: LLM 라우팅)다. 거르지 않고
+    가중만 준다 — 그 추측이 틀렸을 때 정답을 아예 못 보게 되면 안 된다.
     """
     scores, matched = _index(graph).search_with_coverage(query)
     if not scores:
         return []
+    if hint_repo and _REPO_HINT != 1.0:
+        for node_id in scores:
+            node = graph.nodes.get(node_id)
+            if node is not None and node.get("repo") == hint_repo:
+                scores[node_id] *= _REPO_HINT
     # 사람이 식별자를 그대로 쳤다면 그 노드를 지목한 것이다. 그 신호를 점수에 상수로
     # 섞으면 "얼마를 더할지"를 또 손으로 정하게 된다. 정렬 차원을 나눠 우선순위로 둔다.
     needle = query.strip().lower()

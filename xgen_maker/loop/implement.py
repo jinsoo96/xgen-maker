@@ -163,10 +163,13 @@ def run_agent(repo_path: str | Path, prompt: str, session_dir: Path,
                 "--output-format", "stream-json", "--verbose", "-p"]
         streaming = True
         command = [exe, *args]
-        # Windows npm 심(.cmd/.ps1)은 CreateProcess 직접 실행 불가 → cmd /c 경유.
+        # Windows npm 심(.cmd/.ps1)은 CreateProcess 직접 실행 불가. 심이 부르는 실제
+        # exe를 찾아 셸을 건너뛴다 — cmd를 거치면 인자가 셸 문법으로 해석된다.
         if exe.lower().endswith((".cmd", ".bat", ".ps1")):
             base = exe[:-4] + ".cmd" if exe.lower().endswith(".ps1") else exe
-            command = ["cmd", "/c", base, *args]
+            from ..auth import resolve_shim
+            real = resolve_shim(base)
+            command = [str(real), *args] if real is not None else ["cmd", "/c", base, *args]
         stdin_payload = prompt
         shell = False
     # subprocess.run은 블로킹이라 실행 중 중지 요청을 볼 수 없다. 그러면 사용자가
