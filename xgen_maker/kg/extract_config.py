@@ -19,6 +19,13 @@ CONFIG_EXTS = {".yaml", ".yml", ".toml", ".json", ".ini", ".cfg", ".env", ".sh",
 
 # 설정 키처럼 보이는 것: 줄 앞의 `key:` / `key =` / `[section]` / `"key":`
 _YAML_KEY = re.compile(r"^\s*([A-Za-z_][\w.-]{2,})\s*:", re.M)
+# 값도 내용이다. 라우팅 설정에서 "어느 모듈이 등록돼 있나"의 답은 키가 아니라
+# 리스트 항목이다(`- admin`, `- ocr`). 사람은 그 이름으로 묻는다 —
+# "실존 모듈 5종이 화이트리스트에 없어"처럼. 키만 담으면 그 요청이 이 파일에 못 닿는다.
+_YAML_ITEM = re.compile(r"^\s*-\s+([A-Za-z_][\w.-]{2,})\s*$", re.M)
+# `key: value` 의 값도 식별자다우면 담는다(호스트·URL·불리언은 제외).
+_YAML_VALUE = re.compile(r"^\s*[A-Za-z_][\w.-]*\s*:\s*([A-Za-z_][\w.-]{2,})\s*$", re.M)
+_NOT_VALUES = frozenset("true false null none yes no on off".split())
 _TOML_KEY = re.compile(r"^\s*(?:\[([^\]]+)\]|([A-Za-z_][\w.-]{2,})\s*=)", re.M)
 _JSON_KEY = re.compile(r'"([A-Za-z_][\w.-]{2,})"\s*:')
 _MD_HEAD = re.compile(r"^#{1,3}\s+(.+)$", re.M)
@@ -34,7 +41,9 @@ def _names(rel: str, source: str) -> list[str]:
     suffix = Path(rel).suffix.lower()
     found: list[str] = []
     if suffix in (".yaml", ".yml"):
-        found = _YAML_KEY.findall(source)
+        found = (_YAML_KEY.findall(source) + _YAML_ITEM.findall(source)
+                 + [v for v in _YAML_VALUE.findall(source)
+                    if v.lower() not in _NOT_VALUES])
     elif suffix == ".toml":
         found = [a or b for a, b in _TOML_KEY.findall(source)]
     elif suffix == ".json":

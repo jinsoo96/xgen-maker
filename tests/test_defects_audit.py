@@ -1004,6 +1004,21 @@ class TestConfigFilesAreAddressable(unittest.TestCase):
             top = search(g, "version project", k=1)
         self.assertEqual(top[0]["path"], "pyproject.toml")
 
+    def test_config_list_values_are_searchable(self):
+        """라우팅 설정에서 '어느 모듈이 등록됐나'의 답은 키가 아니라 리스트 값이다.
+
+        실측: 실제 services.yaml에서 키만 담으면 20개, 값까지 담으면 69개가 잡히고
+        모듈명(admin 등)은 값 쪽에만 있다. 사람은 그 모듈명으로 묻는다.
+        """
+        from xgen_maker.kg.extract_config import _names
+        got = _names("services.yaml",
+                     "services:\n  core:\n    modules:\n      - admin\n      - ocr\n"
+                     "    mode: passthrough\n    debug: true\n")
+        self.assertIn("admin", got)
+        self.assertIn("ocr", got)
+        self.assertIn("passthrough", got)
+        self.assertNotIn("true", got, "불리언은 이름이 아니다")
+
     def test_generated_lockfiles_do_not_flood_the_index(self):
         """큰 생성물은 이름만 남긴다 — 색인을 지배하면 안 된다."""
         from xgen_maker.kg.extract_config import extract_config_file, _MAX_BYTES
