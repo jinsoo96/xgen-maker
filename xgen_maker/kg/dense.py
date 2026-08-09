@@ -84,21 +84,35 @@ class DenseIndex:
         if not self.path.exists():
             return
         try:
-            store = np.load(self.path, allow_pickle=True)
-            self.ids = [str(i) for i in store["ids"]]
-            self.digests = dict(json.loads(str(store["digests"])))
-            matrix = store["vectors"].astype("float32")
-        except (OSError, KeyError, ValueError, json.JSONDecodeError):
+            # 반드시 닫는다 — 열어 둔 채로 두면 다음 저장이 파일 교체에서 막힌다
+            # (Windows: PermissionError. 갱신이 조용히 실패하고 색인이 낡는다).
+            with np.load(self.path, allow_pickle=True) as store:
+                self.ids = [str(i) for i in store["ids"]]
+                self.digests = dict(json.loads(str(store["digests"])))
+                matrix = store["vectors"].astype("float32")
+        except Exception:      # noqa: BLE001 — 깨진 파일이 착지를 막지 않게
+            # 쓰다 만 파일(BadZipFile)·형식 변경 모두 여기로 온다. 벡터가 없으면
+            # 어휘 검색만으로 착지한다 — 이 층이 없어서 못 하는 일은 없다.
+            self.ids, self.digests = [], {}
             return
         norms = np.linalg.norm(matrix, axis=1, keepdims=True)
         self._matrix = matrix / (norms + 1e-9)
 
     def save(self, ids: list[str], vectors, digests: dict[str, str]) -> None:
+        """임시 파일에 쓰고 바꿔치기한다.
+
+        200MB짜리를 목적지에 직접 쓰면, 쓰는 동안 읽는 쪽은 반쪽짜리 zip을 만난다
+        (실측: 빌드 중에 읽었더니 BadZipFile). 중간에 죽으면 색인이 통째로 날아간다.
+        """
         import numpy as np
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        np.savez_compressed(self.path, ids=np.array(ids, dtype=object),
+        # savez_compressed는 확장자가 .npz가 아니면 제멋대로 붙인다 — 임시 이름도
+        # .npz로 끝나게 두고, 그 다음 목적지로 바꿔치기한다.
+        staging = self.path.with_name(self.path.stem + ".staging.npz")
+        np.savez_compressed(staging, ids=np.array(ids, dtype=object),
                             vectors=np.asarray(vectors, dtype=np.float16),
                             digests=json.dumps(digests, ensure_ascii=False))
+        staging.replace(self.path)
 
     @property
     def ready(self) -> bool:

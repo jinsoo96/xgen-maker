@@ -45,6 +45,13 @@ def _prefer(primary: list[dict], fallback: list[dict], k: int = 8) -> list[dict]
     return out
 
 
+# 융합에 넣을 각 목록의 재료 개수. 실제 머지된 MR 265건으로 훑어 정했다 —
+# 8: R@1 0.460 R@10 0.845 · 12: R@1 0.483 R@10 0.845 MRR 0.591 ← 채택 ·
+# 16: R@10 0.830 · 20: 0.830. 넉넉히 넣을수록 좋을 것 같지만 아니다. RRF는 순위만
+# 보므로, 뒤쪽 재료가 많아지면 양쪽에서 어중간한 것들이 표를 나눠 가진다.
+_LEXICAL_MATERIAL = 12
+
+
 def _fuse(primary: list[dict], secondary: list[dict], k: int = 8,
           head: int = 2, c: int = 60) -> list[dict]:
     """코드 용어 검색과 원문 검색을 합친다 — 앞은 믿는 쪽, 뒤는 융합.
@@ -108,6 +115,23 @@ class MakerLoop:
         journal.close("answered")
         return {"outcome": "answered", "answer": answer,
                 "landing": landing[:10], "code_cited": bool(legacy)}
+
+    def _dense_hits(self, query: str, config) -> list[dict]:
+        """의미 검색 결과. 주소가 없거나 색인이 없으면 빈 목록(= 이 층 없음)."""
+        base = getattr(config, "embed_base", "")
+        if not base:
+            return []
+        index = getattr(self, "_dense", None)
+        if index is None:
+            try:
+                from ..kg.dense import DenseIndex
+            except ImportError:
+                return []           # numpy 없는 환경 — 어휘 검색만으로 간다
+            index = self._dense = DenseIndex(getattr(config, "dense_path", ""))
+        if not index.ready:
+            return []
+        return index.search(self.graph, query, base,
+                            getattr(config, "embed_model", ""), k=_LEXICAL_MATERIAL)
 
     def _legacy_notes(self, landing: list[dict], work_repo: str = "",
                       work_path: Path | None = None) -> str:
@@ -300,9 +324,10 @@ class MakerLoop:
                     report["repo_hint"] = hint
                     journal.event("query_expand", "ok", keywords=keyword_query,
                                   repo_hint=hint)
+                # 의미 검색과 합칠 재료를 넉넉히 남긴다(융합 상한은 아래에서 정한다).
                 landing = _fuse(search(self.graph, query, k=24, hint_repo=hint),
                                 search(self.graph, keyword_query, k=24, hint_repo=hint),
-                                k=8, head=1)
+                                k=_LEXICAL_MATERIAL, head=1)
             else:
                 journal.event("query_expand", "fail",
                               note="코드 어휘 변환 실패 — 원문 검색 결과만 사용합니다"
@@ -325,7 +350,20 @@ class MakerLoop:
                 # 지목한 범위를 앞에 세우되, 검색이 찾은 것을 통째로 버리지는 않는다.
                 # 앵커가 여덟 자리를 다 채우면 검색 3위였던 정답이 그대로 사라진다
                 # (실측: 실제 머지된 MR에서 그 일이 일어났다).
-                landing = _fuse(ranked, landing, k=8, head=1)
+                landing = _fuse(ranked, landing, k=_LEXICAL_MATERIAL, head=1)
+
+        # ③-2 의미 검색 — 말이 겹치지 않는 요청을 위한 층.
+        # 어휘 검색은 질의의 낱말이 코드에 있어야 찾는다. 실제 요청은 그렇지 않다
+        # ("관리자 SQL 콘솔의 role·user 컬럼 오탐 제거"의 답에는 그 낱말이 없다).
+        # 주소가 없거나 서버가 죽었으면 이 층은 통째로 건너뛴다 — 착지는 그대로 된다.
+        semantic = self._dense_hits(query, config)
+        if semantic:
+            # 어휘 머리를 보존하지 않는다. 의미 검색이 섞이면 그쪽 1위가 더 정확했다
+            # (실측 265건: 머리 보존 R@1 0.415 → 보존 안 함 0.483).
+            landing = _fuse(landing[:_LEXICAL_MATERIAL], semantic, k=8, head=0)
+            journal.event("dense_search", "ok", hits=len(semantic))
+        else:
+            landing = landing[:8]
         journal.event("kg_search", "ok" if landing else "empty",
                       hits=[{"id": n["id"], "kind": n["kind"], "score": n["score"]}
                             for n in landing[:8]],

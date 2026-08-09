@@ -939,10 +939,28 @@ class TestTunedValuesCarryTheirEvidence(unittest.TestCase):
         self.assertIn("_MAX_REFS = 400", source)
         self.assertIn("R@10", source)
 
-    def test_landing_head_is_one(self):
-        """머리는 원문 1개 — 큰 표본에서 R@10이 조금 더 높았다(0.742 → 0.746)."""
+    def test_lexical_fusion_keeps_the_raw_head(self):
+        """어휘끼리 합칠 때는 원문 머리 1개를 지킨다 — 큰 표본에서 R@10 0.742 → 0.746."""
         source = Path("xgen_maker/loop/pipeline.py").read_text(encoding="utf-8")
-        self.assertIn("k=8, head=1", source)
+        self.assertIn("k=_LEXICAL_MATERIAL, head=1", source)
+
+    def test_semantic_fusion_drops_the_head(self):
+        """의미 검색이 섞이면 어휘 머리를 보존하지 않는다 — R@1 0.415 → 0.483.
+
+        임베딩의 1위가 더 정확해서다. 어휘끼리 합칠 때와 반대라 헷갈리기 쉬우니
+        두 규칙을 나란히 못박는다.
+        """
+        source = Path("xgen_maker/loop/pipeline.py").read_text(encoding="utf-8")
+        self.assertIn("landing = _fuse(landing[:_LEXICAL_MATERIAL], semantic, k=8, head=0)",
+                      source)
+        self.assertIn("0.483", source, "근거 수치를 남긴다")
+
+    def test_fusion_material_is_evidence_backed(self):
+        """재료 개수는 훑어서 정했다 — 많이 넣을수록 좋을 것 같지만 아니다."""
+        from xgen_maker.loop.pipeline import _LEXICAL_MATERIAL
+        self.assertEqual(_LEXICAL_MATERIAL, 12)
+        source = Path("xgen_maker/loop/pipeline.py").read_text(encoding="utf-8")
+        self.assertIn("0.845", source)
 
 
 class TestLandingStaysSpecific(unittest.TestCase):
@@ -1554,3 +1572,54 @@ class DenseSearchDegradesGracefullyTest(unittest.TestCase):
         source = Path("xgen_maker/kg/dense.py").read_text(encoding="utf-8")
         self.assertIn("Instruct:", source)
         self.assertIn("0.518", source, "근거 수치를 남긴다")
+
+
+class DenseIndexFileHandlingTest(unittest.TestCase):
+    """색인 파일을 다루다 조용히 낡거나 날아가는 길을 막는다."""
+
+    def _index(self, path):
+        from xgen_maker.kg.dense import DenseIndex
+        return DenseIndex(path)
+
+    def test_save_is_atomic_and_leaves_no_debris(self):
+        """200MB를 목적지에 직접 쓰면 쓰는 동안 읽는 쪽이 반쪽 파일을 만난다."""
+        import numpy as np
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "v.npz"
+            index = self._index(path)
+            index.save(["a"], np.zeros((1, 4), dtype="float32"), {"a": "x"})
+            self.assertTrue(path.exists())
+            self.assertFalse(list(Path(tmp).glob("*staging*")), "임시 파일이 남았다")
+
+    def test_reload_then_save_again_does_not_lock(self):
+        """읽으며 열어 둔 핸들이 남으면 다음 저장이 교체에서 막힌다(Windows)."""
+        import numpy as np
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "v.npz"
+            self._index(path).save(["a"], np.zeros((1, 4), dtype="float32"), {"a": "x"})
+            loaded = self._index(path)
+            self.assertTrue(loaded.ready)
+            loaded.save(["a", "b"], np.zeros((2, 4), dtype="float32"),
+                        {"a": "x", "b": "y"})
+            self.assertEqual(len(self._index(path).ids), 2)
+
+    def test_old_format_without_digests_is_treated_as_absent(self):
+        """형식이 다른 파일을 반쯤 읽어 쓰면 갱신 판단이 어긋난다 — 없는 셈 친다."""
+        import numpy as np
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "v.npz"
+            np.savez_compressed(path, ids=np.array(["a"], dtype=object),
+                                vectors=np.zeros((1, 4), dtype="float16"))
+            self.assertFalse(self._index(path).ready)
+
+
+class PipelineRunsSemanticLayerTest(unittest.TestCase):
+    """의미 검색 단계가 코드에만 있고 화면·카탈로그에 없으면 '안 도는' 것으로 보인다."""
+
+    def test_step_is_catalogued(self):
+        from xgen_maker.codes import ALL_EVENTS
+        self.assertIn("dense_search", ALL_EVENTS)
+
+    def test_step_is_on_the_coverage_screen(self):
+        source = Path("xgen_maker/web.py").read_text(encoding="utf-8")
+        self.assertIn('("dense_search", "의미 검색"', source)

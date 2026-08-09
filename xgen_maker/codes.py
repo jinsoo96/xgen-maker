@@ -21,6 +21,7 @@ class Event(str, Enum):
     INTENT = "intent"
     QUERY_EXPAND = "query_expand"
     KG_SEARCH = "kg_search"
+    DENSE_SEARCH = "dense_search"    # 의미 검색(임베딩) — 주소가 있을 때만
     ANCHOR = "anchor"                 # 요청이 직접 지목한 곳(화면 주소·파일·심볼)
     AGENT = "agent"                   # 에이전트가 실제로 한 일(실시간)
     ANSWER = "answer"
