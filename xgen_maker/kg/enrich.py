@@ -111,26 +111,52 @@ def _degree_index(graph: Graph) -> dict[str, int]:
 def enrich_llm(graph: Graph, base: str, model: str, repos: dict[str, str],
                limit: int = 200, timeout: int = 45,
                kinds: tuple[str, ...] = _LLM_KIND_PRIORITY,
-               chat_fn=None) -> dict:
-    """LLM 요약 배치 주입. 반환 stats. chat_fn은 테스트 치환용(기본 llm.json_chat)."""
+               chat_fn=None, workers: int = 6, on_progress=None) -> dict:
+    """LLM 요약 배치 주입. 반환 stats. chat_fn은 테스트 치환용(기본 llm.json_chat).
+
+    한 번에 여러 건을 부른다. 요약은 서로 독립이라 줄 세울 이유가 없는데, 순차로는
+    노드당 20초씩 걸려 의미층이 사실상 못 채워졌다(실측: 순차 3건/분 → 6워커 38건/분).
+    워커를 더 늘려도 처리량은 안 늘어난다(10워커도 39건/분) — CLI 쪽이 한계다.
+    """
+    import concurrent.futures as futures
+
     chat = chat_fn or llm.json_chat
     degree = _degree_index(graph)
     targets = [n for n in graph.nodes.values()
                if n["kind"] in kinds and n["meta"].get("summary_src") != "llm"]
     targets.sort(key=lambda n: (kinds.index(n["kind"]), -degree.get(n["id"], 0)))
-    done, failed = 0, 0
-    for node in targets[:limit]:
-        answer = chat(base, model, [
+    batch = targets[:limit]
+
+    def summarize(node: dict):
+        return node, chat(base, model, [
             {"role": "system", "content": _SUMMARY_SYSTEM},
             {"role": "user", "content": _llm_context(graph, node, repos)}],
             max_tokens=200, timeout=timeout)
-        if answer and isinstance(answer.get("summary"), str) and answer["summary"].strip():
-            node["meta"]["summary"] = answer["summary"].strip()[:300]
-            node["meta"]["summary_src"] = "llm"
-            done += 1
-        else:
-            failed += 1
-            if failed >= 3 and done == 0:
-                break  # 엔드포인트 다운 — 조기 중단
+
+    done = failed = 0
+    if not batch:
+        return {"targets": len(targets), "llm_done": 0, "llm_failed": 0, "remaining": 0}
+    # 첫 건은 혼자 돌려 본다. 엔드포인트가 죽었으면 여기서 멈춘다 — 전부 붙여 놓고
+    # limit만큼 실패를 쌓을 이유가 없다(순차 시절의 '3연속 실패 중단'과 같은 목적).
+    first, answer = summarize(batch[0])
+    if not (answer and isinstance(answer.get("summary"), str) and answer["summary"].strip()):
+        return {"targets": len(targets), "llm_done": 0, "llm_failed": 1,
+                "remaining": len(targets), "aborted": "첫 호출 실패 — 엔드포인트 확인"}
+    first["meta"]["summary"] = answer["summary"].strip()[:300]
+    first["meta"]["summary_src"] = "llm"
+    done = 1
+
+    with futures.ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        for node, answer in pool.map(summarize, batch[1:]):
+            if answer and isinstance(answer.get("summary"), str) and answer["summary"].strip():
+                node["meta"]["summary"] = answer["summary"].strip()[:300]
+                node["meta"]["summary_src"] = "llm"
+                done += 1
+            else:
+                failed += 1
+            if on_progress is not None:
+                on_progress(done, failed, len(batch))
+    if done:
+        graph.touch()          # 요약은 검색 점수에 들어간다 — 색인을 다시 세워야 한다
     return {"targets": len(targets), "llm_done": done, "llm_failed": failed,
             "remaining": max(0, len(targets) - done - failed)}

@@ -96,7 +96,11 @@ def _chat_claude_cli(messages: list[dict], timeout: int,
         _note("claude CLI를 찾지 못했습니다")
         return None
     try:
-        with tempfile.TemporaryDirectory() as neutral:
+        # 정리 실패를 무시한다. Windows에서 자식이 그 디렉토리를 cwd로 잡고 있으면
+        # 삭제가 WinError 32로 실패하는데, 그 예외가 아래 OSError로 잡혀 **이미 받은
+        # 응답까지 통째로 버려졌다**(실측: 호출을 3개만 겹쳐도 절반이 그렇게 날아갔다).
+        # 임시 디렉토리 한 개가 남는 것과 답을 잃는 것은 견줄 일이 아니다.
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as neutral:
             result = subprocess.run(
                 command, input=user, cwd=neutral, capture_output=True, text=True,
                 encoding="utf-8", errors="replace", timeout=timeout)
@@ -151,7 +155,8 @@ def _vision_judge_cli(image_path: str, question: str, timeout: int) -> dict | No
     if command is None:
         return None
     try:
-        with tempfile.TemporaryDirectory() as neutral:   # repo CLAUDE.md/git 오염 차단
+        # 정리 실패로 판정 결과를 버리지 않는다(위 _chat_claude_cli와 같은 이유).
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as neutral:
             result = subprocess.run(command, input=prompt, cwd=neutral,
                                     capture_output=True, text=True,
                                     encoding="utf-8", errors="replace",

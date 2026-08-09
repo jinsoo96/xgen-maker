@@ -1334,3 +1334,68 @@ class ShellMetacharactersNeverReachTheShellTest(unittest.TestCase):
         """이 결함의 진입점이 그대로 있음을 못박는다 — 프롬프트를 바꿔 가리지 말 것."""
         source = Path("xgen_maker/loop/intent.py").read_text(encoding="utf-8")
         self.assertIn("bug|feature|refactor|question", source)
+
+
+class TempCleanupNeverDiscardsAnAnswerTest(unittest.TestCase):
+    """회귀: 임시 디렉토리 삭제 실패로 이미 받은 응답을 통째로 버렸다.
+
+    Windows에서 자식이 그 디렉토리를 cwd로 잡고 있으면 삭제가 WinError 32로 실패하고,
+    그 OSError가 '실행 실패'로 잡혀 답이 날아갔다. 호출을 3개만 겹쳐도 절반이 그렇게
+    사라졌다 — 의미층 주입이 사실상 불가능했던 이유.
+    """
+
+    def test_cleanup_errors_are_ignored(self):
+        source = Path("xgen_maker/llm.py").read_text(encoding="utf-8")
+        self.assertEqual(source.count("ignore_cleanup_errors=True"), 2,
+                         "claude CLI 호출과 화면 판정 둘 다 정리 실패를 무시해야 한다")
+        self.assertNotIn("with tempfile.TemporaryDirectory() as neutral",
+                         source, "정리 실패가 응답을 버리는 경로가 남아 있다")
+
+
+class EnrichRunsInParallelTest(unittest.TestCase):
+    """요약은 서로 독립인데 줄을 세워 의미층이 못 채워졌다(순차 3건/분 → 6워커 38건/분)."""
+
+    def _graph(self):
+        g = Graph()
+        g.add_node("r", "repo", "r", "r", "/r")
+        for i in range(8):        # enrich 대상은 file/route/endpoint/feature다
+            g.add_node(f"r:m{i}.py", "file", f"m{i}.py", "r", f"m{i}.py")
+            g.add_edge("r", f"r:m{i}.py", "contains")
+        return g
+
+    def test_all_targets_get_summaries(self):
+        from xgen_maker.kg.enrich import enrich_llm
+        g = self._graph()
+        calls = []
+
+        def fake(base, model, messages, **kw):
+            calls.append(1)
+            return {"summary": "요약"}
+
+        stats = enrich_llm(g, "b", "m", {"r": "/r"}, limit=8, chat_fn=fake, workers=4)
+        self.assertEqual(stats["llm_done"], 8)
+        self.assertEqual(len(calls), 8, "건마다 한 번씩만 불러야 한다")
+
+    def test_dead_endpoint_stops_after_one_call(self):
+        """엔드포인트가 죽었으면 limit만큼 실패를 쌓지 않는다."""
+        from xgen_maker.kg.enrich import enrich_llm
+        g = self._graph()
+        calls = []
+
+        def dead(*a, **k):
+            calls.append(1)
+            return None
+
+        stats = enrich_llm(g, "b", "m", {"r": "/r"}, limit=8, chat_fn=dead, workers=4)
+        self.assertEqual(len(calls), 1, "죽은 엔드포인트에 8번 매달렸다")
+        self.assertIn("aborted", stats)
+
+    def test_summaries_invalidate_the_search_index(self):
+        """요약은 검색 점수에 들어간다 — 색인을 안 갈면 새 요약이 검색에 안 잡힌다."""
+        from xgen_maker.kg.enrich import enrich_llm
+        g = self._graph()
+        before = g.rev
+        enrich_llm(g, "b", "m", {"r": "/r"}, limit=2,
+                   chat_fn=lambda *a, **k: {"summary": "결제 취소 처리"}, workers=2)
+        self.assertGreater(g.rev, before)
+        self.assertTrue(search(g, "결제 취소", k=3), "새 요약이 검색에 안 잡힌다")
