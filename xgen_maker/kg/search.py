@@ -27,7 +27,20 @@ def _index(graph: Graph) -> Bm25Index:
     index = Bm25Index(nodes, centrality=centrality(nodes, graph.edges))
     graph.__dict__["_bm25"] = index
     graph.__dict__["_bm25_ver"] = version
+    graph.__dict__.pop("_lexicon", None)      # 색인이 새로 서면 어휘 대응도 다시 배운다
     return index
+
+
+def lexicon(graph: Graph) -> dict[str, list[str]]:
+    """이 코드베이스의 한글↔코드 어휘 대응. 색인과 같은 수명으로 캐시한다."""
+    cached = graph.__dict__.get("_lexicon")
+    if cached is not None:
+        return cached
+    _index(graph)                              # rev 기준 캐시 정리를 태운다
+    from .lexicon import build_lexicon
+    built = build_lexicon(list(graph.nodes.values()))
+    graph.__dict__["_lexicon"] = built
+    return built
 
 
 def search(graph: Graph, query: str, k: int = 10,

@@ -258,6 +258,16 @@ class MakerLoop:
                 # 브랜치 이름은 키워드를 이어붙이지 않는다 — 중복되고 길기만 하다.
                 # "무엇을 하는 작업인지"를 한 마디로 받아 쓴다.
                 report["branch_slug"] = str(expanded.get("branch") or "").strip()
+                # LLM이 낸 영어는 일반적인 말이라 이 코드가 쓰는 말과 어긋날 수 있다
+                # ("음성 인식"→speech recognition을 냈는데 코드는 audio다). 그래서
+                # 이 저장소가 실제로 쓰는 말을 그래프에서 배워 함께 붙인다.
+                from ..kg.search import lexicon as _lexicon
+                from ..kg.lexicon import bridge_terms
+                bridged = bridge_terms(_lexicon(self.graph), query)
+                if bridged:
+                    keyword_query = f"{keyword_query} {bridged}".strip()
+                    journal.event("query_expand", "ok", keywords=keyword_query,
+                                  learned=bridged)
                 # 원문·코드용어 두 결과를 융합한다(한쪽으로 대체하지 않는다).
                 # 재료는 넉넉히 뽑아야 융합할 것이 생긴다.
                 landing = _fuse(search(self.graph, keyword_query, k=24),

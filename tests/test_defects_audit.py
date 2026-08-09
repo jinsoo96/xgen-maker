@@ -838,3 +838,67 @@ class TestAnchorDoesNotDiscardSearch(unittest.TestCase):
         found = [{"id": f"f{i}", "name": f"f{i}"} for i in range(8)]
         merged = _fuse(anchors, found, k=8, head=2)
         self.assertEqual([h["id"] for h in merged[:2]], ["anch0", "anch1"])
+
+
+class TestLearnedVocabularyBridge(unittest.TestCase):
+    """사람이 쓰는 말과 코드가 쓰는 말이 다르다. LLM의 일반 영어로 메우면 어긋난다
+    ("음성 인식"→speech recognition을 냈는데 코드는 audio다).
+
+    그래프 자체가 병렬 코퍼스다 — 한 노드 안에 한글 요약과 영문 식별자가 함께 있다.
+    그 공기(co-occurrence)로 이 코드베이스가 그 개념을 뭐라 부르는지 배운다.
+    """
+
+    def _nodes(self):
+        # '전사'가 stt/transcribe와 함께 나오는 노드들 + 무관한 노드들
+        nodes = []
+        for i in range(4):
+            nodes.append({"id": f"a{i}", "kind": "function", "name": f"stt_transcribe_{i}",
+                          "repo": "r", "path": f"service/stt/transcribe_{i}.py",
+                          "meta": {"summary": "전사 결과를 정제한다"}})
+        for i in range(4):
+            nodes.append({"id": f"b{i}", "kind": "function", "name": f"billing_invoice_{i}",
+                          "repo": "r", "path": f"service/billing/invoice_{i}.py",
+                          "meta": {"summary": "청구 금액을 계산한다"}})
+        return nodes
+
+    def test_learns_this_codebase_words(self):
+        from xgen_maker.kg.lexicon import build_lexicon
+        lex = build_lexicon(self._nodes())
+        self.assertTrue(any(w in lex.get("전사", []) for w in ("stt", "transcribe")),
+                        "이 코드가 '전사'를 뭐라 부르는지 못 배웠다")
+        self.assertNotIn("invoice", lex.get("전사", []))
+
+    def test_bridge_adds_code_words_for_korean(self):
+        from xgen_maker.kg.lexicon import build_lexicon, bridge_terms
+        lex = build_lexicon(self._nodes())
+        added = bridge_terms(lex, "전사 정제 고쳐줘")
+        self.assertTrue(added, "한글 질의에 코드 어휘가 안 붙었다")
+        self.assertTrue(all(w.isascii() for w in added.split()))
+
+    def test_english_query_is_untouched(self):
+        from xgen_maker.kg.lexicon import build_lexicon, bridge_terms
+        lex = build_lexicon(self._nodes())
+        self.assertEqual(bridge_terms(lex, "fix transcribe pipeline"), "")
+
+    def test_lexicon_follows_the_graph(self):
+        """사전을 손으로 적지 않는다 — 코드가 바뀌면 사전도 바뀐다.
+
+        대조가 있어야 배운다. 모든 노드가 같은 말을 가지면 그 말은 아무것도
+        가리지 못하므로(PMI 0) 대응으로 치지 않는다 — 그게 옳은 동작이다.
+        """
+        from xgen_maker.kg.search import lexicon
+        g = Graph()
+        for i in range(4):
+            g.add_node(f"r:pay{i}.py#refund_{i}", "function", f"refund_{i}", "r",
+                       f"pay/refund_{i}.py", 1, summary="환불 요청을 처리한다")
+        for i in range(4):
+            g.add_node(f"r:auth{i}.py#login_{i}", "function", f"login_{i}", "r",
+                       f"auth/login_{i}.py", 1, summary="사용자 인증을 확인한다")
+        lex = lexicon(g)
+        self.assertIn("환불", lex)
+        self.assertTrue(any("refund" in w for w in lex["환불"]))
+        self.assertFalse(any("login" in w for w in lex["환불"]))
+
+    def test_pipeline_uses_the_learned_bridge(self):
+        source = Path("xgen_maker/loop/pipeline.py").read_text(encoding="utf-8")
+        self.assertIn("bridge_terms", source)
