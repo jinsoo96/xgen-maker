@@ -154,7 +154,7 @@ def converge(config, repo_path: Path, repo: str, query: str, intent: str,
         judge_result = None
         if sandbox["status"] != "failed" and not checks["blocked"]:
             judge_result = judge(config, query, diff_text, changed,
-                                 checks=checks["summary"])
+                                 checks=checks["summary"], cost=cost)
             journal.event("judge", "pass" if judge_result.get("passed") else "fail",
                           n=iteration, score=judge_result.get("score"),
                           source=judge_result.get("source"))  # heuristic vs llm 정직 노출

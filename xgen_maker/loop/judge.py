@@ -37,7 +37,7 @@ def heuristic_score(diff_text: str, changed_files: list[str],
 
 
 def judge(config: MakerConfig, query: str, diff_text: str,
-          changed_files: list[str], checks: dict | None = None) -> dict:
+          changed_files: list[str], checks: dict | None = None, cost=None) -> dict:
     if not diff_text.strip() and not changed_files:
         return {"score": 0.0, "passed": False, "veto": "빈 diff — 구현 산출물 없음",
                 "reasons": [], "source": "veto"}
@@ -50,11 +50,13 @@ def judge(config: MakerConfig, query: str, diff_text: str,
     source = "heuristic"
     score, reasons = heuristic_score(diff_text, changed_files, checks)
     if config.llm_enabled:
+        body = (f"[request]\n{query}\n\n[changed files]\n{changed_files}\n\n"
+                f"[diff (truncated)]\n{diff_text[:8000]}")
         answer = llm.json_chat(config.llm_base, config.llm_model, [
             {"role": "system", "content": _JUDGE_SYSTEM},
-            {"role": "user", "content":
-             f"[request]\n{query}\n\n[changed files]\n{changed_files}\n\n[diff (truncated)]\n{diff_text[:8000]}"}],
-            max_tokens=300, timeout=45)
+            {"role": "user", "content": body}], max_tokens=300, timeout=45)
+        if cost is not None:
+            cost.add_llm(len(_JUDGE_SYSTEM) + len(body), len(str(answer or "")))
         if answer is not None and isinstance(answer.get("score"), (int, float)):
             score = max(0.0, min(1.0, float(answer["score"])))
             reasons = [str(r) for r in answer.get("reasons", [])][:5]

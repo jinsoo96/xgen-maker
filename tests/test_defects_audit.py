@@ -1192,3 +1192,45 @@ class ClaudeCliPromptSurvivesNewlinesTest(unittest.TestCase):
         source = Path("xgen_maker/loop/judge.py").read_text(encoding="utf-8")
         self.assertIn("[diff (truncated)]", source)
         self.assertIn("\n", source, "판정 프롬프트는 줄바꿈으로 구획을 나눈다")
+
+
+class CostCountsEveryLlmCallTest(unittest.TestCase):
+    """회귀: CostTracker.add_llm이 정의만 되고 아무도 안 불렀다.
+
+    비용 화면은 코딩 에이전트분만 세고 어휘변환·의도분류·판정의 LLM 호출은 전부
+    빠져 있었다. 숫자가 있으니 맞는 줄 알지, 없는 줄은 모른다.
+    """
+
+    def test_judge_records_its_llm_call(self):
+        from xgen_maker.config import MakerConfig
+        from xgen_maker.loop.cost import CostTracker
+        from xgen_maker.loop import judge as judge_mod
+        cfg = MakerConfig()
+        cfg.llm_enabled = True
+        tracker = CostTracker()
+        original = judge_mod.llm.json_chat
+        judge_mod.llm.json_chat = lambda *a, **k: {"score": 0.8, "reasons": ["ok"]}
+        try:
+            judge_mod.judge(cfg, "q", "diff --git a b\n+x", ["a.py"], cost=tracker)
+        finally:
+            judge_mod.llm.json_chat = original
+        self.assertEqual(tracker.llm_calls, 1, "판정의 LLM 호출이 비용에 안 잡힌다")
+        self.assertGreater(tracker.est_input, 0)
+
+    def test_intent_records_its_llm_call(self):
+        from xgen_maker.loop.cost import CostTracker
+        from xgen_maker.loop import intent as intent_mod
+        tracker = CostTracker()
+        original = intent_mod.llm.json_chat
+        intent_mod.llm.json_chat = lambda *a, **k: {"intent": "bug"}
+        try:
+            # 휴리스틱이 못 가리는 문장이어야 LLM 경로로 간다
+            intent_mod.classify("그거", "claude_cli", "cli", cost=tracker)
+        finally:
+            intent_mod.llm.json_chat = original
+        self.assertEqual(tracker.llm_calls, 1, "의도 분류의 LLM 호출이 비용에 안 잡힌다")
+
+    def test_pipeline_records_the_expansion_call(self):
+        source = Path("xgen_maker/loop/pipeline.py").read_text(encoding="utf-8")
+        self.assertIn("cost.add_llm", source, "어휘 변환 호출이 비용에 안 잡힌다")
+        self.assertIn("cost=cost", source)

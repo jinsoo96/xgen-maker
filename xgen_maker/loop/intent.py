@@ -23,7 +23,8 @@ def _hit(query: str, hints: tuple[str, ...]) -> int:
     return sum(1 for hint in hints if hint in lowered)
 
 
-def classify(query: str, llm_base: str | None = None, llm_model: str | None = None) -> dict:
+def classify(query: str, llm_base: str | None = None, llm_model: str | None = None,
+             cost=None) -> dict:
     scores = {"bug": _hit(query, BUG_HINTS), "feature": _hit(query, FEATURE_HINTS),
               "refactor": _hit(query, REFACTOR_HINTS), "question": _hit(query, QUESTION_HINTS)}
     # 변경 동사가 있으면 질문 어미보다 우선 — 단 질문 신호가 더 강하면 질문으로 남긴다.
@@ -38,10 +39,13 @@ def classify(query: str, llm_base: str | None = None, llm_model: str | None = No
     else:
         intent, source = "question", "heuristic-default"
         if llm_base and llm_model:
+            system = ('Classify the dev request. Reply JSON only: '
+                      '{"intent":"bug|feature|refactor|question"}')
             answer = llm.json_chat(llm_base, llm_model, [
-                {"role": "system", "content":
-                 'Classify the dev request. Reply JSON only: {"intent":"bug|feature|refactor|question"}'},
+                {"role": "system", "content": system},
                 {"role": "user", "content": query}], max_tokens=50, timeout=20)
+            if cost is not None:
+                cost.add_llm(len(system) + len(query), len(str(answer or "")))
             if answer and answer.get("intent") in BRANCH_PREFIX:
                 intent, source = answer["intent"], "llm"
     return {"intent": intent, "scores": scores, "source": source,

@@ -216,7 +216,8 @@ class MakerLoop:
         intent_info = classify(
             query,
             config.llm_base if config.llm_enabled else None,
-            config.llm_model if config.llm_enabled else None)
+            config.llm_model if config.llm_enabled else None,
+            cost=cost)
         intent = intent_info["intent"]
         journal.event("intent", "ok", **intent_info)
         report["intent"] = intent
@@ -252,6 +253,8 @@ class MakerLoop:
                  'Reply JSON only: {"keywords": ["..."], "branch": "..."}'},
                 {"role": "user", "content": query}], max_tokens=200, timeout=45,
                 retries=3, diag=expand_diag)
+            # 이 호출도 비용이다. 안 세면 화면의 비용이 코딩 에이전트분만 보여준다.
+            cost.add_llm(len(query) + 400, len(str(expanded or "")))
             if expanded and expanded.get("keywords"):
                 keyword_query = " ".join(str(k) for k in expanded["keywords"])
                 journal.event("query_expand", "ok", keywords=keyword_query)
