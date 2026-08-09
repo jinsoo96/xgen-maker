@@ -23,6 +23,21 @@ def _git_lines(repo_root: str | Path, *args: str) -> list[str]:
     return [line for line in result.stdout.splitlines() if line.strip()]
 
 
+def _git_zfields(repo_root: str | Path, *args: str) -> list[str]:
+    """NUL 구분으로 받는다 — 경로에 따옴표·이스케이프가 섞이지 않게.
+
+    git은 기본적으로 ASCII 밖 경로를 C 스타일로 감싼다("\\354\\240\\225...").
+    그걸 그대로 경로로 쓰면 존재하지 않는 파일을 가리키고, 증분 갱신은 조용히
+    건너뛴다 — 그 파일의 노드는 영영 낡은 채로 남는다(실측: 한글 파일명이
+    '/354/240/225/...'로 뭉개졌다). -z를 주면 git이 감싸지 않는다.
+    """
+    result = subprocess.run(["git", *args], cwd=repo_root, capture_output=True,
+                            text=True, encoding="utf-8", errors="replace", timeout=60)
+    if result.returncode != 0:
+        return []
+    return [field for field in result.stdout.split("\0") if field]
+
+
 def changed_files(repo_root: str | Path, old_sha: str | None,
                   ref: str = "") -> set[str] | None:
     """old_sha 이후 변경 파일. 없거나 유효하지 않으면 None(풀리빌드 신호).
@@ -34,7 +49,7 @@ def changed_files(repo_root: str | Path, old_sha: str | None,
     if not old_sha:
         return None
     target = ref or "HEAD"
-    committed = _git_lines(repo_root, "diff", "--name-only", old_sha, target)
+    committed = _git_zfields(repo_root, "diff", "--name-only", "-z", old_sha, target)
     if not committed and git_head(repo_root, target) != old_sha:
         # diff 실패(rebase로 sha 소실 등) — 풀리빌드로 폴백
         probe = subprocess.run(["git", "cat-file", "-e", old_sha], cwd=repo_root,
@@ -43,11 +58,18 @@ def changed_files(repo_root: str | Path, old_sha: str | None,
             return None
     changed = set(committed)
     if not ref:
-        for line in _git_lines(repo_root, "status", "--porcelain"):
-            path = line[3:].strip().strip('"')
-            if " -> " in path:  # rename: 새 경로 채택
-                path = path.split(" -> ", 1)[1].strip().strip('"')
-            changed.add(path)
+        # -z 형식: 항목마다 "XY <경로>\0", 이름 변경만 뒤에 옛 경로가 한 칸 더 붙는다.
+        # 옛 경로는 이미 사라진 파일이라 갱신 대상이 아니다 — 건너뛴다.
+        fields = _git_zfields(repo_root, "status", "--porcelain", "-z")
+        index = 0
+        while index < len(fields):
+            entry = fields[index]
+            index += 1
+            status, path = entry[:2], entry[3:]
+            if path:
+                changed.add(path)
+            if status and status[0] in ("R", "C"):
+                index += 1              # 짝지어 오는 옛 경로를 소비
     return {p.replace("\\", "/") for p in changed}
 
 

@@ -326,3 +326,51 @@ class GatewayRoutesSurviveIncrementalRefreshTest(unittest.TestCase):
             for _ in range(5):
                 refresh_files(graph, "r", root, ["config/services.yaml", "app.py"])
             self.assertEqual(sorted(graph.nodes), before)
+
+
+class NonAsciiPathsSurviveSyncTest(unittest.TestCase):
+    """회귀: git이 ASCII 밖 경로를 C 스타일로 감싸는 걸 못 풀어 경로가 뭉개졌다.
+
+    '정산.py'가 '/354/240/225/...'가 됐고, 그런 경로는 실재하지 않으므로 증분 갱신이
+    조용히 건너뛴다 — 그 파일의 노드는 영영 낡은 채로 남는다. -z로 받으면 git이
+    애초에 감싸지 않는다.
+    """
+
+    def _repo(self, tmp):
+        root = Path(tmp)
+        git(root, "init", "-q")
+        (root / "정산.py").write_text("def calc_settlement():\n    return 1\n",
+                                     encoding="utf-8")
+        (root / "plain.py").write_text("def g():\n    return 2\n", encoding="utf-8")
+        git(root, "add", "-A")
+        git(root, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "i")
+        return root
+
+    def test_uncommitted_change_to_korean_filename_is_seen(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._repo(tmp)
+            sha = git(root, "rev-parse", "HEAD").strip()
+            (root / "정산.py").write_text("def calc_settlement():\n    return 99\n",
+                                         encoding="utf-8")
+            self.assertIn("정산.py", changed_files(root, sha))
+
+    def test_rename_reports_the_new_path_only(self):
+        """옛 경로는 이미 없는 파일이라 갱신 대상이 아니다."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._repo(tmp)
+            sha = git(root, "rev-parse", "HEAD").strip()
+            git(root, "mv", "plain.py", "일반.py")
+            got = changed_files(root, sha)
+            self.assertIn("일반.py", got)
+
+    def test_refresh_actually_rereads_the_file(self):
+        from xgen_maker.kg.build import build_repo, refresh_files
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._repo(tmp)
+            graph = build_repo("r", root)
+            (root / "정산.py").write_text("def calc_settlement_v2():\n    return 5\n",
+                                         encoding="utf-8")
+            refresh_files(graph, "r", root, ["정산.py"])
+            names = {n.get("name") for n in graph.nodes.values()}
+            self.assertIn("calc_settlement_v2", names)
+            self.assertNotIn("calc_settlement", names)
