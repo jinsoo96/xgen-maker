@@ -580,3 +580,64 @@ class TestFusionActuallyMerges(unittest.TestCase):
         source = Path("xgen_maker/loop/pipeline.py").read_text(encoding="utf-8")
         self.assertIn("_fuse(search(self.graph, keyword_query", source,
                       "확장어 병합이 다시 대체 방식으로 돌아갔다")
+
+
+class TestGatewayConfigIsAddressable(unittest.TestCase):
+    """회귀: 관문 설정 파일에 file 노드가 없어 그 파일 자체를 지목할 좌표가 없었다.
+
+    다른 추출기(py·ts·rust)는 모두 파일 노드를 만든다. 관문만 라우트 노드만 만들어서,
+    "어느 모듈이 어디로 가는지 적힌 그 파일을 고쳐라"라는 요청이 착지할 곳이 없었다.
+    추출기 자신도 파일 노드를 전제한 contains 엣지를 만들려다 조용히 저장소로 폴백했다.
+    """
+
+    def _repo(self, tmp: str):
+        root = Path(tmp)
+        (root / "config").mkdir(parents=True)
+        (root / "config" / "services.yaml").write_text(
+            "base_path: /api\n"
+            "services:\n"
+            "  billing-svc:\n"
+            "    host: http://billing\n"
+            "    modules: [invoice, payment]\n"
+            "  audit-svc:\n"
+            "    host: http://audit\n"
+            "    modules: [trail]\n", encoding="utf-8")
+        return root
+
+    def test_file_node_exists_with_route_nodes(self):
+        from xgen_maker.kg.extract_gateway import extract_gateway_routes
+        g = Graph()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._repo(tmp)
+            g.add_node("gw", "repo", "gw", "gw", str(root))
+            extract_gateway_routes(g, "gw", root)
+        kinds = {n["kind"] for n in g.nodes.values()
+                 if (n.get("path") or "").endswith("services.yaml")}
+        self.assertIn("gateway_route", kinds)
+        self.assertIn("file", kinds, "설정 파일 자체를 가리킬 좌표가 없다")
+
+    def test_file_node_carries_registered_names(self):
+        """무엇이 등록돼 있는지로도 그 파일을 찾을 수 있어야 한다."""
+        from xgen_maker.kg.extract_gateway import extract_gateway_routes
+        g = Graph()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._repo(tmp)
+            g.add_node("gw", "repo", "gw", "gw", str(root))
+            extract_gateway_routes(g, "gw", root)
+        node = next(n for n in g.nodes.values()
+                    if n["kind"] == "file" and (n.get("path") or "").endswith("services.yaml"))
+        summary = (node.get("meta") or {}).get("summary", "")
+        self.assertIn("billing-svc", summary)
+        self.assertIn("invoice", summary)
+
+    def test_contains_edge_hangs_off_the_file(self):
+        from xgen_maker.kg.extract_gateway import extract_gateway_routes
+        g = Graph()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._repo(tmp)
+            g.add_node("gw", "repo", "gw", "gw", str(root))
+            extract_gateway_routes(g, "gw", root)
+        file_id = next(n["id"] for n in g.nodes.values()
+                       if n["kind"] == "file" and (n.get("path") or "").endswith("services.yaml"))
+        from_file = [e for e in g.edges if e["src"] == file_id and e["kind"] == "contains"]
+        self.assertTrue(from_file, "라우트가 저장소가 아니라 그 설정 파일에 달려야 한다")

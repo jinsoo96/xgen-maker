@@ -25,6 +25,8 @@ raw = json.loads((SC / "mr_cases.json").read_text(encoding="utf-8"))
 PREFIX = re.compile(r"^(feat|fix|refactor|chore|docs|style|test|perf|build|ci|release)"
                     r"(\([^)]*\))?\s*:\s*", re.I)
 DRAFT = re.compile(r"^(draft|wip)\s*:\s*", re.I)
+# 제목이 작업 내용을 담지 않는 유형(릴리즈·브랜치 머지·한 단어 브랜치명)
+UNANSWERABLE = re.compile(r"^\[?release\]?|머지$|merge (branch|request)|^(develop|main|stage|staging)$", re.I)
 
 cases = []
 for mr in raw:
@@ -34,6 +36,11 @@ for mr in raw:
     q = DRAFT.sub("", mr["title"]).strip()
     q = PREFIX.sub("", q).strip()
     if len(q) < 6:
+        continue
+    # 제목이 내용을 말하지 않는 MR은 어떤 검색기도 못 맞힌다 — 넣어두면 점수만
+    # 깎이고 개선 여지를 가린다. 릴리즈/브랜치 머지처럼 "무엇을 고쳤나"가 제목에
+    # 없는 것만 뺀다(실측: `[release] develop → stage 머지`, 제목이 `Develop` 뿐).
+    if UNANSWERABLE.search(q):
         continue
     cases.append({"q": q, "files": set(files),
                   "proj": mr.get("proj", "-"), "iid": mr.get("iid", 0)})

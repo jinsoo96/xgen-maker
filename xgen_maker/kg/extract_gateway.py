@@ -107,6 +107,22 @@ def extract_gateway_routes(graph: Graph, repo: str, repo_root: str | Path) -> in
 
     rel = path.relative_to(Path(repo_root)).as_posix()
     base = str(data.get("base_path") or "").rstrip("/")
+    # 이 설정 파일 자체가 좌표여야 한다. 라우트 노드만 만들면 "어느 모듈이 어디로
+    # 가는지 적힌 그 파일을 고쳐라"라는 요청이 착지할 곳이 없다 — 실측: 이 파일을
+    # 고친 MR 네 건이 검색에서 통째로 안 잡혔다. 다른 추출기는 모두 파일 노드를 만든다.
+    # 내용(서비스·모듈 이름)을 요약에 담아, 무엇이 등록돼 있는지로도 찾을 수 있게 한다.
+    file_id = f"{repo}:{rel}"
+    services = [str(s) for s in data["services"] if isinstance(s, str)]
+    modules: list[str] = []
+    for spec in data["services"].values():
+        if isinstance(spec, dict):
+            modules += [str(m).strip().strip("/") for m in (spec.get("modules") or [])]
+    graph.add_node(file_id, "file", Path(rel).name, repo, rel,
+                   summary=("API 관문 라우팅 표 — 어느 모듈 요청이 어느 서비스로 가는지. "
+                            f"서비스: {', '.join(services[:20])} · "
+                            f"모듈: {', '.join(m for m in modules[:40] if m)}"),
+                   summary_src="deterministic")
+
     created = 0
     for service, spec in data["services"].items():
         if not isinstance(spec, dict):
