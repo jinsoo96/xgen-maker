@@ -1466,6 +1466,8 @@ class MakerWebHandler(BaseHTTPRequestHandler):
         ("impact", "영향 분석", "변경 시 영향받는 코드를 찾습니다", None),
         ("chain", "워크플로우 체인", "연관된 코드를 함께 살펴봅니다", None),
         ("legacy_check", "레거시 확인", "기존 코드를 읽어 참고 자료로 전달합니다", None),
+        ("companions", "함께 볼 파일",
+         "착지한 코드와 이어져 이번 변경이 기대를 깰 수 있는 파일을 함께 전달합니다", None),
         ("learnings", "과거 학습", "이전 작업에서 얻은 내용을 반영합니다", None),
         ("fetch_latest", "최신 코드 동기화", "작업 전 최신 코드를 받아옵니다", "fetch_latest"),
         ("worktree", "별도 작업 공간 사용", "별도 작업 공간에서 진행합니다", "isolate_worktree"),
