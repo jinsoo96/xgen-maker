@@ -185,12 +185,25 @@ def cmd_kg_impact(args) -> None:
 def cmd_kg_enrich(args) -> None:
     from .kg.enrich import enrich_deterministic, enrich_llm
     graph = Graph.load(args.kg)
-    filled = enrich_deterministic(graph)
-    print(f"[kg enrich] 결정론 요약 {filled}개 주입")
+    # 결정론 요약은 기본에서 뺀다 — 검색을 깎는다(실측 R@10 0.800 → 0.774).
+    # 상투구가 수만 노드에 같은 말을 붙여 그 말들의 변별력을 없앤다. 사람이 읽을
+    # 목록을 만들 때만 쓰라고 명시 옵션으로 돌린다.
+    if args.deterministic:
+        filled = enrich_deterministic(graph)
+        print(f"[kg enrich] 결정론 요약 {filled}개 주입 "
+              f"(⚠ 검색 품질은 내려간다 — 사람이 읽는 용도로만)")
     if not args.no_llm:
         config = MakerConfig.from_file(args.config) if args.config else MakerConfig()
+        done = [0]
+
+        def progress(ok: int, bad: int, total: int) -> None:
+            if ok + bad != done[0]:
+                done[0] = ok + bad
+                if done[0] % 20 == 0:
+                    print(f"  {done[0]}/{total} (실패 {bad})", flush=True)
+
         stats = enrich_llm(graph, config.llm_base, config.llm_model, config.repos,
-                           limit=args.limit)
+                           limit=args.limit, on_progress=progress)
         print(f"[kg enrich] LLM 요약: {json.dumps(stats, ensure_ascii=False)}")
     graph.save(args.kg)
     print(f"[kg enrich] 저장 → {args.kg}")
@@ -753,9 +766,11 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--hops", type=int, default=2)
     p.set_defaults(func=cmd_kg_chain)
 
-    p = kg_sub.add_parser("enrich", help="의미층 주입 (결정론 + LLM 요약)")
+    p = kg_sub.add_parser("enrich", help="의미층 주입 (LLM 요약)")
     p.add_argument("--kg", default="kg/merged.json")
     p.add_argument("--no-llm", action="store_true")
+    p.add_argument("--deterministic", action="store_true",
+                   help="결정론 요약도 채운다 (⚠ 검색 품질은 내려간다 — 읽기 용도)")
     p.add_argument("--limit", type=int, default=200)
     p.add_argument("--config", default=None)
     p.set_defaults(func=cmd_kg_enrich)

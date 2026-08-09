@@ -1399,3 +1399,25 @@ class EnrichRunsInParallelTest(unittest.TestCase):
                    chat_fn=lambda *a, **k: {"summary": "결제 취소 처리"}, workers=2)
         self.assertGreater(g.rev, before)
         self.assertTrue(search(g, "결제 취소", k=3), "새 요약이 검색에 안 잡힌다")
+
+
+class DeterministicSummariesAreOptInTest(unittest.TestCase):
+    """회귀: `kg enrich`가 검색을 깎는 결정론 요약을 항상 먼저 주입했다.
+
+    실측(실제 머지된 MR 265건, 전체 노드 주입): R@10 0.800 → 0.774 · MRR 0.542 → 0.523.
+    상투구("config 파일 — 심볼 없음")가 수만 노드에 같은 말을 붙여 변별력을 없앤다.
+    """
+
+    def test_cli_does_not_fill_them_by_default(self):
+        source = Path("xgen_maker/cli.py").read_text(encoding="utf-8")
+        self.assertIn("args.deterministic", source,
+                      "결정론 요약이 명시 옵션 뒤에 있어야 한다")
+        index = source.index("def cmd_kg_enrich")
+        body = source[index:index + 1200]
+        self.assertNotIn("filled = enrich_deterministic(graph)\n    print", body,
+                         "기본 경로에서 무조건 주입하면 안 된다")
+
+    def test_the_cost_is_written_next_to_the_function(self):
+        source = Path("xgen_maker/kg/enrich.py").read_text(encoding="utf-8")
+        self.assertIn("검색에는 해롭다", source,
+                      "다음 사람이 모르고 다시 켜지 않도록 근거를 남긴다")

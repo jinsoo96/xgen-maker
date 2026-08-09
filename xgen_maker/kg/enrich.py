@@ -64,7 +64,16 @@ def deterministic_summary(graph: Graph, node: dict) -> str:
 
 
 def enrich_deterministic(graph: Graph) -> int:
-    """summary가 없는 모든 노드에 결정론 요약 주입. 반환 = 채운 노드 수."""
+    """summary가 없는 모든 노드에 결정론 요약 주입. 반환 = 채운 노드 수.
+
+    ⚠️ 검색에는 해롭다. 실측(실제 머지된 MR 265건, 전체 노드에 주입):
+      요약 없음   R@1 0.419 · R@10 0.800 · MRR 0.542
+      결정론 요약  R@1 0.415 · R@10 0.774 · MRR 0.523   (분할 A·B·D 모두 하락)
+    요약이 검색 점수에 들어가는데(rank._META_KEYS), 여기서 만드는 문장은 대부분
+    상투구다("config 파일 — 심볼 없음", "function f — a.py:12"). 같은 말이 수만
+    노드에 붙으면 그 말들의 변별력이 사라지고, 노드 문서만 길어져 길이 정규화로
+    실제 신호가 깎인다. 사람이 읽을 목록을 만들 때만 쓰고, 검색용으로는 쓰지 말 것.
+    """
     filled = 0
     for node in graph.nodes.values():
         if node["meta"].get("summary"):
