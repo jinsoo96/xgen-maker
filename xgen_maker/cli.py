@@ -229,6 +229,9 @@ def cmd_kg_embed(args) -> None:
 
     stats = build(graph, args.out or config.dense_path, base, model, on_progress=progress)
     print(f"[kg embed] {json.dumps(stats, ensure_ascii=False)}")
+    if stats.get("aborted"):
+        # 조용히 끝내면 색인이 낡은 줄 모른다 — 종료코드로도 알린다.
+        raise SystemExit(f"[kg embed] 중단: {stats['aborted']}")
 
 
 def cmd_kg_domains(args) -> None:

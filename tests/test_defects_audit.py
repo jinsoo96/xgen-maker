@@ -1643,3 +1643,31 @@ class EmbedHintStaysOutOfLexicalIndexTest(unittest.TestCase):
         """이득이 없었다는 사실을 남긴다 — 없으면 같은 실험을 또 한다."""
         source = Path("xgen_maker/kg/dense.py").read_text(encoding="utf-8")
         self.assertIn("상관이지 지렛대가 아니었다", source)
+
+
+class EmbedBuildReportsAbortTest(unittest.TestCase):
+    """회귀: 임베딩 서버가 죽으면 `kg embed`가 조용히 성공처럼 끝났다.
+
+    added 0으로 종료코드 0이 나오면 색인이 최신인 줄 안다. 그 뒤로 의미 검색은
+    옛 좌표를 계속 준다 — 틀린 답을 자신 있게 준다.
+    """
+
+    def _graph(self):
+        g = Graph()
+        g.add_node("r", "repo", "r", "r", "")
+        for i in range(3):
+            g.add_node(f"r:m{i}.py#f{i}", "function", f"f{i}", "r", f"m{i}.py", 1)
+        return g
+
+    def test_dead_endpoint_is_reported(self):
+        from xgen_maker.kg.dense import build
+        with tempfile.TemporaryDirectory() as tmp:
+            stats = build(self._graph(), Path(tmp) / "v.npz",
+                          "http://127.0.0.1:1/v1", "m")
+            self.assertIn("aborted", stats)
+            self.assertEqual(stats["missing"], 3)
+
+    def test_cli_exits_nonzero_on_abort(self):
+        source = Path("xgen_maker/cli.py").read_text(encoding="utf-8")
+        self.assertIn('stats.get("aborted")', source)
+        self.assertIn("SystemExit", source)

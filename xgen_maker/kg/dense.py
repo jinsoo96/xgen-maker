@@ -181,11 +181,15 @@ def build(graph: Graph, path: str | Path, base: str, model: str,
              if nid not in set(keep_ids)]
 
     added = 0
+    aborted = ""
     for start in range(0, len(fresh), _BATCH):
         chunk = fresh[start:start + _BATCH]
         vectors = embed_texts(base, model, [t for _, t in chunk])
         if vectors is None:
-            break                      # 엔드포인트가 죽었다 — 여기까지만 저장한다
+            # 여기까지만 저장하고 멈춘다. 다만 조용히 끝내면 안 된다 — 색인이
+            # 낡았는데 성공으로 보이면, 그 뒤로 의미 검색은 옛 좌표를 준다.
+            aborted = f"임베딩 응답 없음 — {len(fresh) - added}개가 색인에 없다"
+            break
         keep_ids.extend(nid for nid, _ in chunk)
         keep_vectors.extend(vectors)
         added += len(chunk)
@@ -195,5 +199,9 @@ def build(graph: Graph, path: str | Path, base: str, model: str,
     digests = {nid: _digest(wanted[nid]) for nid in keep_ids if nid in wanted}
     if keep_ids:
         index.save(keep_ids, np.asarray(keep_vectors, dtype="float32"), digests)
-    return {"total": len(wanted), "reused": len(keep_ids) - added, "added": added,
-            "dropped": max(0, len(index.ids) - (len(keep_ids) - added))}
+    stats = {"total": len(wanted), "reused": len(keep_ids) - added, "added": added,
+             "dropped": max(0, len(index.ids) - (len(keep_ids) - added)),
+             "missing": len(wanted) - len(keep_ids)}
+    if aborted:
+        stats["aborted"] = aborted
+    return stats
