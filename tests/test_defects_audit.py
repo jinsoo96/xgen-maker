@@ -1463,3 +1463,27 @@ class NonAsciiPathsReachTheCommitTest(unittest.TestCase):
             got = GitRepo(root).changed_files()
             self.assertIn("b.py", got)
             self.assertFalse([f for f in got if f.endswith(".pyc")])
+
+
+class SecretsAreMaskedOutsideUrlsTest(unittest.TestCase):
+    """자격은 늘 URL 형태로만 새지 않는다 — 헤더 문자열·설정 덤프·에러 본문에도 섞인다."""
+
+    def test_bare_tokens_are_masked(self):
+        from xgen_maker.loop.git_ops import redact
+        for secret in ("glpat-ABCDEFGHIJKLMNOP1234",
+                       "ghp_abcdefghijklmnopqrstuvwxyz012345",
+                       "github_pat_11AZZ3PKY0Bb_dRZESX5WLK"):
+            self.assertNotIn(secret, redact(f"PRIVATE-TOKEN: {secret}"))
+            self.assertNotIn(secret, redact(f'{{"token": "{secret}"}}'))
+
+    def test_url_credentials_still_masked(self):
+        from xgen_maker.loop.git_ops import redact
+        got = redact("https://user:glpat-ABCDEFGHIJKLMNOP1234@gitlab.example.com/g/r.git")
+        self.assertNotIn("glpat-ABCDEFGHIJKLMNOP1234", got)
+        self.assertIn("user:***@", got)
+
+    def test_ordinary_text_is_left_alone(self):
+        """가리기가 과하면 로그가 못 읽게 된다."""
+        from xgen_maker.loop.git_ops import redact
+        text = "fix/login-timeout 브랜치에서 테스트 3건 실패"
+        self.assertEqual(redact(text), text)

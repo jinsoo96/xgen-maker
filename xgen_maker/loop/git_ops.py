@@ -15,12 +15,17 @@ from ..config import is_allowed_branch, is_protected_branch, branch_name_issue
 #  https://user:TOKEN@host  그리고  https://TOKEN@host (토큰=userinfo, GitLab PAT 형식)
 _CRED_URL_UP = re.compile(r"(?P<scheme>[a-zA-Z][a-zA-Z0-9+.-]*://)(?P<user>[^:/@\s]+):(?P<secret>[^@\s]+)@")
 _CRED_URL_U = re.compile(r"(?P<scheme>[a-zA-Z][a-zA-Z0-9+.-]*://)(?P<secret>[^:/@\s]+)@")
+# URL 밖에 있는 토큰도 가린다. 자격이 늘 URL 형태로만 새지는 않는다 —
+# 헤더 문자열("PRIVATE-TOKEN: glpat-…"), 설정 덤프, 에러 본문에도 섞인다.
+# 발급처가 정한 접두사로 알아본다(값의 모양을 추측하지 않는다).
+_BARE_TOKEN = re.compile(r"\b(glpat-|gldt-|ghp_|gho_|ghu_|ghs_|github_pat_|sk-|xoxb-)[A-Za-z0-9_-]{8,}")
 
 
 def redact(text: str) -> str:
-    """문자열 속 인증 URL의 비밀값을 ***로 치환(user:token@ · token@ 둘 다)."""
+    """문자열 속 비밀값을 ***로 치환 — 인증 URL과, URL 밖의 토큰 모양 둘 다."""
     s = _CRED_URL_UP.sub(lambda m: f"{m['scheme']}{m['user']}:***@", str(text))
-    return _CRED_URL_U.sub(lambda m: f"{m['scheme']}***@", s)
+    s = _CRED_URL_U.sub(lambda m: f"{m['scheme']}***@", s)
+    return _BARE_TOKEN.sub(lambda m: f"{m.group(1)}***", s)
 
 
 class GitOpsError(RuntimeError):
