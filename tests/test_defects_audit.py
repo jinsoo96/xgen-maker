@@ -641,3 +641,50 @@ class TestGatewayConfigIsAddressable(unittest.TestCase):
                        if n["kind"] == "file" and (n.get("path") or "").endswith("services.yaml"))
         from_file = [e for e in g.edges if e["src"] == file_id and e["kind"] == "contains"]
         self.assertTrue(from_file, "라우트가 저장소가 아니라 그 설정 파일에 달려야 한다")
+
+
+class TestFragmentAnchors(unittest.TestCase):
+    """앵커는 걸릴 때 가장 강력하다 — 실측(머지된 MR)에서 걸린 건의 1위 적중이
+    0.400 → 0.800. 그런데 이름이 정확히 같아야만 걸려서 13%에서만 발동했다.
+
+    사람은 `parse_retry_context`라고 쓰지 않고 "retry_context 추가"라고 쓴다.
+    그 개념을 다루는 함수가 바로 옆에 있는데 앵커가 안 걸렸다.
+    """
+
+    def _graph(self) -> Graph:
+        g = Graph()
+        g.add_node("r", "repo", "r", "r", "/r")
+        for name in ("parse_retry_context", "build_retry_context", "sanitize_retry_context"):
+            g.add_node(f"r:retry.py#{name}", "function", name, "r", "retry.py", 1)
+        # 흔한 조각 — 많은 심볼이 공유하면 지목이 아니다
+        for i in range(20):
+            g.add_node(f"r:h{i}.py#handle_request_{i}", "function", f"handle_request_{i}",
+                       "r", f"h{i}.py", 1)
+        return g
+
+    def test_fragment_shared_by_few_symbols_anchors(self):
+        from xgen_maker.kg.anchor import find_anchors
+        got = find_anchors(self._graph(), "retry_context 필드 추가")
+        names = {n["name"] for n in got}
+        self.assertIn("parse_retry_context", names)
+        self.assertIn("build_retry_context", names)
+
+    def test_common_fragment_does_not_anchor(self):
+        """조각이 많은 심볼에 걸리면 범위를 못 좁히므로 지목으로 보지 않는다."""
+        from xgen_maker.kg.anchor import find_anchors
+        self.assertEqual(find_anchors(self._graph(), "handle_request 정리"), [])
+
+    def test_exact_match_still_wins(self):
+        """완전일치가 있으면 조각으로 넓히지 않는다 — 정밀도가 우선."""
+        from xgen_maker.kg.anchor import find_anchors
+        g = self._graph()
+        g.add_node("r:exact.py#parse_retry_context", "function", "parse_retry_context",
+                   "r", "exact.py", 1)
+        got = find_anchors(g, "parse_retry_context 고쳐줘")
+        self.assertTrue(all(n["name"] == "parse_retry_context" for n in got))
+
+    def test_short_or_plain_words_are_not_fragments(self):
+        from xgen_maker.kg.anchor import find_anchors
+        g = Graph()
+        g.add_node("r:a.py#update", "function", "update", "r", "a.py", 1)
+        self.assertEqual(find_anchors(g, "update 처리"), [])

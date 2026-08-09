@@ -82,7 +82,35 @@ def find_anchors(graph: Graph, query: str, hint: str = "") -> list[dict]:
                       if hint_words & set(tokenize(n["repo"]))]
             nodes = scoped if 0 < len(scoped) <= _MAX_ANCHORS_PER_MENTION else []
         anchors.extend(nodes)
-    return anchors
+    return anchors or _fragment_anchors(graph, found["symbols"])
+
+
+# 조각이 이만큼보다 많은 심볼에 걸리면 지목이 아니다 — 흔한 조각은 범위를 못 좁힌다.
+_MAX_FRAGMENT_MATCHES = 8
+
+
+def _fragment_anchors(graph: Graph, symbols: list[str]) -> list[dict]:
+    """완전일치가 없을 때, 지목된 식별자 '조각'이 소수 심볼만 공유하면 그것도 지목이다.
+
+    사람은 `parse_retry_context`라고 안 하고 "retry_context 추가"라고 쓴다. 이름이
+    정확히 같아야만 지목으로 치면, 그 개념을 다루는 함수들이 바로 옆에 있는데도
+    앵커가 안 걸린다. 조각이 소수 심볼에만 나타날 때만 인정해 정밀도를 지킨다.
+
+    앵커는 걸릴 때 가장 강력하다 — 실측(머지된 MR): 앵커가 걸린 건의 1위 적중이
+    0.400 → 0.800. 그래서 정밀도를 해치지 않는 선에서 걸릴 기회를 넓힌다.
+    """
+    picked: list[dict] = []
+    for raw in symbols:
+        fragment = raw.lower()
+        # 식별자다운 것만 — 짧거나 평범한 단어는 조각으로 보지 않는다
+        if len(fragment) < 6 or not ("_" in fragment or fragment != raw):
+            continue
+        hits = [node for node in graph.nodes.values()
+                if node["kind"] in ("function", "class")
+                and fragment in node["name"].lower()]
+        if 0 < len(hits) <= _MAX_FRAGMENT_MATCHES:
+            picked.extend(hits)
+    return picked
 
 
 def expand(graph: Graph, anchors: list[dict], hops: int = 5, limit: int = 120) -> list[dict]:
