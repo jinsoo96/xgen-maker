@@ -120,7 +120,8 @@ def _degree_index(graph: Graph) -> dict[str, int]:
 def enrich_llm(graph: Graph, base: str, model: str, repos: dict[str, str],
                limit: int = 200, timeout: int = 45,
                kinds: tuple[str, ...] = _LLM_KIND_PRIORITY,
-               chat_fn=None, workers: int = 6, on_progress=None) -> dict:
+               chat_fn=None, workers: int = 6, on_progress=None,
+               field: str = "summary") -> dict:
     """LLM 요약 배치 주입. 반환 stats. chat_fn은 테스트 치환용(기본 llm.json_chat).
 
     한 번에 여러 건을 부른다. 요약은 서로 독립이라 줄 세울 이유가 없는데, 순차로는
@@ -160,14 +161,14 @@ def enrich_llm(graph: Graph, base: str, model: str, repos: dict[str, str],
     if not (answer and isinstance(answer.get("summary"), str) and answer["summary"].strip()):
         return {"targets": len(targets), "llm_done": 0, "llm_failed": 1,
                 "remaining": len(targets), "aborted": "첫 호출 실패 — 엔드포인트 확인"}
-    first["meta"]["summary"] = answer["summary"].strip()[:300]
+    first["meta"][field] = answer["summary"].strip()[:300]
     first["meta"]["summary_src"] = "llm"
     done = 1
 
     with futures.ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
         for node, answer in pool.map(summarize, batch[1:]):
             if answer and isinstance(answer.get("summary"), str) and answer["summary"].strip():
-                node["meta"]["summary"] = answer["summary"].strip()[:300]
+                node["meta"][field] = answer["summary"].strip()[:300]
                 node["meta"]["summary_src"] = "llm"
                 done += 1
             else:

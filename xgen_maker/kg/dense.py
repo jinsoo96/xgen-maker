@@ -34,7 +34,12 @@ def node_text(node: dict) -> str:
     parts = [f"{node.get('kind', '')} {node.get('name', '')}",
              f"{node.get('repo', '')}/{node.get('path', '')}"]
     meta = node.get("meta") or {}
-    for key in ("summary", "doc"):
+    # embed_hint는 임베딩만 읽는 자리다. 같은 문장을 meta.summary에 넣으면 BM25
+    # 색인에도 들어가 검색이 나빠진다(실측 R@10 0.796 → 0.781) — 상투구가 수만
+    # 노드에 같은 말을 붙여 변별력을 없애고 문서를 길게 만들기 때문이다.
+    # 반대로 임베딩은 산문을 잘 읽는다: 정답 파일에 문서가 있으면 성공률 90.0%,
+    # 없으면 70.7%. 그래서 층을 갈라 각자에게 맞는 것만 준다.
+    for key in ("embed_hint", "summary", "doc"):
         value = meta.get(key)
         if isinstance(value, str) and value.strip():
             parts.append(value.strip()[:_DOC_CHARS])
