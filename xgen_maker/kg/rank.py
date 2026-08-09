@@ -60,11 +60,24 @@ _TEST_PENALTY = 0.35
 # 엉뚱한 서비스(대개 코퍼스를 지배하는 언어)가 이기던 문제를 바로잡는다.
 # 값은 강한 종류 가중(function 2.0)과 견줄 만하게 — 지목이 명시적일 때만 켜진다.
 _REPO_AFFINITY = 2.5
+# 저장소 크기 보정. IDF는 코퍼스 전체에서 재므로, 노드가 3배 많은 저장소는 어떤
+# 점수대에서든 뽑힐 기회가 3배다 — 그래서 검색이 '맞는 저장소'가 아니라 '큰 저장소'로
+# 쏠린다. 실측(기능질의 265건): 한 저장소가 노드의 35.1%인데 정답인 건 12.5%,
+# 1위로 뽑힌 건 28.7%였다. 반대로 노드 1.0%짜리 저장소가 정답 12.8%인데 1위는 4.9%.
+# 예측 비중이 정답 비중이 아니라 노드 비중을 따라간다.
+# 저장소별 사전확률을 이 표본에서 학습하지는 않는다 — 그건 '최근 어느 저장소에 MR이
+# 많았나'를 외우는 것이라 일반화되지 않는다. 크기로만 눌러 기회를 고르게 한다.
+# 값은 홀짝·전후 네 분할로 검증했다. α=0.1에서 R@1은 네 분할 모두(+0.015 +0.061
+# +0.068 +0.008), MRR도 네 분할 모두(+0.018 +0.038 +0.054 +0.002) 올랐고 R@10은
+# 중립(+0.015). α=0.2는 R@1을 더 올리지만 R@10이 분할마다 깎인다(-0.030 -0.045).
+_REPO_SIZE_DAMP = 0.1
 # 다시 하지 말 것: '저장소 단위 질의어 포괄도' 가중은 해롭다. 아깝게 놓친 건들에서
 # 정답을 밀어낸 상위 칸의 69%가 다른 저장소이길래, 질의어가 고루 모인 저장소를
 # 밀어주게 해봤다. 기능질의 265건에서 가중 0.5~5.0 · 지수 1~3 전 조합이 나빠졌다
 # (R@10 0.762 → 0.736 이하). 큰 저장소일수록 어떤 질의어든 어딘가엔 있어서,
-# 그 신호는 '맞는 저장소'가 아니라 '큰 저장소'를 가리킨다.
+# 그 신호는 '맞는 저장소'가 아니라 '큰 저장소'를 가리킨다. 위 크기 보정이 같은
+# 관찰에 대한 옳은 방향이다 — 큰 저장소를 밀어주는 게 아니라 눌러야 했다.
+
 # 그래프 중심성(PageRank) 가중 — 같은 말을 가진 함수가 여럿일 때, 코드에서 실제로
 # 중심인 것(다들 호출하는)을 앞세운다. 질의 관련도가 지배하도록 약하게(최대 +50%).
 # 기법 출처(웹 조사): RANGER·코드 중심성 랭킹 연구의 "PageRank로 함수 중요도".
@@ -152,6 +165,13 @@ class Bm25Index:
             mine = sum(1 for nid in owners
                        if tok in self.repo_tokens.get(self.meta.get(nid, ("", "", ""))[2], ()))
             self.token_exclusivity[tok] = mine / len(owners)
+        # 저장소별 노드 수 — 크기가 곧 뽑힐 기회라서, 그 기회를 고르게 하는 데 쓴다.
+        self.repo_size: dict[str, int] = {}
+        for kind_path_repo in self.meta.values():
+            repo_name = kind_path_repo[2]
+            self.repo_size[repo_name] = self.repo_size.get(repo_name, 0) + 1
+        self.avg_repo_size = (sum(self.repo_size.values())
+                              / max(len(self.repo_size), 1)) or 1.0
         self.total = len(self.length) or 1
         self.avg_len = sum(self.length.values()) / self.total
         self.vocab = sorted(self.postings)
@@ -253,6 +273,10 @@ class Bm25Index:
             excl = max((self.token_exclusivity.get(tok, 0.0) for tok in (named or ())),
                        default=0.0)
             boost *= 1.0 + (_REPO_AFFINITY - 1.0) * excl
+        # 큰 저장소일수록 뽑힐 기회가 많다 — 그만큼만 눌러 기회를 고르게 한다.
+        if _REPO_SIZE_DAMP:
+            size = self.repo_size.get(node[2], 0) or 1
+            boost *= (self.avg_repo_size / size) ** _REPO_SIZE_DAMP
         # 구조적으로 중심인 코드를 약하게 앞세운다(동점 가르기 — 질의 관련도가 지배)
         cen = self.centrality.get(node_id)
         if cen:

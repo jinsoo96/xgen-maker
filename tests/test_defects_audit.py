@@ -1086,3 +1086,35 @@ class CompanionFilesTest(unittest.TestCase):
                                   "relations": ["imports"], "score": 1.0}])
         self.assertIn("core/service.py", block)
         self.assertIn("고쳐야 한다는 뜻이 아니다", block)
+
+
+class RepoSizeDoesNotBuyRankTest(unittest.TestCase):
+    """회귀: 큰 저장소가 '맞아서'가 아니라 '커서' 이겼다.
+
+    IDF는 코퍼스 전체에서 재므로 노드가 많은 저장소는 어떤 점수대에서든 뽑힐 기회가
+    많다. 실측에서 노드 35.1%인 저장소가 정답은 12.5%인데 1위는 28.7%였다.
+    """
+
+    def _graph(self):
+        g = Graph()
+        for repo, count in (("big", 60), ("small", 2)):
+            g.add_node(repo, "repo", repo, repo, "")
+            for i in range(count):
+                path = f"mod{i}/handler.py"
+                g.add_node(f"{repo}:{path}#upload_document_handler",
+                           "function", "upload_document_handler", repo, path, 1)
+        return g
+
+    def test_equal_matches_are_not_decided_by_repo_size(self):
+        """같은 이름이 양쪽에 있으면 큰 저장소가 상위를 독식하면 안 된다."""
+        hits = search(self._graph(), "upload document handler", k=10)
+        repos = [h["repo"] for h in hits]
+        self.assertIn("small", repos,
+                      "작은 저장소가 동일 매치인데도 상위 10에서 밀렸다")
+
+    def test_damping_is_evidence_backed(self):
+        """값을 조용히 바꾸지 못하게 못박는다 — 네 분할 검증으로 고른 값이다."""
+        from xgen_maker.kg import rank
+        self.assertEqual(rank._REPO_SIZE_DAMP, 0.1)
+        source = Path("xgen_maker/kg/rank.py").read_text(encoding="utf-8")
+        self.assertIn("네 분할", source, "근거 없이 상수를 두지 않는다")
