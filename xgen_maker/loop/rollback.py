@@ -92,8 +92,9 @@ def undo(config, action: dict, delete_remote: bool = False) -> dict:
     leftover: list[str] = []
     try:
         if git.current_branch() == branch:
-            leftover = [line[3:].strip()
-                        for line in git._run("status", "--porcelain").splitlines() if line.strip()]
+            # -z: 항목마다 "XY <경로>NUL" (감싸지 않는다 — 한글 이름도 그대로 온다)
+            leftover = [f[3:] for f in git._run("status", "--porcelain", "-z").split(chr(0))
+                        if f and f[3:]]
             git.checkout(base)
             steps.append(f"checkout {base}")
     except GitOpsError as e:

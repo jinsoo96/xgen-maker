@@ -115,9 +115,19 @@ class GitRepo:
         self._run(*args)
         return self._run("rev-parse", "FETCH_HEAD").strip()
 
+    def _run_paths(self, *args: str) -> list[str]:
+        r"""경로 목록을 NUL 구분으로 받는다.
+
+        git은 ASCII 밖 경로를 C 스타일로 감싼다("\354\240\225...").
+        줄 단위로 읽으면 그게 그대로 경로가 되어, stage_all이 실재하지 않는 파일을
+        add 하려 든다 — 에이전트가 고친 한글 이름 파일이 커밋에서 통째로 빠진다.
+        -z를 주면 git이 감싸지 않는다.
+        """
+        return [field for field in self._run(*args, "-z").split(chr(0)) if field]
+
     def diff_names(self, ref_a: str, ref_b: str = "") -> list[str]:
-        out = self._run("diff", "--name-only", ref_a, *( [ref_b] if ref_b else [] ))
-        return [f.strip() for f in out.splitlines() if f.strip()]
+        return self._run_paths("diff", "--name-only", ref_a,
+                               *([ref_b] if ref_b else []))
 
     def add_worktree(self, path: str | Path, branch: str, base_ref: str) -> "GitRepo":
         """격리 worktree 생성(동시실행 충돌 방지) — path에 base_ref로부터 branch 체크아웃."""
@@ -145,10 +155,9 @@ class GitRepo:
                 or any(part in path for part in cls._OWN_BUILD_ARTIFACTS))
 
     def changed_files(self, base: str = "HEAD") -> list[str]:
-        tracked = self._run("diff", "--name-only", base).splitlines()
-        untracked = self._run("ls-files", "--others", "--exclude-standard").splitlines()
-        return sorted({f.strip() for f in tracked + untracked
-                       if f.strip() and not self._is_own_artifact(f.strip())})
+        tracked = self._run_paths("diff", "--name-only", base)
+        untracked = self._run_paths("ls-files", "--others", "--exclude-standard")
+        return sorted({f for f in tracked + untracked if not self._is_own_artifact(f)})
 
     def diff(self, base: str = "HEAD") -> str:
         return self._run("diff", base)
@@ -166,8 +175,7 @@ class GitRepo:
         self._run("add", "--", *paths)
 
     def staged_files(self, base: str = "HEAD") -> list[str]:
-        lines = self._run("diff", "--cached", "--name-only", base).splitlines()
-        return sorted({f.strip() for f in lines if f.strip()})
+        return sorted(set(self._run_paths("diff", "--cached", "--name-only", base)))
 
     def staged_diff(self, base: str = "HEAD") -> str:
         return self._run("diff", "--cached", base)

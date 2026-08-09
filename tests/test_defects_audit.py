@@ -1421,3 +1421,45 @@ class DeterministicSummariesAreOptInTest(unittest.TestCase):
         source = Path("xgen_maker/kg/enrich.py").read_text(encoding="utf-8")
         self.assertIn("검색에는 해롭다", source,
                       "다음 사람이 모르고 다시 켜지 않도록 근거를 남긴다")
+
+
+class NonAsciiPathsReachTheCommitTest(unittest.TestCase):
+    """회귀: 한글·공백이 든 파일명이 커밋에서 통째로 빠졌다.
+
+    git은 그런 경로를 C 스타일로 감싸 내보낸다. 줄 단위로 읽으면 그 따옴표째가
+    경로가 되고, stage_all은 실재하지 않는 파일을 add 하려 든다 — 에이전트가 고친
+    코드가 MR에 없다. 화면에는 성공이라 뜬다.
+    """
+
+    def _repo(self, root: Path):
+        subprocess.run(["git", "init", "-q"], cwd=root, capture_output=True)
+        (root / "a.py").write_text("x=1\n", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=root, capture_output=True)
+        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t",
+                        "commit", "-qm", "i"], cwd=root, capture_output=True)
+
+    def test_korean_and_spaced_filenames_are_staged(self):
+        from xgen_maker.loop.git_ops import GitRepo
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._repo(root)
+            repo = GitRepo(root)
+            (root / "정산 보고서.py").write_text("def calc():\n    return 1\n",
+                                              encoding="utf-8")
+            self.assertIn("정산 보고서.py", repo.changed_files())
+            repo.stage_all()
+            self.assertIn("정산 보고서.py", repo.staged_files(),
+                          "고친 파일이 커밋에 안 들어간다")
+
+    def test_build_artifacts_are_still_excluded(self):
+        """경로 파싱을 바꾸면서 부산물 제외가 깨지지 않아야 한다."""
+        from xgen_maker.loop.git_ops import GitRepo
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._repo(root)
+            (root / "__pycache__").mkdir()
+            (root / "__pycache__" / "a.cpython-312.pyc").write_bytes(b"\x00\x01")
+            (root / "b.py").write_text("y=1\n", encoding="utf-8")
+            got = GitRepo(root).changed_files()
+            self.assertIn("b.py", got)
+            self.assertFalse([f for f in got if f.endswith(".pyc")])
