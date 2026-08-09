@@ -1265,7 +1265,7 @@ class RepoHintGuidesButDoesNotFilterTest(unittest.TestCase):
 
     def test_hint_weight_is_evidence_backed(self):
         from xgen_maker.kg import search as search_mod
-        self.assertEqual(search_mod._REPO_HINT, 1.5)
+        self.assertEqual(search_mod._REPO_HINT, 1.3)
         source = Path("xgen_maker/kg/search.py").read_text(encoding="utf-8")
         self.assertIn("네 분할", source, "근거 없이 상수를 두지 않는다")
 
@@ -1487,3 +1487,22 @@ class SecretsAreMaskedOutsideUrlsTest(unittest.TestCase):
         from xgen_maker.loop.git_ops import redact
         text = "fix/login-timeout 브랜치에서 테스트 3건 실패"
         self.assertEqual(redact(text), text)
+
+
+class SemanticSummariesAreNotForSearchTest(unittest.TestCase):
+    """직관과 반대라 근거를 코드에 못박는다 — 없으면 누구든 다시 켠다.
+
+    중심성 상위 800개 노드에 실제로 LLM 요약을 채워 재 봤다:
+      요약 전 R@10 0.796 · MRR 0.531 → 요약 후 R@10 0.781 · MRR 0.511.
+    요약을 받은 파일만 따로 봐도 나빠졌다(0.914 → 0.877) — 부분 커버리지 탓이 아니다.
+    """
+
+    def test_the_measurement_is_recorded_next_to_the_function(self):
+        source = Path("xgen_maker/kg/enrich.py").read_text(encoding="utf-8")
+        self.assertIn("검색을 위해 돌리지 말 것", source)
+        self.assertIn("0.914", source, "요약된 파일만 봐도 나빠졌다는 근거를 남긴다")
+
+    def test_summaries_are_still_indexed_when_present(self):
+        """쓰지 말라는 것과 없는 셈 치는 것은 다르다 — 있으면 검색은 그대로 쓴다."""
+        from xgen_maker.kg.rank import _META_KEYS
+        self.assertIn("summary", _META_KEYS)
