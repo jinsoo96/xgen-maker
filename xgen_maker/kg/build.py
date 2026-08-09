@@ -13,6 +13,7 @@ from .extract_python import extract_python_file
 from .extract_typescript import extract_ts_file
 from .extract_rust import extract_rust_file, link_rust_routes, RUST_EXTS
 from .extract_gateway import extract_gateway_routes, link_gateway_routes
+from .extract_config import extract_config_file, CONFIG_EXTS
 from .calls import link_calls
 from .routes_nextjs import extract_routes
 from .crossrepo import link_api_calls, link_feature_packages
@@ -48,7 +49,7 @@ def content_head(repo_root: str | Path, ref: str = "") -> str | None:
 
 def collect_from_ref(source, scope: str | None, max_files: int) -> list[str]:
     """특정 커밋에 담긴 파일 목록. 워킹트리를 훑지 않는다."""
-    exts = PY_EXTS | TS_EXTS | RUST_EXTS
+    exts = PY_EXTS | TS_EXTS | RUST_EXTS | CONFIG_EXTS
     prefix = f"{scope.strip('/')}/" if scope else ""
     out = []
     for rel in source.list_files():
@@ -78,7 +79,7 @@ def collect_files(repo_root: Path, scope: str | None = None,
             if entry.is_dir():
                 if entry.name not in SKIP_DIRS and not entry.name.startswith("."):
                     stack.append(entry)
-            elif entry.suffix in PY_EXTS | TS_EXTS | RUST_EXTS:
+            elif entry.suffix.lower() in PY_EXTS | TS_EXTS | RUST_EXTS | CONFIG_EXTS:
                 rel_files.append(entry.relative_to(repo_root).as_posix())
                 if len(rel_files) >= max_files:
                     return rel_files
@@ -119,6 +120,9 @@ def build_repo(repo: str, repo_root: str | Path, scope: str | None = None,
                 ts_files.append(rel)      # Next.js 라우트(page.tsx)는 TS 파일에서만 나온다
             elif suffix in RUST_EXTS:
                 extract_rust_file(graph, repo, repo_root, rel, known, src=src)
+            elif suffix.lower() in CONFIG_EXTS:
+                # 설정·문서도 고칠 자리다 — 코드만 담으면 그 요청이 착지할 곳이 없다.
+                extract_config_file(graph, repo, repo_root, rel, known, src=src)
         except (OSError, RecursionError):
             continue
         file_id = f"{repo}:{rel}"
@@ -215,6 +219,8 @@ def refresh_files(graph: Graph, repo: str, repo_root: str | Path,
                 ts_files.append(rel)      # Next.js 라우트(page.tsx)는 TS 파일에서만 나온다
             elif suffix in RUST_EXTS:
                 extract_rust_file(graph, repo, repo_root, rel, known, src=src)
+            elif suffix.lower() in CONFIG_EXTS:
+                extract_config_file(graph, repo, repo_root, rel, known, src=src)
         except (OSError, RecursionError):
             continue
         if f"{repo}:{rel}" in graph.nodes:

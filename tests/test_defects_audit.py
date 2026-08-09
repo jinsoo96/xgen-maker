@@ -967,3 +967,61 @@ class TestLandingStaysSpecific(unittest.TestCase):
         from xgen_maker.kg.rank import _KIND_BOOST
         self.assertLess(_KIND_BOOST["repo"], 1.0)
         self.assertLess(_KIND_BOOST["feature"], 1.0)
+
+
+class TestConfigFilesAreAddressable(unittest.TestCase):
+    """회귀: 코드만 그래프에 담아 설정·문서는 착지할 좌표가 아예 없었다.
+
+    실제로 머지된 MR 294건을 세어 보니 그래프가 파일을 하나도 모르는 것이 32건이었고,
+    그중 22건은 코드가 아닌 파일만 고친 것이었다(pyproject.toml 버전 범프, README 갱신,
+    배포 스크립트, 라우팅 yaml). 그런 요청이 오면 갈 곳이 없다.
+    """
+
+    def _repo(self, tmp: str):
+        root = Path(tmp)
+        (root / "pyproject.toml").write_text(
+            "[project]\nname = \"demo\"\nversion = \"1.2.3\"\n", encoding="utf-8")
+        (root / "deploy.sh").write_text(
+            "#!/bin/sh\nbuild_image() {\n  echo build\n}\n", encoding="utf-8")
+        (root / "README.md").write_text("# Demo\n## 설치 방법\n", encoding="utf-8")
+        (root / "app.py").write_text("def run():\n    return 1\n", encoding="utf-8")
+        subprocess.run(["git", "init", "-q"], cwd=root, capture_output=True)
+        return root
+
+    def test_config_and_doc_files_become_nodes(self):
+        from xgen_maker.kg.build import build_repo
+        with tempfile.TemporaryDirectory() as tmp:
+            g = build_repo("r", self._repo(tmp))
+        paths = {n.get("path") for n in g.nodes.values() if n["kind"] == "file"}
+        for expected in ("pyproject.toml", "deploy.sh", "README.md", "app.py"):
+            self.assertIn(expected, paths, f"{expected}에 착지할 좌표가 없다")
+
+    def test_config_keys_are_searchable(self):
+        """무엇이 적혀 있는지로도 그 파일을 찾을 수 있어야 한다."""
+        from xgen_maker.kg.build import build_repo
+        with tempfile.TemporaryDirectory() as tmp:
+            g = build_repo("r", self._repo(tmp))
+            top = search(g, "version project", k=1)
+        self.assertEqual(top[0]["path"], "pyproject.toml")
+
+    def test_generated_lockfiles_do_not_flood_the_index(self):
+        """큰 생성물은 이름만 남긴다 — 색인을 지배하면 안 된다."""
+        from xgen_maker.kg.extract_config import extract_config_file, _MAX_BYTES
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "huge.json").write_text('{"k": 1}' + "x" * (_MAX_BYTES + 10),
+                                            encoding="utf-8")
+            g = Graph()
+            g.add_node("r", "repo", "r", "r", str(root))
+            extract_config_file(g, "r", root, "huge.json")
+            node = next(n for n in g.nodes.values() if n["kind"] == "file")
+        self.assertNotIn("refs", node.get("meta") or {})
+
+    def test_incremental_sync_covers_config(self):
+        """빌드가 담는 확장자를 sync가 안 보면 그 파일은 조용히 낡는다."""
+        from xgen_maker.kg.sync import _relevant
+        got = _relevant({"a.py", "conf/services.yaml", "pyproject.toml",
+                         "README.md", "logo.png"}, None)
+        self.assertIn("conf/services.yaml", got)
+        self.assertIn("pyproject.toml", got)
+        self.assertNotIn("logo.png", got)

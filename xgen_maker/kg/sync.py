@@ -12,6 +12,7 @@ from pathlib import Path
 
 from .graph import Graph
 from .build import PY_EXTS, TS_EXTS, RUST_EXTS, git_head, refresh_files
+from .extract_config import CONFIG_EXTS
 
 
 def _git_lines(repo_root: str | Path, *args: str) -> list[str]:
@@ -55,7 +56,7 @@ def _relevant(files: set[str], scope: str | None) -> list[str]:
     # 증분 반영되지 않았다 — 빌드엔 있고 sync엔 없는 언어는 조용히 낡는다.
     out = []
     for rel in files:
-        if Path(rel).suffix not in PY_EXTS | TS_EXTS | RUST_EXTS:
+        if Path(rel).suffix.lower() not in PY_EXTS | TS_EXTS | RUST_EXTS | CONFIG_EXTS:
             continue
         if scope and not rel.startswith(scope.rstrip("/") + "/"):
             continue

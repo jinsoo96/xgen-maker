@@ -298,7 +298,7 @@ class MakerLoop:
                 # 지목한 범위를 앞에 세우되, 검색이 찾은 것을 통째로 버리지는 않는다.
                 # 앵커가 여덟 자리를 다 채우면 검색 3위였던 정답이 그대로 사라진다
                 # (실측: 실제 머지된 MR에서 그 일이 일어났다).
-                landing = _fuse(ranked, landing, k=8)
+                landing = _fuse(ranked, landing, k=8, head=1)
         journal.event("kg_search", "ok" if landing else "empty",
                       hits=[{"id": n["id"], "kind": n["kind"], "score": n["score"]}
                             for n in landing[:8]],
