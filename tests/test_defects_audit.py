@@ -1623,3 +1623,23 @@ class PipelineRunsSemanticLayerTest(unittest.TestCase):
     def test_step_is_on_the_coverage_screen(self):
         source = Path("xgen_maker/web.py").read_text(encoding="utf-8")
         self.assertIn('("dense_search", "의미 검색"', source)
+
+
+class EmbedHintStaysOutOfLexicalIndexTest(unittest.TestCase):
+    """임베딩 전용 자리는 어휘 색인에 새면 안 된다 — 새는 순간 검색이 나빠진다."""
+
+    def test_lexical_index_does_not_read_it(self):
+        from xgen_maker.kg.rank import _META_KEYS
+        self.assertNotIn("embed_hint", _META_KEYS)
+
+    def test_dense_reads_it_first(self):
+        from xgen_maker.kg.dense import node_text
+        node = {"kind": "file", "name": "a.py", "repo": "r", "path": "a.py",
+                "meta": {"embed_hint": "결제 취소 처리", "doc": "무시될 문서"}}
+        self.assertIn("결제 취소 처리", node_text(node))
+        self.assertNotIn("무시될 문서", node_text(node))
+
+    def test_the_null_result_is_recorded(self):
+        """이득이 없었다는 사실을 남긴다 — 없으면 같은 실험을 또 한다."""
+        source = Path("xgen_maker/kg/dense.py").read_text(encoding="utf-8")
+        self.assertIn("상관이지 지렛대가 아니었다", source)
