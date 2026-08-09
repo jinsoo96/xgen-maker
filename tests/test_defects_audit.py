@@ -741,3 +741,100 @@ class TestReferencedIdentifiersAreIndexed(unittest.TestCase):
             refs = (node.get("meta") or {}).get("refs", "")
         self.assertIn("RerankerNode", refs)
         self.assertNotIn("VectorDBContextV2", refs)
+
+
+class TestIncrementalEqualsFullRebuild(unittest.TestCase):
+    """증분 갱신의 유일한 정답은 '전체를 다시 만든 것과 같다'이다.
+
+    이 성질이 깨지면 증상이 안 난다 — 그래프는 멀쩡해 보이는데 내용만 어긋나고,
+    착지가 조용히 옛 코드를 가리킨다. 이번 세션에서 실제로 그런 결함을 여럿 고쳤다
+    (들어오는 호출 엣지 소실, TS 해석기 누락, 참조 식별자 미갱신).
+    """
+
+    @staticmethod
+    def _snap(g):
+        return ({n["id"] for n in g.nodes.values()},
+                {(e["src"], e["dst"], e["kind"]) for e in g.edges})
+
+    @staticmethod
+    def _git(root, *args):
+        subprocess.run(["git", *args], cwd=root, capture_output=True, check=True)
+
+    def _seed(self, root: Path):
+        (root / "pkg").mkdir()
+        (root / "pkg" / "a.py").write_text("def alpha():\n    return helper_one()\n",
+                                           encoding="utf-8")
+        (root / "pkg" / "b.py").write_text(
+            "def helper_one():\n    return 1\ndef helper_two():\n    return 2\n", encoding="utf-8")
+        (root / "pkg" / "gone.py").write_text("def doomed():\n    return 0\n", encoding="utf-8")
+        self._git(root, "init", "-q")
+        self._git(root, "config", "user.email", "t@t.local")
+        self._git(root, "config", "user.name", "t")
+        self._git(root, "add", "-A")
+        self._git(root, "commit", "-qm", "init")
+
+    def test_modify_add_delete_rename_all_converge(self):
+        from xgen_maker.kg.build import build_repo, refresh_files
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._seed(root)
+            incremental = build_repo("r", root)
+            (root / "pkg" / "a.py").write_text("def alpha():\n    return helper_two()\n",
+                                               encoding="utf-8")          # 수정
+            (root / "pkg" / "c.py").write_text("def gamma():\n    return 3\n",
+                                               encoding="utf-8")          # 신규
+            (root / "pkg" / "gone.py").unlink()                           # 삭제
+            (root / "pkg" / "b.py").write_text(
+                "def helper_one():\n    return 1\ndef renamed_two():\n    return 2\n",
+                encoding="utf-8")                                          # 개명
+            refresh_files(incremental, "r", root,
+                          ["pkg/a.py", "pkg/b.py", "pkg/c.py", "pkg/gone.py"])
+            full = build_repo("r", root)
+        self.assertEqual(self._snap(incremental), self._snap(full),
+                         "증분 갱신 결과가 전체 재빌드와 다르다")
+
+    def test_repeated_refresh_does_not_erode(self):
+        """같은 파일을 여러 번 갱신해도 닳지 않아야 한다 — 한 번씩 잃으면 누적된다."""
+        from xgen_maker.kg.build import build_repo, refresh_files
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._seed(root)
+            incremental = build_repo("r", root)
+            for i in range(10):
+                (root / "pkg" / "a.py").write_text(
+                    f"def alpha():\n    return helper_one()  # rev {i}\n", encoding="utf-8")
+                refresh_files(incremental, "r", root, ["pkg/a.py"])
+            full = build_repo("r", root)
+        self.assertEqual(self._snap(incremental), self._snap(full),
+                         "반복 갱신에서 그래프가 닳았다")
+
+
+class TestAnchorDoesNotDiscardSearch(unittest.TestCase):
+    """회귀: 지목(앵커) 결과가 검색 결과를 통째로 밀어냈다.
+
+    확장어 병합에서 고친 것과 같은 결함이 앵커 병합에 남아 있었다. 앵커가 여덟 자리를
+    다 채우면 검색이 3위로 찾아 둔 정답이 그대로 사라진다 — 실측: 실제 머지된 MR에서
+    그 일이 일어났고, 그 케이스는 '못 찾음'으로 집계됐다.
+    """
+
+    def test_pipeline_fuses_anchor_results(self):
+        source = Path("xgen_maker/loop/pipeline.py").read_text(encoding="utf-8")
+        self.assertIn("landing = _fuse(ranked, landing", source,
+                      "앵커 병합이 다시 대체 방식으로 돌아갔다")
+        self.assertNotIn("landing = _prefer(ranked, landing", source)
+
+    def test_search_result_survives_a_full_anchor_list(self):
+        from xgen_maker.loop.pipeline import _fuse
+        anchors = [{"id": f"anch{i}", "name": f"anch{i}"} for i in range(8)]
+        found = [{"id": "real", "name": "real"}]
+        merged = _fuse(anchors, found, k=8)
+        self.assertIn("real", [h["id"] for h in merged],
+                      "앵커가 자리를 다 채워 검색이 찾은 것이 사라졌다")
+
+    def test_anchor_head_still_leads(self):
+        """지목은 여전히 앞이다 — 정밀도를 잃자는 게 아니다."""
+        from xgen_maker.loop.pipeline import _fuse
+        anchors = [{"id": f"anch{i}", "name": f"anch{i}"} for i in range(8)]
+        found = [{"id": f"f{i}", "name": f"f{i}"} for i in range(8)]
+        merged = _fuse(anchors, found, k=8, head=2)
+        self.assertEqual([h["id"] for h in merged[:2]], ["anch0", "anch1"])

@@ -276,11 +276,15 @@ class MakerLoop:
         anchors = find_anchors(self.graph, query, report.get("keywords", ""))
         if anchors:
             scope = expand(self.graph, anchors)
-            ranked = rank_within(scope, query, report.get("keywords", ""), k=8)
+            # 재료는 넉넉히 — 융합할 것이 있어야 뒤쪽 자리가 채워진다.
+            ranked = rank_within(scope, query, report.get("keywords", ""), k=24)
             if ranked:
                 journal.event("anchor", "ok",
                               anchors=[a["name"] for a in anchors], scope=len(scope))
-                landing = _prefer(ranked, landing, k=8)
+                # 지목한 범위를 앞에 세우되, 검색이 찾은 것을 통째로 버리지는 않는다.
+                # 앵커가 여덟 자리를 다 채우면 검색 3위였던 정답이 그대로 사라진다
+                # (실측: 실제 머지된 MR에서 그 일이 일어났다).
+                landing = _fuse(ranked, landing, k=8)
         journal.event("kg_search", "ok" if landing else "empty",
                       hits=[{"id": n["id"], "kind": n["kind"], "score": n["score"]}
                             for n in landing[:8]],
