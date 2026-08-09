@@ -1118,3 +1118,63 @@ class RepoSizeDoesNotBuyRankTest(unittest.TestCase):
         self.assertEqual(rank._REPO_SIZE_DAMP, 0.1)
         source = Path("xgen_maker/kg/rank.py").read_text(encoding="utf-8")
         self.assertIn("네 분할", source, "근거 없이 상수를 두지 않는다")
+
+
+class ClaudeCliPromptSurvivesNewlinesTest(unittest.TestCase):
+    """회귀: 여러 줄 프롬프트가 첫 줄만 모델에 닿았다.
+
+    Windows에서 claude는 .CMD 심이라 cmd /c 를 거치는데, cmd는 인자 안의 줄바꿈에서
+    잘라 버린다. 에러도 없고 응답도 그럴듯해서 조용히 틀린다 — 판정 LLM이
+    "[request] 한 줄"만 보고 diff 없이 점수를 매기고 있었고, 코드 요약도 첫 줄만 봤다.
+    """
+
+    def _capture(self, messages):
+        import xgen_maker.llm as llm_mod
+        seen = {}
+
+        class _Result:
+            returncode, stdout, stderr = 0, '{"ok": 1}', ""
+
+        def fake_run(command, **kw):
+            seen["command"] = command
+            seen["input"] = kw.get("input")
+            return _Result()
+
+        original = llm_mod.subprocess.run
+        llm_mod.subprocess.run = fake_run
+        try:
+            llm_mod._chat_claude_cli(messages, timeout=5)
+        finally:
+            llm_mod.subprocess.run = original
+        return seen
+
+    def test_multiline_user_prompt_goes_through_stdin(self):
+        body = "[request]\nfix the thing\n\n[diff]\n- a\n+ b"
+        seen = self._capture([{"role": "user", "content": body}])
+        if not seen:
+            self.skipTest("claude CLI 없음")
+        self.assertEqual(seen["input"], body, "본문이 stdin으로 안 갔다")
+        for arg in seen["command"]:
+            self.assertNotIn("\n", arg, "줄바꿈이 있는 인자는 cmd에서 잘린다")
+
+    def test_multiline_system_prompt_is_not_passed_as_argument(self):
+        seen = self._capture([{"role": "system", "content": "one\ntwo"},
+                              {"role": "user", "content": "q"}])
+        if not seen:
+            self.skipTest("claude CLI 없음")
+        self.assertNotIn("--system-prompt", seen["command"])
+        self.assertIn("one\ntwo", seen["input"], "여러 줄 system이 통째로 사라졌다")
+
+    def test_single_line_system_still_overrides_agent_prompt(self):
+        """한 줄이면 --system-prompt로 넘겨야 한다 — 기본 에이전트 프롬프트 대체가 목적."""
+        seen = self._capture([{"role": "system", "content": "reply json only"},
+                              {"role": "user", "content": "q"}])
+        if not seen:
+            self.skipTest("claude CLI 없음")
+        self.assertIn("--system-prompt", seen["command"])
+
+    def test_judge_prompt_is_actually_multiline(self):
+        """판정 프롬프트가 여러 줄이라는 사실 자체를 못박는다 — 이 결함의 진입점이었다."""
+        source = Path("xgen_maker/loop/judge.py").read_text(encoding="utf-8")
+        self.assertIn("[diff (truncated)]", source)
+        self.assertIn("\n", source, "판정 프롬프트는 줄바꿈으로 구획을 나눈다")

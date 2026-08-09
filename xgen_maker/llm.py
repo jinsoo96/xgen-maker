@@ -79,9 +79,18 @@ def _chat_claude_cli(messages: list[dict], timeout: int,
 
     system = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
     user = "\n\n".join(m["content"] for m in messages if m["role"] != "system")
-    args = ["-p", user, "--output-format", "text"]
+    # 프롬프트는 인자가 아니라 stdin으로 넘긴다. Windows에서 claude는 .CMD 심이라
+    # cmd /c 를 거치는데, cmd는 인자 안의 줄바꿈에서 잘라 버린다 — 첫 줄만 모델에
+    # 닿는다. 에러도 없고 응답도 그럴듯해서 조용히 틀린다(실측: 판정 LLM이
+    # "[request] 한 줄"만 보고 diff 없이 점수를 매기고 있었다).
+    args = ["-p", "--output-format", "text"]
     if system:
-        args += ["--system-prompt", system]
+        # --system-prompt도 인자라 같은 함정에 걸린다. 지금 쓰는 것들은 모두 한 줄이라
+        # 안전하지만, 여러 줄이면 인자로는 온전히 못 넘긴다 — 본문 앞에 붙여 보낸다.
+        if "\n" in system:
+            user = f"{system}\n\n{user}"
+        else:
+            args += ["--system-prompt", system]
     command = claude_command(args)
     if command is None:
         _note("claude CLI를 찾지 못했습니다")
@@ -89,7 +98,7 @@ def _chat_claude_cli(messages: list[dict], timeout: int,
     try:
         with tempfile.TemporaryDirectory() as neutral:
             result = subprocess.run(
-                command, cwd=neutral, capture_output=True, text=True,
+                command, input=user, cwd=neutral, capture_output=True, text=True,
                 encoding="utf-8", errors="replace", timeout=timeout)
     except subprocess.TimeoutExpired:
         _note(f"{timeout}초 안에 응답이 없었습니다")
@@ -137,13 +146,15 @@ def _vision_judge_cli(image_path: str, question: str, timeout: int) -> dict | No
     prompt = (f"Read the image at {abs_path} and reply JSON only: "
               '{"renders_ok": true/false, "issues": ["..."], "summary": "..."}. '
               f"{question}")
-    command = claude_command(["-p", prompt, "--output-format", "text"])
+    # 프롬프트는 stdin으로 — question에 줄바꿈이 섞이면 인자로는 첫 줄만 전달된다.
+    command = claude_command(["-p", "--output-format", "text"])
     if command is None:
         return None
     try:
         with tempfile.TemporaryDirectory() as neutral:   # repo CLAUDE.md/git 오염 차단
-            result = subprocess.run(command, cwd=neutral, capture_output=True,
-                                    text=True, encoding="utf-8", errors="replace",
+            result = subprocess.run(command, input=prompt, cwd=neutral,
+                                    capture_output=True, text=True,
+                                    encoding="utf-8", errors="replace",
                                     timeout=timeout)
     except (OSError, subprocess.SubprocessError):
         return None
