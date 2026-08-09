@@ -688,3 +688,56 @@ class TestFragmentAnchors(unittest.TestCase):
         g = Graph()
         g.add_node("r:a.py#update", "function", "update", "r", "a.py", 1)
         self.assertEqual(find_anchors(g, "update 처리"), [])
+
+
+class TestReferencedIdentifiersAreIndexed(unittest.TestCase):
+    """회귀: 그래프가 파일이 '정의한' 것만 색인해, 그 파일이 '다루는' 이름으로는
+    찾을 수 없었다.
+
+    "VectorDBContextV2 노출 바꿔줘"는 그 이름을 정의한 곳이 아니라 그 이름이 적혀 있는
+    카탈로그 파일을 가리킨다. 실측 — 그 파일은 문자 그대로 그 이름을 담고 있는데
+    검색에 전혀 안 잡혔다.
+    """
+
+    def test_referenced_name_is_findable(self):
+        from xgen_maker.kg.build import build_repo
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "catalog.py").write_text(
+                "CATALOG = {'VectorDBContextV2': {}, 'AudioStreamNode': {}}\n", encoding="utf-8")
+            (root / "other.py").write_text("def unrelated():\n    return 1\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q"], cwd=root, capture_output=True)
+            g = build_repo("r", root)
+            top = search(g, "VectorDBContextV2", k=1)
+        self.assertTrue(top)
+        self.assertEqual(top[0]["path"], "catalog.py",
+                         "파일이 다루는 이름으로 그 파일을 못 찾는다")
+
+    def test_defined_names_are_not_double_counted(self):
+        """정의부는 심볼 노드가 이미 담는다 — refs에 또 넣으면 그 파일만 두 번 유리해진다."""
+        from xgen_maker.kg.refs import collect_refs
+        src = "def parse_payload():\n    return handle_response(payload_schema)\n"
+        refs = collect_refs(src, {"parse_payload"})
+        self.assertNotIn("parse_payload", refs)
+        self.assertIn("handle_response", refs)
+
+    def test_plain_short_words_are_not_refs(self):
+        from xgen_maker.kg.refs import collect_refs
+        refs = collect_refs("value = total + count\n", set())
+        self.assertEqual(refs, [], "평범한 짧은 말은 식별자로 보지 않는다")
+
+    def test_incremental_refresh_replaces_refs(self):
+        """증분 갱신에서 옛 이름이 남으면 사라진 것으로도 계속 검색된다."""
+        from xgen_maker.kg.build import build_repo, refresh_files
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "cat.py").write_text("CATALOG = {'VectorDBContextV2': 1}\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q"], cwd=root, capture_output=True)
+            g = build_repo("r", root)
+            (root / "cat.py").write_text("CATALOG = {'RerankerNode': 1}\n", encoding="utf-8")
+            refresh_files(g, "r", root, ["cat.py"])
+            node = next(n for n in g.nodes.values()
+                        if n["kind"] == "file" and n.get("path") == "cat.py")
+            refs = (node.get("meta") or {}).get("refs", "")
+        self.assertIn("RerankerNode", refs)
+        self.assertNotIn("VectorDBContextV2", refs)

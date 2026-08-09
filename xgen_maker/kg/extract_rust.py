@@ -164,6 +164,13 @@ def extract_rust_file(graph: Graph, repo: str, repo_root: Path, rel: str,
 
         depth += _brace_depth(line)
 
+    from .refs import collect_refs
+    defined = set(local_fns) | {n["name"] for n in graph.nodes.values()
+                                if n.get("path") == rel and n["kind"] in ("function", "class")}
+    refs = collect_refs(source, defined)
+    if refs:
+        graph.add_node(file_id, "file", Path(rel).name, repo, rel, refs=" ".join(refs))
+
     # 호출 이름을 모아 둔다 — 저장소 함수가 다 들어온 뒤 link_calls가 해소(파일 간 호출).
     from .calls import record_calls
     record_calls(graph, file_id, source)

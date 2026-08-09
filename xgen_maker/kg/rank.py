@@ -59,7 +59,9 @@ _CENTRALITY_WEIGHT = 0.5
 # (R@1 0.321→0.346) 상위 10 안에 정답이 들어올 확률이 떨어진다(R@10 0.679→0.641).
 # 에이전트에게 건네는 근거 목록에 정답이 있느냐가 작업 성패를 가르므로 회수를 지킨다.
 _FIELD_WEIGHT = {"name": 3, "path": 2, "repo": 1, "kind": 1, "meta": 1}
-_META_KEYS = ("summary", "doc", "package", "route_path", "module", "service", "handler")
+# refs = 그 파일이 정의하진 않았지만 다루는 이름들. 사람은 그 이름으로 찾는다.
+_META_KEYS = ("summary", "doc", "package", "route_path", "module", "service",
+              "handler", "refs")
 
 
 def tokenize(text: str) -> list[str]:
