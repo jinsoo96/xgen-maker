@@ -942,3 +942,28 @@ class TestTunedValuesCarryTheirEvidence(unittest.TestCase):
         """머리는 원문 1개 — 큰 표본에서 R@10이 조금 더 높았다(0.742 → 0.746)."""
         source = Path("xgen_maker/loop/pipeline.py").read_text(encoding="utf-8")
         self.assertIn("k=8, head=1", source)
+
+
+class TestLandingStaysSpecific(unittest.TestCase):
+    """착지는 '고칠 자리'여야 한다 — 파일 노드에는 줄 번호가 없다.
+
+    파일 노드가 참조 식별자까지 담게 되면서 신호가 늘었고, 가중을 올리면 상위 10 안에
+    정답이 들어올 확률은 오른다. 그런데 너무 올리면 착지 1위가 파일이 되어(10%→31%)
+    에이전트가 열 자리를 잃는다. 그 균형을 값과 함께 못박는다.
+    """
+
+    def test_symbols_still_outrank_their_own_file(self):
+        from xgen_maker.kg.rank import _KIND_BOOST
+        self.assertLess(_KIND_BOOST["file"], _KIND_BOOST["function"])
+        self.assertLess(_KIND_BOOST["file"], _KIND_BOOST["class"])
+
+    def test_file_boost_records_its_evidence(self):
+        source = Path("xgen_maker/kg/rank.py").read_text(encoding="utf-8")
+        self.assertIn('"file": 1.6', source)
+        self.assertIn("줄 번호가 없어", source, "왜 더 올리지 않았는지 근거가 없다")
+
+    def test_containers_are_still_not_landing_sites(self):
+        """저장소·기능은 여전히 좌표가 아니다."""
+        from xgen_maker.kg.rank import _KIND_BOOST
+        self.assertLess(_KIND_BOOST["repo"], 1.0)
+        self.assertLess(_KIND_BOOST["feature"], 1.0)
