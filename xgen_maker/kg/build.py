@@ -227,6 +227,22 @@ def refresh_files(graph: Graph, repo: str, repo_root: str | Path,
             graph.add_edge(repo, f"{repo}:{rel}", "contains")
     extract_routes(graph, repo, ts_files)
     link_rust_routes(graph, repo)  # 라우트→핸들러는 파일 간이라 추출 후 연결
+    # 라우팅 설정을 다시 읽었으면 게이트웨이 라우트도 다시 만든다. 그 노드들은 path가
+    # 설정 파일이라 위에서 함께 걷혔는데, 재생성이 없으면 라우팅 테이블이 통째로
+    # 사라진다 — 하필 새 모듈이 붙어 설정이 바뀌는 순간에. TS·Rust 라우트는 바로 위에서
+    # 다시 만들면서 이것만 빠져 있었다(실측: 증분 뒤 노드 7개 → 5개).
+    if any(Path(rel).suffix.lower() in (".yaml", ".yml") for rel in targets):
+        from .extract_gateway import (find_services_file, extract_gateway_routes,
+                                      link_gateway_routes)
+        services = find_services_file(repo_root)
+        if services is not None:
+            try:
+                rel_services = services.relative_to(repo_root).as_posix()
+            except ValueError:
+                rel_services = ""
+            if rel_services in targets:
+                extract_gateway_routes(graph, repo, repo_root)
+                link_gateway_routes(graph)
     link_calls(graph, repo)        # 파일 간 호출 해소(증분 갱신분)
     link_api_calls(graph)
     # 걷어낸 심볼 중 되살아나지 않은 것(이번 변경으로 삭제·개명됨)을 가리키는 엣지는 끊는다.

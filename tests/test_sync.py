@@ -281,3 +281,48 @@ class TestRustIsSynced(unittest.TestCase):
             result = sync_source(merged, source)
         self.assertEqual(result["changed"], 1, "Rust 변경이 sync 대상에 안 잡힘")
         self.assertIn("validate_token", {n["name"] for n in merged.nodes.values()})
+
+
+class GatewayRoutesSurviveIncrementalRefreshTest(unittest.TestCase):
+    """회귀: 라우팅 설정을 증분 갱신하면 게이트웨이 라우트가 통째로 사라졌다.
+
+    그 노드들은 path가 설정 파일이라 갱신 대상으로 함께 걷히는데, TS·Rust 라우트와
+    달리 재생성이 없었다. 하필 새 모듈이 붙어 설정이 바뀌는 순간에 표가 비었다.
+    """
+
+    def _repo(self, tmp, modules):
+        root = Path(tmp)
+        (root / "config").mkdir(exist_ok=True)
+        (root / "app.py").write_text("def handle():\n    return 1\n", encoding="utf-8")
+        (root / "config" / "services.yaml").write_text(
+            "services:\n  core:\n    modules:\n"
+            + "".join(f"      - {m}\n" for m in modules), encoding="utf-8")
+        subprocess.run(["git", "init", "-q"], cwd=root, capture_output=True)
+        return root
+
+    def test_refresh_matches_full_rebuild(self):
+        from xgen_maker.kg.build import build_repo, refresh_files
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._repo(tmp, ["admin"])
+            graph = build_repo("r", root)
+            if not [n for n in graph.nodes if "gwroute" in n]:
+                self.skipTest("PyYAML 없음 — 라우팅 표를 못 읽는다")
+            self._repo(tmp, ["admin", "vision"])
+            refresh_files(graph, "r", root, ["config/services.yaml"])
+            full = build_repo("r", root)
+            self.assertEqual(sorted(graph.nodes), sorted(full.nodes),
+                             "증분 갱신이 풀리빌드와 다른 그래프를 남겼다")
+            self.assertIn("r:gwroute:/vision", graph.nodes, "새 모듈 라우트가 안 잡혔다")
+
+    def test_repeated_refresh_does_not_wear_the_graph(self):
+        """같은 파일을 몇 번 갱신해도 표가 닳으면 안 된다."""
+        from xgen_maker.kg.build import build_repo, refresh_files
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._repo(tmp, ["admin", "ocr"])
+            graph = build_repo("r", root)
+            if not [n for n in graph.nodes if "gwroute" in n]:
+                self.skipTest("PyYAML 없음")
+            before = sorted(graph.nodes)
+            for _ in range(5):
+                refresh_files(graph, "r", root, ["config/services.yaml", "app.py"])
+            self.assertEqual(sorted(graph.nodes), before)
