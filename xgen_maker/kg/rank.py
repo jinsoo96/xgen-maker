@@ -55,6 +55,9 @@ _REPO_AFFINITY = 2.5
 # 기법 출처(웹 조사): RANGER·코드 중심성 랭킹 연구의 "PageRank로 함수 중요도".
 _CENTRALITY_WEIGHT = 0.5
 # 이름은 노드의 정체라 더 무겁게, 경로는 그 다음.
+# meta(요약·문서)는 실제 머지된 MR로 재 보고 1로 둔다. 2로 올리면 1위 적중은 오르지만
+# (R@1 0.321→0.346) 상위 10 안에 정답이 들어올 확률이 떨어진다(R@10 0.679→0.641).
+# 에이전트에게 건네는 근거 목록에 정답이 있느냐가 작업 성패를 가르므로 회수를 지킨다.
 _FIELD_WEIGHT = {"name": 3, "path": 2, "repo": 1, "kind": 1, "meta": 1}
 _META_KEYS = ("summary", "doc", "package", "route_path", "module", "service", "handler")
 
@@ -82,7 +85,9 @@ def node_terms(node: dict) -> list[str]:
     for key in _META_KEYS:
         value = meta.get(key)
         if isinstance(value, str) and value:
-            terms.extend(tokenize(value))
+            # 선언한 가중을 실제로 적용한다. 전에는 _FIELD_WEIGHT["meta"]를 적어 두고
+            # 쓰지 않아, 의미층(요약·문서)의 무게를 조절할 손잡이가 없는 상태였다.
+            terms.extend(tokenize(value) * _FIELD_WEIGHT["meta"])
     return terms
 
 
