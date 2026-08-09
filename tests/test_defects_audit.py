@@ -1506,3 +1506,51 @@ class SemanticSummariesAreNotForSearchTest(unittest.TestCase):
         """쓰지 말라는 것과 없는 셈 치는 것은 다르다 — 있으면 검색은 그대로 쓴다."""
         from xgen_maker.kg.rank import _META_KEYS
         self.assertIn("summary", _META_KEYS)
+
+
+class DenseSearchDegradesGracefullyTest(unittest.TestCase):
+    """의미 검색은 있으면 좋은 층이지, 없으면 안 되는 층이 아니다.
+
+    사내 임베딩 서버는 점프호스트 뒤에 있어 늘 닿는다고 볼 수 없다. 주소가 없거나
+    죽었을 때 착지가 통째로 실패하면, 어제 되던 일이 오늘 안 된다.
+    """
+
+    def _graph(self):
+        g = Graph()
+        g.add_node("r", "repo", "r", "r", "")
+        g.add_node("r:svc/stt.py#transcribe", "function", "transcribe", "r",
+                   "svc/stt.py", 1, doc="음성 파일을 텍스트로 바꾼다")
+        return g
+
+    def test_no_endpoint_means_skipped_not_crashed(self):
+        from xgen_maker.kg.dense import build, DenseIndex
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "v.npz"
+            self.assertIn("skipped", build(self._graph(), path, "", "m"))
+            self.assertFalse(DenseIndex(path).ready)
+
+    def test_dead_endpoint_does_not_raise(self):
+        from xgen_maker.kg.dense import build
+        with tempfile.TemporaryDirectory() as tmp:
+            stats = build(self._graph(), Path(tmp) / "v.npz",
+                          "http://127.0.0.1:1/v1", "m")
+            self.assertEqual(stats["added"], 0)
+
+    def test_search_without_index_returns_nothing(self):
+        from xgen_maker.kg.dense import DenseIndex
+        with tempfile.TemporaryDirectory() as tmp:
+            index = DenseIndex(Path(tmp) / "missing.npz")
+            self.assertEqual(index.search(self._graph(), "질의", "http://x/v1", "m"), [])
+
+    def test_node_text_carries_what_the_model_can_read(self):
+        from xgen_maker.kg.dense import node_text
+        text = node_text(self._graph().nodes["r:svc/stt.py#transcribe"])
+        self.assertIn("transcribe", text)
+        self.assertIn("svc/stt.py", text)
+        self.assertIn("음성 파일", text, "문서가 있으면 그것이 가장 강한 신호다")
+
+    def test_query_gets_an_instruction_prefix(self):
+        """Qwen3 계열 표준 사용법 — 실측 R@1 0.447 → 0.518."""
+        source = Path("xgen_maker/kg/dense.py").read_text(encoding="utf-8")
+        self.assertIn("Instruct:", source)
+        self.assertIn("0.518", source, "근거 수치를 남긴다")

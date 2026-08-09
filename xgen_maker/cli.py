@@ -209,6 +209,28 @@ def cmd_kg_enrich(args) -> None:
     print(f"[kg enrich] 저장 → {args.kg}")
 
 
+def cmd_kg_embed(args) -> None:
+    """의미 검색용 벡터 만들기 — 바뀐 노드만 다시 임베딩한다."""
+    from .kg.dense import build
+    config = MakerConfig.from_file(args.config) if args.config else MakerConfig()
+    base = args.base or config.embed_base
+    model = args.model or config.embed_model
+    if not base:
+        print("[kg embed] 임베딩 주소가 없습니다 — .env의 XGEN_MAKER_EMBED_BASE "
+              "또는 --base로 주세요(사내 vLLM 등 OpenAI 호환)")
+        return
+    graph = Graph.load(args.kg)
+    seen = [0]
+
+    def progress(done: int, total: int) -> None:
+        if done - seen[0] >= 1280 or done == total:
+            seen[0] = done
+            print(f"  {done}/{total}", flush=True)
+
+    stats = build(graph, args.out or config.dense_path, base, model, on_progress=progress)
+    print(f"[kg embed] {json.dumps(stats, ensure_ascii=False)}")
+
+
 def cmd_kg_domains(args) -> None:
     from .kg.domains import build_domains, render_domain_map
     graph = Graph.load(args.kg)
@@ -774,6 +796,14 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--limit", type=int, default=200)
     p.add_argument("--config", default=None)
     p.set_defaults(func=cmd_kg_enrich)
+
+    p = kg_sub.add_parser("embed", help="의미 검색용 노드 벡터 생성/갱신 (변경분만)")
+    p.add_argument("--kg", default="kg/merged.json")
+    p.add_argument("--out", default=None)
+    p.add_argument("--base", default=None, help="OpenAI 호환 임베딩 주소")
+    p.add_argument("--model", default=None)
+    p.add_argument("--config", default=None)
+    p.set_defaults(func=cmd_kg_embed)
 
     p = kg_sub.add_parser("domains", help="도메인/플로우 뷰 생성 (UI/UX KG)")
     p.add_argument("--kg", default="kg/merged.json")

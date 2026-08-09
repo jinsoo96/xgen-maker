@@ -48,6 +48,11 @@ class MakerConfig:
     llm_enabled: bool = True
     llm_base: str = field(default_factory=lambda: os.environ.get("XGEN_MAKER_LLM_BASE", DEFAULT_LLM_BASE))
     llm_model: str = field(default_factory=lambda: os.environ.get("XGEN_MAKER_LLM_MODEL", DEFAULT_LLM_MODEL))
+    # 의미 검색(임베딩). 비어 있으면 그 층을 통째로 건너뛴다 — 없어도 착지는 된다.
+    # 실 주소는 .env로만 준다(사내망 주소를 공개 저장소에 적지 않는다).
+    embed_base: str = field(default_factory=lambda: os.environ.get("XGEN_MAKER_EMBED_BASE", ""))
+    embed_model: str = field(default_factory=lambda: os.environ.get("XGEN_MAKER_EMBED_MODEL", ""))
+    dense_path: str = "kg/vectors.npz"
     gitlab_url: str = field(default_factory=lambda: os.environ.get(
         "XGEN_MAKER_GITLAB_URL", "https://gitlab.example.com"))  # 실 호스트는 .env로
     gitlab_projects: dict[str, str] = field(default_factory=dict)  # repo명 → "group/repo" (config로 주입)
@@ -114,6 +119,8 @@ class MakerConfig:
         base = path.resolve().parent
         if not Path(config.kg_path).is_absolute():
             config.kg_path = str(base / config.kg_path)
+        if not Path(config.dense_path).is_absolute():
+            config.dense_path = str(base / config.dense_path)
         if not Path(config.worklogs_dir).is_absolute():
             config.worklogs_dir = str(base / config.worklogs_dir)
         if not Path(config.learnings_dir).is_absolute():
