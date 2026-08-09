@@ -9,6 +9,7 @@ import unittest
 from pathlib import Path
 
 from xgen_maker.kg.graph import Graph
+from xgen_maker.kg.companions import companion_files, as_prompt_block as companion_block
 from xgen_maker.kg.search import search
 
 
@@ -1040,3 +1041,48 @@ class TestConfigFilesAreAddressable(unittest.TestCase):
         self.assertIn("conf/services.yaml", got)
         self.assertIn("pyproject.toml", got)
         self.assertNotIn("logo.png", got)
+
+
+class CompanionFilesTest(unittest.TestCase):
+    """MR은 파일 하나로 끝나지 않는다 — 이어진 파일을 에이전트가 봐야 한다."""
+
+    def _graph(self):
+        g = Graph()
+        g.add_node("r", "repo", "r", "r", "")
+        for path in ("api/view.py", "core/service.py", "core/model.py", "far/away.py"):
+            g.add_node(f"r:{path}", "file", path.split("/")[-1], "r", path)
+            g.add_edge("r", f"r:{path}", "contains")
+        g.add_edge("r:api/view.py", "r:core/service.py", "imports")
+        g.add_edge("r:core/service.py", "r:core/model.py", "calls")
+        return g
+
+    def test_neighbors_of_landing_are_offered(self):
+        got = companion_files(self._graph(), [{"path": "api/view.py", "id": "r:api/view.py"}])
+        self.assertEqual([c["path"] for c in got], ["core/service.py"])
+        self.assertEqual(got[0]["relations"], ["imports"])
+
+    def test_landed_files_are_not_repeated(self):
+        landing = [{"path": "api/view.py"}, {"path": "core/service.py"}]
+        got = {c["path"] for c in companion_files(self._graph(), landing)}
+        self.assertNotIn("api/view.py", got)
+        self.assertIn("core/model.py", got, "착지 밖 이웃은 나와야 한다")
+
+    def test_repo_containment_is_not_a_neighbor(self):
+        """contains를 이웃으로 세면 같은 저장소 전체가 이웃이 된다."""
+        got = {c["path"] for c in companion_files(self._graph(), [{"path": "api/view.py"}])}
+        self.assertNotIn("far/away.py", got)
+
+    def test_cap_is_honored(self):
+        g = Graph()
+        g.add_node("r:hub.py", "file", "hub.py", "r", "hub.py")
+        for i in range(30):
+            g.add_node(f"r:n{i}.py", "file", f"n{i}.py", "r", f"n{i}.py")
+            g.add_edge("r:hub.py", f"r:n{i}.py", "imports")
+        self.assertEqual(len(companion_files(g, [{"path": "hub.py"}], cap=5)), 5)
+
+    def test_prompt_block_does_not_order_edits(self):
+        """'고쳐라'가 아니라 '이어져 있다'는 단서다 — 지시로 읽히면 무관한 파일을 건드린다."""
+        block = companion_block([{"path": "core/service.py", "repo": "r",
+                                  "relations": ["imports"], "score": 1.0}])
+        self.assertIn("core/service.py", block)
+        self.assertIn("고쳐야 한다는 뜻이 아니다", block)

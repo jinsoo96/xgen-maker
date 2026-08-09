@@ -14,6 +14,7 @@ from ..config import MakerConfig
 from ..kg.graph import Graph
 from ..kg.search import search, impact, retrieve_chain
 from ..kg.anchor import find_anchors, expand, rank_within
+from ..kg.companions import companion_files, as_prompt_block as companion_block
 from ..kg.build import refresh_files, git_head
 from .intent import classify
 from .converge import converge
@@ -335,6 +336,18 @@ class MakerLoop:
         journal.event("legacy_check", "ok" if legacy_notes else "skipped",
                       bytes=len(legacy_notes))
 
+        # ④-1 함께 볼 파일 — 착지한 곳과 이어져 있어 이번 변경이 기대를 깰 수 있는 곳.
+        # MR은 파일 하나로 끝나지 않는다. 이걸 안 주면 에이전트는 그 존재를 모른 채
+        # 고친다(실측: 착지 10개만으로는 MR 변경 파일의 25.7%만 전부 덮었고,
+        # 이웃 12개를 얹으면 40.4%).
+        companions = companion_files(self.graph, landing)
+        if companions:
+            legacy_notes = (legacy_notes + "\n\n"
+                            + companion_block(companions)).strip()
+        journal.event("companions", "ok" if companions else "empty",
+                      files=[c["path"] for c in companions])
+        report["companions"] = companions
+
         # ④-2 과거 학습 조회 — 이 영역에서 겪은 실수/교훈을 꺼내 구현에 주입(실수 방지)
         from .learnings import retrieve, as_prompt_block, area_of, record
         area = area_of(landing)
@@ -479,6 +492,12 @@ class MakerLoop:
                     legacy_notes = self._legacy_notes(landing, repo, repo_path)
                     if past:  # 학습 메모리 재주입(재발췌로 덮였으므로)
                         legacy_notes = (as_prompt_block(past) + "\n\n" + legacy_notes).strip()
+                    # 착지가 바뀌었으니 이웃도 다시 센다 — 재발췌로 블록이 덮였다.
+                    companions = companion_files(self.graph, landing)
+                    if companions:
+                        legacy_notes = (legacy_notes + "\n\n"
+                                        + companion_block(companions)).strip()
+                    report["companions"] = companions
                     relanded_ok = True
             if base_ref:
                 # 최신화는 '가져온 것이 있을 때'만 기록하면 안 된다. 이미 최신이어도 이 단계는
