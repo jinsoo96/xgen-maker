@@ -27,6 +27,12 @@ _YAML_ITEM = re.compile(r"^\s*-\s+([A-Za-z_][\w.-]{2,})\s*$", re.M)
 _YAML_VALUE = re.compile(r"^\s*[A-Za-z_][\w.-]*\s*:\s*([A-Za-z_][\w.-]{2,})\s*$", re.M)
 _NOT_VALUES = frozenset("true false null none yes no on off".split())
 _TOML_KEY = re.compile(r"^\s*(?:\[([^\]]+)\]|([A-Za-z_][\w.-]{2,})\s*=)", re.M)
+# 의존성 목록은 값 쪽에 있다: dependencies = ["orjson==3.11.9", ...].
+# 키만 담으면 `dependencies` 하나만 남고, 정작 사람이 말하는 이름(orjson,
+# python-dotenv)은 사라진다. 버전 의존성 갱신 MR이 실패의 큰 몫이었다 —
+# 근거가 아예 없던 14건 중 7건이 pyproject.toml이었고 질의는 전부 패키지 이름이었다.
+_QUOTED = re.compile(r'"([A-Za-z_][\w.-]{2,})(?:[<>=!~\[\s].*?)?"|\'([A-Za-z_][\w.-]{2,})'
+                     r"(?:[<>=!~\[\s].*?)?'")
 _JSON_KEY = re.compile(r'"([A-Za-z_][\w.-]{2,})"\s*:')
 _MD_HEAD = re.compile(r"^#{1,3}\s+(.+)$", re.M)
 _SH_FUNC = re.compile(r"^\s*(?:function\s+)?([A-Za-z_][\w-]{2,})\s*\(\)\s*\{", re.M)
@@ -45,9 +51,12 @@ def _names(rel: str, source: str) -> list[str]:
                  + [v for v in _YAML_VALUE.findall(source)
                     if v.lower() not in _NOT_VALUES])
     elif suffix == ".toml":
-        found = [a or b for a, b in _TOML_KEY.findall(source)]
+        found = ([a or b for a, b in _TOML_KEY.findall(source)]
+                 + [a or b for a, b in _QUOTED.findall(source)])
     elif suffix == ".json":
-        found = _JSON_KEY.findall(source)
+        # package.json의 dependencies는 키 쪽이지만, scripts 값·workspaces 목록은
+        # 값 쪽이다. 양쪽 다 담는다.
+        found = _JSON_KEY.findall(source) + [a or b for a, b in _QUOTED.findall(source)]
     elif suffix == ".md":
         found = [h.strip() for h in _MD_HEAD.findall(source)]
     elif suffix == ".sh":

@@ -1020,6 +1020,20 @@ class TestConfigFilesAreAddressable(unittest.TestCase):
         self.assertIn("passthrough", got)
         self.assertNotIn("true", got, "불리언은 이름이 아니다")
 
+    def test_dependency_names_are_searchable(self):
+        """의존성 갱신 요청은 패키지 이름으로 온다 — 그 이름은 키가 아니라 값에 있다.
+
+        총합 지표는 거의 안 움직였다(MRR +0.002). 그래도 남긴다 — 이름이 색인에
+        없으면 그 요청은 어떤 순위 조정으로도 그 파일에 닿을 수 없다.
+        """
+        from xgen_maker.kg.extract_config import _names
+        got = _names("pyproject.toml",
+                     '[project]\nname = "svc"\ndependencies = [\n'
+                     '  "orjson==3.11.9",\n  "python-dotenv>=1.2",\n]\n')
+        self.assertIn("orjson", got)
+        self.assertIn("python-dotenv", got)
+        self.assertNotIn("orjson==3.11.9", got, "버전 지정자는 이름이 아니다")
+
     def test_generated_lockfiles_do_not_flood_the_index(self):
         """큰 생성물은 이름만 남긴다 — 색인을 지배하면 안 된다."""
         from xgen_maker.kg.extract_config import extract_config_file, _MAX_BYTES
