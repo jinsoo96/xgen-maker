@@ -92,8 +92,18 @@ def _host_name(host: str) -> str:
 
 
 def extract_gateway_routes(graph: Graph, repo: str, repo_root: str | Path) -> int:
-    """게이트웨이 레포에서 모듈→서비스 매핑을 읽어 gateway_route 노드를 만든다."""
+    """게이트웨이 레포에서 모듈→서비스 매핑을 읽어 gateway_route 노드를 만든다.
+
+    인프라 저장소는 건드리지 않는다. 거기에도 배포용 사본(services.docker.yaml)이
+    있어서 같은 라우팅표가 두 벌 생긴다 — 게다가 빌드(extract_infra)는 그걸 안 만들고
+    sync만 만들어, 동기화 한 번에 그래프가 달라졌다. 빌드와 sync는 같은 그래프를
+    내야 한다. 실측: 중복 라우트 27개가 들어가면 검색이 깎인다(R@10 0.845 → 0.834).
+    정본은 관문 저장소의 config/services.yaml이다.
+    """
     if not HAS_YAML:
+        return 0
+    node = graph.nodes.get(repo)
+    if node is not None and (node.get("meta") or {}).get("plane") == "infra":
         return 0
     path = find_services_file(repo_root)
     if path is None:

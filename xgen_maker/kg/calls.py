@@ -28,8 +28,37 @@ static void const let var type interface struct enum impl trait pub mut where us
 """.split())
 
 
-def scan_call_names(source: str) -> set[str]:
-    """소스에서 호출된 식별자 이름들(제어문 키워드 제외)."""
+# 주석·문자열은 코드가 아니다. `이름(` 패턴은 산문에도 있어서, 그대로 훑으면
+# 없는 호출을 지어낸다(실측: "annotations: MCP annotations (read_only_hint 등)."
+# 이라는 도크스트링 한 줄이 Tool.annotations를 부른다는 엣지를 만들었다).
+# 그렇게 생긴 엣지는 영향분석·중심성·체인 확장을 조용히 오염시킨다.
+# 파싱하지 않는다 — 언어별 파서를 붙이는 대신, 코드가 아닌 구간만 걷어낸다.
+_STRIP_RULES = (
+    re.compile(r'"""[\s\S]*?"""'),          # 파이썬 도크스트링
+    re.compile(r"'''[\s\S]*?'''"),
+    re.compile(r"/\*[\s\S]*?\*/"),          # C 계열 블록 주석
+    re.compile(r'"(?:\\.|[^"\\\n])*"'),     # 문자열 리터럴(줄을 넘지 않는 것만)
+    re.compile(r"'(?:\\.|[^'\\\n])*'"),
+    re.compile(r"`(?:\\.|[^`\\])*`"),       # 템플릿 리터럴
+    re.compile(r"#[^\n]*"),                 # 파이썬·셸 주석
+    re.compile(r"//[^\n]*"),                # C 계열 줄 주석
+)
+
+
+def strip_noncode(source: str) -> str:
+    """주석·문자열을 지운다. 지운 자리는 빈 칸으로 둬 다른 토큰이 붙지 않게."""
+    for rule in _STRIP_RULES:
+        source = rule.sub(" ", source)
+    return source
+
+
+def scan_call_names(source: str, strip: bool = True) -> set[str]:
+    """소스에서 호출된 식별자 이름들(제어문 키워드 제외).
+
+    strip=False는 감사용 — 걷어내기 전후를 비교할 때만 쓴다.
+    """
+    if strip:
+        source = strip_noncode(source)
     return {m.group(1) for m in _CALL_RE.finditer(source)
             if m.group(1) not in _NOT_CALLS}
 

@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from xgen_maker.kg.graph import Graph
 from xgen_maker.kg.build import build_repo, merge_and_link
 from xgen_maker.kg.sync import sync_all, sync_source, changed_files, install_hooks, remove_hooks
 
@@ -374,3 +375,42 @@ class NonAsciiPathsSurviveSyncTest(unittest.TestCase):
             names = {n.get("name") for n in graph.nodes.values()}
             self.assertIn("calc_settlement_v2", names)
             self.assertNotIn("calc_settlement", names)
+
+
+class SyncDoesNotInventGatewayRoutesTest(unittest.TestCase):
+    """회귀: sync가 빌드에 없는 라우팅표를 만들어, 동기화 한 번에 그래프가 달라졌다.
+
+    인프라 저장소에도 배포용 사본(services.docker.yaml)이 있다. 빌드(extract_infra)는
+    그걸 안 읽는데 sync만 읽어, 같은 라우팅표가 두 벌 생겼다. 중복 라우트 27개가
+    들어가면 검색도 깎인다(실측 R@10 0.845 → 0.834).
+    """
+
+    def _infra(self, tmp):
+        root = Path(tmp)
+        (root / "dockerfiles" / "gw" / "config").mkdir(parents=True)
+        (root / "dockerfiles" / "gw" / "config" / "services.docker.yaml").write_text(
+            "base_path: /api\nservices:\n  core:\n    host: http://core:8000\n"
+            "    modules:\n      - admin\n", encoding="utf-8")
+        return root
+
+    def test_infra_plane_is_skipped(self):
+        from xgen_maker.kg.extract_gateway import extract_gateway_routes, find_services_file
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._infra(tmp)
+            if find_services_file(root) is None:
+                self.skipTest("PyYAML 없음")
+            graph = Graph()
+            graph.add_node("infra", "repo", "infra", "infra", str(root), plane="infra")
+            self.assertEqual(extract_gateway_routes(graph, "infra", root), 0,
+                             "인프라 저장소에서 라우팅표를 또 만들면 안 된다")
+
+    def test_code_repo_still_extracted(self):
+        """막는 것과 안 하는 것은 다르다 — 관문 저장소에서는 그대로 뽑아야 한다."""
+        from xgen_maker.kg.extract_gateway import extract_gateway_routes, find_services_file
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._infra(tmp)
+            if find_services_file(root) is None:
+                self.skipTest("PyYAML 없음")
+            graph = Graph()
+            graph.add_node("gw", "repo", "gw", "gw", str(root))
+            self.assertGreater(extract_gateway_routes(graph, "gw", root), 0)
