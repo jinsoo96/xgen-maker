@@ -917,3 +917,28 @@ class TestLearnedVocabularyBridge(unittest.TestCase):
     def test_pipeline_uses_the_learned_bridge(self):
         source = Path("xgen_maker/loop/pipeline.py").read_text(encoding="utf-8")
         self.assertIn("bridge_terms", source)
+
+
+class TestTunedValuesCarryTheirEvidence(unittest.TestCase):
+    """작은 표본으로 정한 값이 큰 표본에서 뒤집힌 일이 실제로 있었다.
+
+    머지된 MR 78건에서 최적으로 보이던 길이 정규화 값이 256건에서는 더 나쁜 쪽이었다.
+    그래서 이 값들은 근거(어느 표본에서 무엇을 쟀는지)를 코드에 달아 둔다 — 다음 사람이
+    작은 표본으로 다시 흔들지 않게.
+    """
+
+    def test_length_normalisation_records_its_evidence(self):
+        source = Path("xgen_maker/kg/rank.py").read_text(encoding="utf-8")
+        self.assertIn("_B = 0.2", source)
+        self.assertIn("256", source, "이 값을 어느 표본에서 정했는지 근거가 없다")
+        self.assertIn("작은 표본으로 이 값을 정하지 말 것", source)
+
+    def test_refs_cap_records_its_evidence(self):
+        source = Path("xgen_maker/kg/refs.py").read_text(encoding="utf-8")
+        self.assertIn("_MAX_REFS = 400", source)
+        self.assertIn("R@10", source)
+
+    def test_landing_head_is_one(self):
+        """머리는 원문 1개 — 큰 표본에서 R@10이 조금 더 높았다(0.742 → 0.746)."""
+        source = Path("xgen_maker/loop/pipeline.py").read_text(encoding="utf-8")
+        self.assertIn("k=8, head=1", source)

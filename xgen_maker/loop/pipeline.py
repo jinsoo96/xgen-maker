@@ -275,7 +275,7 @@ class MakerLoop:
                 # 사람이 쓴 말로 잡고, 나머지 자리를 확장어가 채운다.
                 # 재료는 넉넉히 뽑아야 융합할 것이 생긴다.
                 landing = _fuse(search(self.graph, query, k=24),
-                                search(self.graph, keyword_query, k=24), k=8)
+                                search(self.graph, keyword_query, k=24), k=8, head=1)
             else:
                 journal.event("query_expand", "fail",
                               note="코드 어휘 변환 실패 — 원문 검색 결과만 사용합니다"
