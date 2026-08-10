@@ -1878,3 +1878,35 @@ class InfraVetoCoversRealConventionsTest(unittest.TestCase):
         self.assertTrue(infra_files(["charts/x/values.yaml"]))
         readme = Path("README.md").read_text(encoding="utf-8")
         self.assertIn("charts", readme)
+
+
+class TestPenaltyIsNotMetricGamedTest(unittest.TestCase):
+    """지표가 오르는 것과 일을 잘하는 것은 다르다.
+
+    테스트 감점을 풀면 전체 R@1이 오른다(0.35→0.458 · 0.8→0.467). 벤치마크가
+    "그 MR이 바꾼 파일 중 아무거나" 찾으면 맞춘 것으로 세기 때문이다 — 테스트
+    파일을 더 잘 찾는 것이 점수가 된다. 정답에서 테스트를 빼면 정반대다
+    (0.455 → 0.448 → 0.442). 감점을 풀면 에이전트는 고칠 자리 대신 테스트로 간다.
+    """
+
+    def test_penalty_stays_strong(self):
+        from xgen_maker.kg.rank import _TEST_PENALTY
+        self.assertEqual(_TEST_PENALTY, 0.35)
+
+    def test_the_trap_is_written_down(self):
+        source = Path("xgen_maker/kg/rank.py").read_text(encoding="utf-8")
+        self.assertIn("지표만 보고 올리지 말 것", source)
+        self.assertIn("구현 파일만", source)
+
+    def test_tests_still_win_when_asked_for(self):
+        """감점은 기본값일 뿐이다 — 요청이 테스트를 지목하면 그쪽으로 가야 한다."""
+        g = Graph()
+        g.add_node("r", "repo", "r", "r", "")
+        g.add_node("r:svc/upload.py#upload", "function", "upload_document",
+                   "r", "svc/upload.py", 1)
+        g.add_node("r:tests/test_upload.py#test_upload", "function",
+                   "test_upload_document", "r", "tests/test_upload.py", 1)
+        plain = search(g, "upload document", k=2)
+        asked = search(g, "upload document test", k=2)
+        self.assertFalse(plain[0]["path"].startswith("tests/"))
+        self.assertTrue(any(h["path"].startswith("tests/") for h in asked))

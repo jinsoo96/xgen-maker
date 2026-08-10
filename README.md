@@ -4,8 +4,8 @@
 
 **Ask in plain language. Get a reviewable merge request — grounded in a knowledge graph of your own code.**
 
-[![tests](https://img.shields.io/badge/tests-549%20passing-3aa8c9)](#testing)
-[![retrieval](https://img.shields.io/badge/landing%20R%4010-0.906-3aa8c9)](#measured-not-asserted)
+[![tests](https://img.shields.io/badge/tests-558%20passing-3aa8c9)](#testing)
+[![retrieval](https://img.shields.io/badge/landing%20R%4010-0.867-3aa8c9)](#measured-not-asserted)
 [![python](https://img.shields.io/badge/python-3.12%2B-3aa8c9)](#requirements)
 [![deps](https://img.shields.io/badge/dependencies-stdlib%20first-3aa8c9)](#requirements)
 [![license](https://img.shields.io/badge/license-private-8894a0)](#license)
@@ -65,23 +65,33 @@ MAKER is evaluated the only way that means anything: against **merge requests th
 merged**. Each MR title becomes the request; the files that MR changed are the ground truth. If
 MAKER lands where the team actually worked, retrieval is right.
 
-The benchmark below is 265 merged MRs across a 12-repository platform (~26,000 graph nodes,
-~60,000 edges). Release trains and branch-merge commits are excluded — their titles carry no
-intent, so no retrieval system can or should match them.
+The benchmark is **2,412 merged MRs the tuning has never seen**, drawn from every repository in
+the platform. Excluded up front, for reasons that are properties of the data rather than of the
+ranker: release trains and branch-merge commits (their titles carry no intent), titles that recur
+with different answers (one query, several truths), and MRs that only touch files the graph does
+not index.
+
+The graph is built from *today's* code, so an old MR describes a place that has since moved.
+Scores track that distance, which is why the window is stated rather than hidden:
 
 | Metric | Lexical only | **Hybrid, tuned** |
 |---|---|---|
-| Landing is exactly right (R@1) | 0.415 | **0.555** |
-| Answer in the agent's evidence list (R@10) | 0.796 | **0.906** |
-| MRR | 0.538 | **0.663** |
-| MR's changed files fully covered | — | **52.1%** (74.3% average) |
+| Landing is exactly right (R@1) | 0.371 | **0.458** |
+| Answer in the agent's evidence list (R@10) | 0.777 | **0.809** |
+| …restricted to MRs merged in the last ~3 months | — | **0.867** |
+| MRR | 0.505 | **0.573** |
+| MR's changed files fully covered | — | **46.2%** (65.4% average) |
 
-Of the 25 remaining misses, 15 have no answer anywhere in a 40-candidate pool, and of the 10
-that do, an LLM shown the whole pool picks correctly for only 2 — the MR title simply does not
-determine the file. The measured ceiling here is the benchmark, not the ranker.
+Every ranking constant was re-checked against this set. Three had to move: they had been fitted
+to an earlier 294-MR sample whose answers happened to sit in small repositories (14% and 13% of
+answers in repositories holding 1.0% and 3.6% of the graph). One of them — a repository-size
+correction — was removed entirely, because on a representative sample there is no skew left to
+correct. The measurement that justified each surviving value is written next to it.
 
-Held across four independent splits of the benchmark (odd/even and first/second half), because a
-gain that only shows up on one slice is noise.
+Not every measurable gain is kept. Loosening the penalty on test files raises R@1 from 0.458 to
+0.467 — but only because the benchmark counts a hit on *any* file the MR touched, and test files
+are easy to find. Score the implementation files alone and the same change makes it worse
+(0.455 → 0.448). The penalty stayed where it was, and the trap is written next to it.
 
 **Graph quality is audited against the repositories themselves**, not assumed:
 
@@ -283,7 +293,7 @@ MAKER is designed to be *boring* in production.
 python -m pytest -q
 ```
 
-549 tests covering the graph extractors, incremental-sync equivalence, retrieval ranking, safety
+558 tests covering the graph extractors, incremental-sync equivalence, retrieval ranking, safety
 guards, the convergence loop end-to-end over a real temporary repository, and the dashboard
 endpoints.
 
