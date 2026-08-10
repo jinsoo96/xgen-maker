@@ -26,7 +26,7 @@ ROUTES = BENCH / "routes_v2.json"
 VECTORS = BENCH / "qvectors_v2.npz"
 BOOK = re.compile(r"^\s*(?:revert\b|merge\s+(?:branch|remote)\b|\[release\]|release[:/ ])"
                   r"|develop\s*(?:→|->)\s*(?:stage|stg|main|master)", re.I)
-_WORKERS = 6
+_WORKERS = 4      # 장시간 돌릴 때는 낮춘다(일시 실패가 쌓였다)
 
 
 def _load(path):
@@ -64,7 +64,10 @@ def main() -> None:
     graph = Graph.load(pathlib.Path("kg/merged.json"))
     block = profile_block(graph)
     expansions, routes = _load(EXPANSIONS), _load(ROUTES)
-    todo = [q for q in queries if q not in expansions]
+    # 둘 다 비어 있으면 호출이 실패한 것이다(모델이 저장소를 모르겠다고 답한 것과 다르다).
+    # 장시간 병렬로 돌리면 일시 실패가 쌓인다 — 그대로 재면 실패한 파이프라인을 재는 셈.
+    todo = [q for q in queries
+            if q not in expansions or (not expansions[q] and not routes.get(q))]
     print(f"확장 필요 {len(todo)}건", flush=True)
 
     done = 0
