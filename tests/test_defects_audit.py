@@ -1800,3 +1800,18 @@ class ConfigFilesGetKoreanTooTest(unittest.TestCase):
                      "extract_config"):
             source = Path(f"xgen_maker/kg/{name}.py").read_text(encoding="utf-8")
             self.assertIn("collect_labels", source, f"{name}이 한글을 안 담는다")
+
+
+class LabelWeightIsTunedTest(unittest.TestCase):
+    """화면 문구는 사용자가 실제로 쓰는 말이라 다른 메타보다 조금 더 무겁다."""
+
+    def test_weight_is_two_with_evidence(self):
+        from xgen_maker.kg.rank import _LABEL_WEIGHT
+        self.assertEqual(_LABEL_WEIGHT, 2)
+        source = Path("xgen_maker/kg/rank.py").read_text(encoding="utf-8")
+        self.assertIn("0.906", source)
+
+    def test_other_meta_keeps_its_own_weight(self):
+        """문구 무게를 올리면서 요약·문서까지 같이 올리면 다른 실험을 덮어쓴다."""
+        from xgen_maker.kg.rank import _FIELD_WEIGHT
+        self.assertEqual(_FIELD_WEIGHT["meta"], 1)

@@ -89,6 +89,11 @@ _CENTRALITY_WEIGHT = 0.5
 # (R@1 0.321→0.346) 상위 10 안에 정답이 들어올 확률이 떨어진다(R@10 0.679→0.641).
 # 에이전트에게 건네는 근거 목록에 정답이 있느냐가 작업 성패를 가르므로 회수를 지킨다.
 _FIELD_WEIGHT = {"name": 3, "path": 2, "repo": 1, "kind": 1, "meta": 1}
+# 화면 문구의 무게. 사용자가 실제로 쓰는 말이라 다른 메타보다 조금 더 무겁다.
+# 실측(기능질의 265건): 1 → R@10 0.902 MRR 0.657 · 2 → 0.906/0.663 ← 채택 ·
+# 3 → 0.898/0.667 (1위 적중은 더 오르지만 상위 10 회수가 깎인다 — 에이전트에게
+# 건네는 근거에 정답이 있느냐가 먼저다).
+_LABEL_WEIGHT = 2
 # refs = 그 파일이 정의하진 않았지만 다루는 이름들. 사람은 그 이름으로 찾는다.
 # labels = 그 파일이 화면에 보여 주는 한글. 사용자는 UI에 적힌 말로 요청한다.
 _META_KEYS = ("summary", "doc", "package", "route_path", "module", "service",
@@ -126,7 +131,8 @@ def node_terms(node: dict) -> list[str]:
         if isinstance(value, str) and value:
             # 선언한 가중을 실제로 적용한다. 전에는 _FIELD_WEIGHT["meta"]를 적어 두고
             # 쓰지 않아, 의미층(요약·문서)의 무게를 조절할 손잡이가 없는 상태였다.
-            terms.extend(tokenize(value) * _FIELD_WEIGHT["meta"])
+            weight = _LABEL_WEIGHT if key == "labels" else _FIELD_WEIGHT["meta"]
+            terms.extend(tokenize(value) * weight)
     return terms
 
 
