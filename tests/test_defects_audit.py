@@ -1772,3 +1772,31 @@ class DenseAlsoReadsKoreanLabelsTest(unittest.TestCase):
         self.assertEqual(_LABEL_CHARS, 300)
         source = Path("xgen_maker/kg/dense.py").read_text(encoding="utf-8")
         self.assertIn("0.547", source)
+
+
+class ConfigFilesGetKoreanTooTest(unittest.TestCase):
+    """회귀: 한글 색인을 코드 추출기 3개에만 붙이고 설정·문서를 빠뜨렸다.
+
+    README·서비스 설명·설정 주석이 한글인데 그 파일들만 조용히 안 잡혔다.
+    127개 파일이 한글을 갖게 되자 R@10 0.883 → 0.902 (네 분할 모두 개선/유지).
+    """
+
+    def test_markdown_korean_is_indexed(self):
+        from xgen_maker.kg.extract_config import extract_config_file
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "README.md").write_text(
+                "# 다운로드 센터\n\n설치 파일 목록을 관리한다.\n", encoding="utf-8")
+            g = Graph()
+            g.add_node("r", "repo", "r", "r", str(root))
+            extract_config_file(g, "r", root, "README.md")
+            labels = (g.nodes["r:README.md"]["meta"] or {}).get("labels", "")
+        self.assertIn("다운로드", labels)
+        self.assertIn("설치", labels)
+
+    def test_every_extractor_collects_labels(self):
+        """하나라도 빠지면 그 종류의 파일만 조용히 검색에서 사라진다."""
+        for name in ("extract_python", "extract_typescript", "extract_rust",
+                     "extract_config"):
+            source = Path(f"xgen_maker/kg/{name}.py").read_text(encoding="utf-8")
+            self.assertIn("collect_labels", source, f"{name}이 한글을 안 담는다")

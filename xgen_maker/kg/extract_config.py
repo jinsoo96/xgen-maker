@@ -92,5 +92,12 @@ def extract_config_file(graph: Graph, repo: str, repo_root: Path, rel: str,
         if keys:
             # 무엇이 적혀 있는지로도 이 파일을 찾을 수 있어야 한다.
             meta["refs"] = " ".join(keys)
+    # 설정·문서에도 한글이 있다. README·서비스 설명·주석이 그렇고, 사용자는 그 말로
+    # 요청한다. 코드 추출기에만 붙이고 여기를 빠뜨리면 그 파일들만 조용히 안 잡힌다.
+    if len(source) <= _MAX_BYTES:
+        from .refs import collect_labels
+        labels = collect_labels(source)
+        if labels:
+            meta["labels"] = " ".join(labels)
     graph.add_node(file_id, "file", Path(rel).name, repo, rel, **meta)
     graph.add_edge(repo, file_id, "contains")
