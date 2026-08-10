@@ -117,10 +117,12 @@ class MakerLoop:
         return {"outcome": "answered", "answer": answer,
                 "landing": landing[:10], "code_cited": bool(legacy)}
 
-    def _dense_hits(self, query: str, config) -> list[dict]:
+    def _dense_hits(self, query: str, config, diag: dict | None = None) -> list[dict]:
         """의미 검색 결과. 주소가 없거나 색인이 없으면 빈 목록(= 이 층 없음)."""
         base = getattr(config, "embed_base", "")
         if not base:
+            if diag is not None:
+                diag["reason"] = "임베딩 주소 미설정 — 어휘 검색만 사용"
             return []
         index = getattr(self, "_dense", None)
         if index is None:
@@ -130,9 +132,12 @@ class MakerLoop:
                 return []           # numpy 없는 환경 — 어휘 검색만으로 간다
             index = self._dense = DenseIndex(getattr(config, "dense_path", ""))
         if not index.ready:
+            if diag is not None:
+                diag["reason"] = "벡터 색인 없음 — kg embed로 만드세요"
             return []
         return index.search(self.graph, query, base,
-                            getattr(config, "embed_model", ""), k=_LEXICAL_MATERIAL)
+                            getattr(config, "embed_model", ""), k=_LEXICAL_MATERIAL,
+                            diag=diag)
 
     def _legacy_notes(self, landing: list[dict], work_repo: str = "",
                       work_path: Path | None = None) -> str:
@@ -357,13 +362,20 @@ class MakerLoop:
         # 어휘 검색은 질의의 낱말이 코드에 있어야 찾는다. 실제 요청은 그렇지 않다
         # ("관리자 SQL 콘솔의 role·user 컬럼 오탐 제거"의 답에는 그 낱말이 없다).
         # 주소가 없거나 서버가 죽었으면 이 층은 통째로 건너뛴다 — 착지는 그대로 된다.
-        semantic = self._dense_hits(query, config)
+        dense_diag: dict = {}
+        semantic = self._dense_hits(query, config, dense_diag)
         if semantic:
             # 어휘 머리를 보존하지 않는다. 의미 검색이 섞이면 그쪽 1위가 더 정확했다
             # (실측 265건: 머리 보존 R@1 0.415 → 보존 안 함 0.483).
             landing = _fuse(landing[:_LEXICAL_MATERIAL], semantic, k=8, head=0)
             journal.event("dense_search", "ok", hits=len(semantic))
         else:
+            # 설정해 놓고 못 쓴 것과 아예 안 쓴 것은 다르다. 서버가 죽었으면
+            # 착지가 어제와 달라지는데, 조용하면 그 이유를 영영 모른다.
+            reason = dense_diag.get("reason", "")
+            journal.event("dense_search",
+                          "skipped" if "미설정" in reason else "unavailable",
+                          note=reason or "의미 검색을 쓰지 않았습니다")
             landing = landing[:8]
         journal.event("kg_search", "ok" if landing else "empty",
                       hits=[{"id": n["id"], "kind": n["kind"], "score": n["score"]}

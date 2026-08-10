@@ -140,12 +140,24 @@ class DenseIndex:
     # ---- 질의 ----
 
     def search(self, graph: Graph, query: str, base: str, model: str,
-               k: int = 10) -> list[dict]:
-        if not self.ready or not base:
+               k: int = 10, diag: dict | None = None) -> list[dict]:
+        """의미 검색 결과. 못 하면 빈 목록 — 다만 왜 못 했는지는 남긴다.
+
+        "안 쓴 것"과 "쓰려다 실패한 것"이 똑같이 빈 목록이면, 서버가 죽어도 화면에는
+        아무 표시가 없다. 어제와 오늘의 착지가 달라졌는데 이유를 알 길이 없다.
+        """
+        def _why(reason: str) -> list[dict]:
+            if diag is not None:
+                diag["reason"] = reason
             return []
+
+        if not base:
+            return _why("임베딩 주소 미설정 — 어휘 검색만 사용")
+        if not self.ready:
+            return _why(f"벡터 색인 없음({self.path.name}) — kg embed로 만드세요")
         vector = embed_texts(base, model, [_INSTRUCT.format(query=query)], timeout=30)
         if not vector:
-            return []
+            return _why("임베딩 서버 응답 없음 — 이 요청은 어휘 검색만으로 착지합니다")
         import numpy as np
         needle = np.asarray(vector[0], dtype="float32")
         needle /= (np.linalg.norm(needle) + 1e-9)

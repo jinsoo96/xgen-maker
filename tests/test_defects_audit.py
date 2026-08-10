@@ -1910,3 +1910,39 @@ class TestPenaltyIsNotMetricGamedTest(unittest.TestCase):
         asked = search(g, "upload document test", k=2)
         self.assertFalse(plain[0]["path"].startswith("tests/"))
         self.assertTrue(any(h["path"].startswith("tests/") for h in asked))
+
+
+class DenseFailureIsVisibleTest(unittest.TestCase):
+    """회귀: 의미 검색이 왜 안 도는지 아무도 몰랐다.
+
+    이 층은 없어도 착지가 되므로, 서버가 죽어도 실행은 성공으로 보인다. 그러면 착지
+    품질만 조용히 내려간다(R@10 0.809 → 0.777). '안 쓴 것'과 '쓰려다 실패한 것'을
+    구분해 말해야 한다.
+    """
+
+    def _index(self):
+        from xgen_maker.kg.dense import DenseIndex
+        return DenseIndex("kg/vectors.npz")
+
+    def test_missing_address_says_so(self):
+        diag = {}
+        self._index().search(Graph(), "q", "", "m", diag=diag)
+        self.assertIn("미설정", diag.get("reason", ""))
+
+    def test_dead_server_says_so(self):
+        index = self._index()
+        if not index.ready:
+            self.skipTest("벡터 색인 없음")
+        diag = {}
+        index.search(Graph(), "q", "http://127.0.0.1:1/v1", "m", diag=diag)
+        self.assertIn("응답 없음", diag.get("reason", ""))
+
+    def test_pipeline_reports_the_reason(self):
+        source = Path("xgen_maker/loop/pipeline.py").read_text(encoding="utf-8")
+        self.assertIn('"unavailable"', source, "실패를 skipped와 같게 적으면 안 된다")
+        self.assertIn("dense_diag", source)
+
+    def test_doctor_checks_the_endpoint(self):
+        source = Path("xgen_maker/doctor.py").read_text(encoding="utf-8")
+        self.assertIn("의미 검색", source)
+        self.assertIn("임베딩 서버 미응답", source)

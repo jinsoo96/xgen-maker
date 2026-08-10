@@ -119,6 +119,34 @@ def run_doctor(config_path: str | None = None) -> bool:
         else:
             check.warn("의미층", "요약 없음 — maker kg enrich 필요")
 
+    # 목적 3-1: 의미 검색 — 켜 놓고 못 쓰는 상태를 화면에서 잡는다.
+    # 이 층은 없어도 착지가 되므로, 서버가 죽어도 실행은 성공으로 보인다.
+    # 그러면 착지 품질만 조용히 내려간다(R@10 0.809 → 0.777).
+    embed_base = getattr(config, "embed_base", "")
+    if not embed_base:
+        check.warn("의미 검색", "주소 미설정 — 어휘 검색만 사용(R@10 0.809 → 0.777)")
+    else:
+        try:
+            from .kg.dense import DenseIndex, embed_texts
+            index = DenseIndex(getattr(config, "dense_path", ""))
+            probe = embed_texts(embed_base, getattr(config, "embed_model", ""),
+                                ["probe"], timeout=15)
+            if not index.ready:
+                check.fail("의미 검색", "주소는 있는데 벡터 색인이 없음 — maker kg embed")
+            elif probe is None:
+                check.fail("의미 검색",
+                           f"색인 {len(index.ids):,}개는 있으나 임베딩 서버 미응답 "
+                           f"— 이 상태로도 실행은 성공으로 보인다")
+            else:
+                stale = len(graph.nodes) - len(index.ids) if graph is not None else 0
+                note = f"벡터 {len(index.ids):,}개 · 서버 응답 OK"
+                if graph is not None and stale > len(graph.nodes) * 0.02:
+                    check.warn("의미 검색", note + f" · 그래프보다 {stale:,}개 적음 — kg embed")
+                else:
+                    check.ok("의미 검색", note)
+        except Exception as error:            # noqa: BLE001 — 점검이 doctor를 깨지 않게
+            check.fail("의미 검색", str(error)[:80])
+
     # 목적 3-2: 인가 게이트 — act(실 push/MR)는 인가된 xgen 작업자만
     try:
         from .loop.authz import is_placeholder_target
