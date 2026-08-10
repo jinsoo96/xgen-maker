@@ -930,8 +930,8 @@ class TestTunedValuesCarryTheirEvidence(unittest.TestCase):
 
     def test_length_normalisation_records_its_evidence(self):
         source = Path("xgen_maker/kg/rank.py").read_text(encoding="utf-8")
-        self.assertIn("_B = 0.2", source)
-        self.assertIn("256", source, "이 값을 어느 표본에서 정했는지 근거가 없다")
+        self.assertIn("_B = 0.0", source)
+        self.assertIn("2,412", source, "이 값을 어느 표본에서 정했는지 근거가 없다")
         self.assertIn("작은 표본으로 이 값을 정하지 말 것", source)
 
     def test_refs_cap_records_its_evidence(self):
@@ -958,9 +958,9 @@ class TestTunedValuesCarryTheirEvidence(unittest.TestCase):
     def test_fusion_material_is_evidence_backed(self):
         """재료 개수는 훑어서 정했다 — 많이 넣을수록 좋을 것 같지만 아니다."""
         from xgen_maker.loop.pipeline import _LEXICAL_MATERIAL
-        self.assertEqual(_LEXICAL_MATERIAL, 12)
+        self.assertEqual(_LEXICAL_MATERIAL, 16)
         source = Path("xgen_maker/loop/pipeline.py").read_text(encoding="utf-8")
-        self.assertIn("0.845", source)
+        self.assertIn("2,412", source, "어느 표본에서 정했는지 근거가 없다")
 
 
 class TestLandingStaysSpecific(unittest.TestCase):
@@ -1120,8 +1120,8 @@ class CompanionFilesTest(unittest.TestCase):
         self.assertIn("고쳐야 한다는 뜻이 아니다", block)
 
 
-class RepoSizeDoesNotBuyRankTest(unittest.TestCase):
-    """회귀: 큰 저장소가 '맞아서'가 아니라 '커서' 이겼다.
+class RepoSizeDampingWasSampleBiasTest(unittest.TestCase):
+    """다시 하지 말 것: 크기 보정은 표본 치우침을 메우던 값이었다.
 
     IDF는 코퍼스 전체에서 재므로 노드가 많은 저장소는 어떤 점수대에서든 뽑힐 기회가
     많다. 실측에서 노드 35.1%인 저장소가 정답은 12.5%인데 1위는 28.7%였다.
@@ -1137,19 +1137,16 @@ class RepoSizeDoesNotBuyRankTest(unittest.TestCase):
                            "function", "upload_document_handler", repo, path, 1)
         return g
 
-    def test_equal_matches_are_not_decided_by_repo_size(self):
-        """같은 이름이 양쪽에 있으면 큰 저장소가 상위를 독식하면 안 된다."""
-        hits = search(self._graph(), "upload document handler", k=10)
-        repos = [h["repo"] for h in hits]
-        self.assertIn("small", repos,
-                      "작은 저장소가 동일 매치인데도 상위 10에서 밀렸다")
+    def test_the_knob_is_gone(self):
+        """다시 하지 말 것 — 쓰지 않는 손잡이를 남기면 다음 사람이 다시 켠다."""
+        import xgen_maker.kg.rank as rank_mod
+        self.assertFalse(hasattr(rank_mod, "_REPO_SIZE_DAMP"))
 
-    def test_damping_is_evidence_backed(self):
-        """값을 조용히 바꾸지 못하게 못박는다 — 네 분할 검증으로 고른 값이다."""
-        from xgen_maker.kg import rank
-        self.assertEqual(rank._REPO_SIZE_DAMP, 0.1)
+    def test_the_reason_is_recorded(self):
+        """294건에서는 이득이었다 — 그 표본이 작은 저장소에 치우쳐 있었을 뿐이다."""
         source = Path("xgen_maker/kg/rank.py").read_text(encoding="utf-8")
-        self.assertIn("네 분할", source, "근거 없이 상수를 두지 않는다")
+        self.assertIn("표본 치우침을 메우던 값", source)
+        self.assertIn("2,412", source)
 
 
 class ClaudeCliPromptSurvivesNewlinesTest(unittest.TestCase):
