@@ -4,8 +4,8 @@
 
 **Ask in plain language. Get a reviewable merge request — grounded in a knowledge graph of your own code.**
 
-[![tests](https://img.shields.io/badge/tests-558%20passing-3aa8c9)](#testing)
-[![retrieval](https://img.shields.io/badge/landing%20R%4010-0.867-3aa8c9)](#measured-not-asserted)
+[![tests](https://img.shields.io/badge/tests-567%20passing-3aa8c9)](#testing)
+[![retrieval](https://img.shields.io/badge/landing%20R%4010-0.868-3aa8c9)](#measured-not-asserted)
 [![python](https://img.shields.io/badge/python-3.12%2B-3aa8c9)](#requirements)
 [![deps](https://img.shields.io/badge/dependencies-stdlib%20first-3aa8c9)](#requirements)
 [![license](https://img.shields.io/badge/license-private-8894a0)](#license)
@@ -65,22 +65,23 @@ MAKER is evaluated the only way that means anything: against **merge requests th
 merged**. Each MR title becomes the request; the files that MR changed are the ground truth. If
 MAKER lands where the team actually worked, retrieval is right.
 
-The benchmark is **2,412 merged MRs the tuning has never seen**, drawn from every repository in
-the platform. Excluded up front, for reasons that are properties of the data rather than of the
-ranker: release trains and branch-merge commits (their titles carry no intent), titles that recur
-with different answers (one query, several truths), and MRs that only touch files the graph does
-not index.
+The benchmark is **2,587 merged MRs the tuning has never seen**, drawn from every repository in
+the platform. Exclusions are declared, counted, and tested — not quietly applied. From 4,155 collected MRs:
+667 touch only files the graph does not index, 343 share a title with a different answer (one
+query, several truths), 217 are release trains or branch merges, 101 have titles too short to be
+a request. Each rule is a property of the data, not of the ranker, and each has a regression test
+so the definition cannot drift.
 
 The graph is built from *today's* code, so an old MR describes a place that has since moved.
 Scores track that distance, which is why the window is stated rather than hidden:
 
 | Metric | Lexical only | **Hybrid, tuned** |
 |---|---|---|
-| Landing is exactly right (R@1) | 0.371 | **0.458** |
-| Answer in the agent's evidence list (R@10) | 0.777 | **0.809** |
-| …restricted to MRs merged in the last ~3 months | — | **0.867** |
-| MRR | 0.505 | **0.573** |
-| MR's changed files fully covered | — | **46.2%** (65.4% average) |
+| Landing is exactly right (R@1) | 0.371 | **0.455** |
+| Answer in the agent's evidence list (R@10) | 0.777 | **0.813** |
+| …restricted to MRs merged in the last ~3 months | — | **0.868** |
+| MRR | 0.505 | **0.572** |
+| MR's changed files fully covered | — | **47.3%** (66.2% average) |
 
 Every ranking constant was re-checked against this set. Three had to move: they had been fitted
 to an earlier 294-MR sample whose answers happened to sit in small repositories (14% and 13% of
@@ -88,9 +89,13 @@ answers in repositories holding 1.0% and 3.6% of the graph). One of them — a r
 correction — was removed entirely, because on a representative sample there is no skew left to
 correct. The measurement that justified each surviving value is written next to it.
 
-Not every measurable gain is kept. Loosening the penalty on test files raises R@1 from 0.458 to
-0.467 — but only because the benchmark counts a hit on *any* file the MR touched, and test files
-are easy to find. Score the implementation files alone and the same change makes it worse
+Tuning runs against a stratified 600-MR slice that preserves the repository and month mix, which
+is four times faster; it is only trusted because it ranks the candidate values in the same order
+as the full set, and that agreement is itself checked.
+
+Not every measurable gain is kept. Loosening the penalty on test files raises R@1 by nine points
+— but only because the benchmark counts a hit on *any* file the MR touched, and test files are
+easy to find. Score the implementation files alone and the same change makes it worse
 (0.455 → 0.448). The penalty stayed where it was, and the trap is written next to it.
 
 **Graph quality is audited against the repositories themselves**, not assumed:
@@ -125,8 +130,11 @@ are easy to find. Score the implementation files alone and the same change makes
 ```
 
 The semantic layer is **optional and off by default**. Point it at any OpenAI-compatible
-embedding endpoint and it turns on; if the endpoint is unreachable, landing quietly falls back to
-lexical. Nothing that worked yesterday stops working because a server is down.
+embedding endpoint and it turns on; if the endpoint is unreachable, landing falls back to lexical
+so nothing that worked yesterday stops working. It does not fall back *silently*, though —
+"not configured" and "configured but unreachable" are different states, and the run log and
+`maker doctor` say which one you are in. A layer that can vanish without a word is a layer whose
+absence you discover from a bad answer.
 
 ### Pipeline
 
@@ -293,7 +301,7 @@ MAKER is designed to be *boring* in production.
 python -m pytest -q
 ```
 
-558 tests covering the graph extractors, incremental-sync equivalence, retrieval ranking, safety
+567 tests covering the graph extractors, incremental-sync equivalence, retrieval ranking, safety
 guards, the convergence loop end-to-end over a real temporary repository, and the dashboard
 endpoints.
 

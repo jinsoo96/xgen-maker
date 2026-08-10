@@ -1,111 +1,68 @@
-"""남은 실패를 하나씩 들여다본다 — 고칠 수 있는 것과 원리적으로 못 맞히는 것을 가른다.
+"""남은 실패를 들여다본다 — 고칠 수 있는 것과 원리적으로 못 맞히는 것을 가른다.
 
-지표만 보면 "41건 남았다"로 끝나지만, 그 41건이 같은 종류가 아니다. 질의에 애초에
+지표만 보면 "N건 남았다"로 끝나지만, 그 N건이 같은 종류가 아니다. 질의에 애초에
 단서가 없는 것과, 단서가 있는데 못 찾는 것은 다른 일이다. 후자만 고칠 수 있다.
+
+표본 정의와 착지는 bench.py(정본)를 쓴다 — 여기서 다시 정의하면 두 수치가 어긋난다.
 """
+import collections
 import json
 import pathlib
-import re
 import sys
 
-import numpy as np
-
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-import sweep256 as S
-from xgen_maker.kg.graph import Graph
-from xgen_maker.kg.search import lexicon, search as ksearch
-from xgen_maker.kg.lexicon import bridge_terms
-from xgen_maker.kg.dense import DenseIndex
+from bench import Benchmark, BENCH, describe
 from xgen_maker.kg.rank import tokenize, node_terms
-from xgen_maker.loop.pipeline import _fuse, _LEXICAL_MATERIAL
-from xgen_maker.kg.anchor import find_anchors, expand as aexp, rank_within
-
-BENCH = pathlib.Path(__file__).resolve().parent.parent / "bench"
-BOOK = re.compile(r"^\s*(?:revert\b|merge\s+(?:branch|remote)\b|\[release\]|release[:/ ])"
-                  r"|develop\s*(?:→|->)\s*(?:stage|stg|main|master)", re.I)
-
-
-def build():
-    graph = Graph.load(pathlib.Path("kg/merged.json"))
-    routes = json.loads((BENCH / "mr_shipped_routes.json").read_text(encoding="utf-8"))
-    index = DenseIndex("kg/vectors.npz")
-    with np.load(BENCH / "query_vectors_instruct.npz", allow_pickle=True) as store:
-        qvecs = {q: v for q, v in zip(store["queries"], store["vectors"])}
-    lex = lexicon(graph)
-    material = _LEXICAL_MATERIAL
-
-    def lexical(query, k):
-        hint = routes.get(query, "")
-        keywords = S.kw_of(query)
-        merged = f"{keywords} {bridge_terms(lex, query)}".strip() or query
-        hits = _fuse(ksearch(graph, query, k=24, hint_repo=hint),
-                     ksearch(graph, merged, k=24, hint_repo=hint), k=k, head=1)
-        anchors = find_anchors(graph, query, keywords)
-        if anchors:
-            within = rank_within(aexp(graph, anchors), query, keywords, k=24)
-            if within:
-                hits = _fuse(within, hits, k=k)
-        return hits
-
-    def dense(query, k):
-        vector = np.asarray(qvecs[query], dtype=np.float32)
-        vector /= np.linalg.norm(vector) + 1e-9
-        scores = index._matrix @ vector
-        top = np.argsort(-scores)[:k]
-        return [{"score": float(scores[i]), **graph.nodes[index.ids[i]]}
-                for i in top if index.ids[i] in graph.nodes]
-
-    def land(query, k=10):
-        return _fuse(lexical(query, material), dense(query, material), k=k, head=0)
-
-    return graph, land, lexical, dense, routes
 
 
 def main() -> None:
-    graph, land, lexical, dense, routes = build()
-    cases = [c for c in S.CASES if not BOOK.search(c["q"])]
+    bench = Benchmark()
+    print(describe(bench), flush=True)
+    scope = bench.stratified(int(sys.argv[1]) if len(sys.argv) > 1 else 600)
+    print(f"층화 표본 {len(scope)}건으로 실패를 살펴본다\n", flush=True)
+
     path_repo = {}
-    for node in graph.nodes.values():
+    for node in bench.graph.nodes.values():
         if node.get("path"):
             path_repo.setdefault(node["path"], node.get("repo"))
 
     rows = []
-    for case in cases:
-        hits = land(case["q"], 10)
-        if any((h.get("path") or "") in case["files"] for h in hits):
+    for case in scope:
+        query = case["title"]
+        if any((h.get("path") or "") in case["files"] for h in bench.land(query)):
             continue
-        deep = land(case["q"], 300)
+        deep = bench.land(query, 300)
         rank = next((i for i, h in enumerate(deep, 1)
                      if (h.get("path") or "") in case["files"]), None)
-        lex_rank = next((i for i, h in enumerate(lexical(case["q"], 300), 1)
-                         if (h.get("path") or "") in case["files"]), None)
-        den_rank = next((i for i, h in enumerate(dense(case["q"], 300), 1)
-                         if (h.get("path") or "") in case["files"]), None)
-        target_repos = {path_repo.get(f) for f in case["files"]} - {None}
-        got_repo = hits[0].get("repo") if hits else ""
-        query_words = set(tokenize(case["q"]) + tokenize(S.kw_of(case["q"])))
-        target_words = set()
-        for node in graph.nodes.values():
+        words = set(tokenize(query) + tokenize(bench.expansions.get(query, "")))
+        target = set()
+        for node in bench.graph.nodes.values():
             if (node.get("path") or "") in case["files"]:
-                target_words |= set(node_terms(node))
-        rows.append({
-            "q": case["q"], "files": sorted(case["files"]),
-            "rank": rank, "lex": lex_rank, "dense": den_rank,
-            "repo_ok": got_repo in target_repos,
-            "shared": len(query_words & target_words),
-            "hint": routes.get(case["q"], ""),
-            "hint_ok": routes.get(case["q"], "") in target_repos,
-        })
+                target |= set(node_terms(node))
+        target_repos = {path_repo.get(f) for f in case["files"]} - {None}
+        rows.append({"title": query, "files": sorted(case["files"]),
+                     "repo": case.get("repo", ""), "merged_at": case.get("merged_at", ""),
+                     "rank": rank, "shared": len(words & target),
+                     "hint": bench.routes.get(query, ""),
+                     "hint_ok": bench.routes.get(query, "") in target_repos})
 
-    print(f"실패 {len(rows)}건 / 전체 {len(cases)}건\n")
-    print(f"{'융합':>5} {'어휘':>5} {'의미':>5} {'레포':>4} {'힌트':>4} {'공유어':>5}  질의")
-    for r in sorted(rows, key=lambda x: (x["rank"] or 9999)):
-        print(f"{str(r['rank'] or '-'):>5} {str(r['lex'] or '-'):>5} "
-              f"{str(r['dense'] or '-'):>5} {'O' if r['repo_ok'] else 'X':>4} "
-              f"{'O' if r['hint_ok'] else 'X':>4} {r['shared']:>5}  {r['q'][:52]}")
-        print(f"{'':>27}    정답: {r['files'][0][:58]}")
-
-    pathlib.Path(BENCH / "failures.json").write_text(
+    kinds = collections.Counter()
+    for row in rows:
+        first = row["files"][0]
+        kinds["프론트" if first.startswith(("features/", "apps/", "packages/"))
+              else "설정·매니페스트" if first.endswith((".toml", ".yaml", ".yml", ".json", ".md"))
+              else "백엔드" if first.startswith(("controller/", "service/", "backend/",
+                                              "src/", "editor/"))
+              else "기타"] += 1
+    nowhere = [r for r in rows if not r["rank"]]
+    print(f"실패 {len(rows)}/{len(scope)}건 ({len(rows)/max(len(scope),1):.1%}) · {dict(kinds)}")
+    print(f"  300위 안에도 없음 {len(nowhere)}건 · 레포 힌트 맞음 "
+          f"{sum(1 for r in rows if r['hint_ok'])}건")
+    print("\n단서가 가장 적은 것들:")
+    for row in sorted(rows, key=lambda r: r["shared"])[:8]:
+        print(f"  공유어{row['shared']:2} [{row['rank'] or '-'}위] {row['title'][:46]}")
+        print(f"        → {row['files'][0][:56]}")
+    (BENCH / "failures.json").write_text(
         json.dumps(rows, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
