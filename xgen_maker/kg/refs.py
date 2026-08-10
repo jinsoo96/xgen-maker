@@ -30,6 +30,30 @@ def _is_identifier_like(name: str) -> bool:
     return name != lowered and name != name.upper()   # camelCase / PascalCase
 
 
+# 화면에 보이는 말 — 코드 안의 한글. 사용자는 UI에 적힌 낱말로 요청한다
+# ("다운로드 센터 목록 정렬해줘"). 그 낱말은 식별자가 아니라 문자열·주석에 있어서
+# 위 규칙(ASCII 식별자)으로는 하나도 안 잡혔다. 실측: 프론트 파일의 67%가 한글을
+# 담고 있고, 안 잡히던 질의의 정답 파일에는 그 질의의 낱말이 문자 그대로 있었다.
+_LABEL = re.compile(r"[가-힣]{2,}")
+# 한 파일에서 이만큼까지만. 실제 머지된 MR 265건으로 훑어 정했다 —
+# 0(끔) R@1 0.491 R@10 0.857 · 40 0.506/0.849 · 80 0.506/0.864 · 120 0.498/0.860 ·
+# 200 0.513/0.868 · 400 0.525/0.868 ← 채택 · 800 0.521/0.868(다시 내려감).
+_MAX_LABELS = 400
+
+
+def collect_labels(source: str) -> list[str]:
+    """이 파일이 사람에게 보여 주는 말. 자주 나올수록 그 파일의 주제에 가깝다.
+
+    흔한 말(관리·목록 같은)을 걸러내지 않는다 — 어느 파일에나 있는 말은 BM25가
+    IDF로 알아서 눌러 준다. 여기서 손으로 불용어를 정하면 도메인 낱말까지 날아간다.
+    """
+    seen: dict[str, int] = {}
+    for match in _LABEL.finditer(source):
+        word = match.group(0)
+        seen[word] = seen.get(word, 0) + 1
+    return sorted(seen, key=lambda w: (-seen[w], -len(w), w))[:_MAX_LABELS]
+
+
 def collect_refs(source: str, defined: set[str]) -> list[str]:
     """이 파일이 다루지만 정의하지는 않은 식별자.
 

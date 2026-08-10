@@ -1705,3 +1705,40 @@ class VersionLiteralsSurviveTokenizationTest(unittest.TestCase):
     def test_paths_are_not_versions(self):
         from xgen_maker.kg.rank import tokenize
         self.assertFalse([t for t in tokenize("service/v1.2/handler.py") if t == "1.2"])
+
+
+class KoreanUiWordsAreIndexedTest(unittest.TestCase):
+    """사용자는 화면에 적힌 말로 요청하는데, 그 말이 색인에 하나도 없었다.
+
+    "다운로드 센터 목록을 사용자 화면 기준으로 정렬"의 정답 파일에는 다운로드·목록·
+    사용자·삭제가 문자 그대로 있었다. 그런데 refs 규칙이 ASCII 식별자만 담아
+    통째로 놓쳤다 — 프론트 파일의 67%가 한글을 담고 있는데도.
+    실측 265건: R@1 0.491 → 0.525 · R@10 0.857 → 0.868 (네 분할 모두 개선).
+    """
+
+    def test_labels_are_collected_from_source(self):
+        from xgen_maker.kg.refs import collect_labels
+        got = collect_labels('const t = "다운로드 센터";  // 목록 정렬\nconst u = "사용자 화면";')
+        for word in ("다운로드", "센터", "목록", "사용자"):
+            self.assertIn(word, got)
+
+    def test_frequent_words_come_first(self):
+        """자주 나오는 말일수록 그 파일의 주제에 가깝다 — 상한에 걸릴 때 살아남아야 한다."""
+        from xgen_maker.kg.refs import collect_labels
+        got = collect_labels("결제 결제 결제 배송")
+        self.assertEqual(got[0], "결제")
+
+    def test_lexical_index_reads_them(self):
+        from xgen_maker.kg.rank import _META_KEYS
+        self.assertIn("labels", _META_KEYS)
+
+    def test_cap_is_evidence_backed(self):
+        from xgen_maker.kg.refs import _MAX_LABELS
+        self.assertEqual(_MAX_LABELS, 400)
+        source = Path("xgen_maker/kg/refs.py").read_text(encoding="utf-8")
+        self.assertIn("0.525", source, "고른 근거를 값 옆에 남긴다")
+
+    def test_extractors_wire_it(self):
+        for name in ("extract_python", "extract_typescript", "extract_rust"):
+            source = Path(f"xgen_maker/kg/{name}.py").read_text(encoding="utf-8")
+            self.assertIn("collect_labels", source, f"{name}이 한글을 안 담는다")

@@ -90,8 +90,9 @@ _CENTRALITY_WEIGHT = 0.5
 # 에이전트에게 건네는 근거 목록에 정답이 있느냐가 작업 성패를 가르므로 회수를 지킨다.
 _FIELD_WEIGHT = {"name": 3, "path": 2, "repo": 1, "kind": 1, "meta": 1}
 # refs = 그 파일이 정의하진 않았지만 다루는 이름들. 사람은 그 이름으로 찾는다.
+# labels = 그 파일이 화면에 보여 주는 한글. 사용자는 UI에 적힌 말로 요청한다.
 _META_KEYS = ("summary", "doc", "package", "route_path", "module", "service",
-              "handler", "refs")
+              "handler", "refs", "labels")
 
 
 def tokenize(text: str) -> list[str]:

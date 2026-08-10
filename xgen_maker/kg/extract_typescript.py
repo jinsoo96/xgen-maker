@@ -118,11 +118,13 @@ def extract_ts_file(graph: Graph, repo: str, repo_root: Path, rel: str,
         graph.add_edge(file_id, call_id, "contains")
 
     # 이 파일이 '다루는' 이름도 색인한다(정의부는 심볼 노드가 담는다).
-    from .refs import collect_refs
+    from .refs import collect_refs, collect_labels
     defined = {m.group(2) for m in _EXPORT_RE.finditer(source)}
     refs = collect_refs(source, defined)
-    if refs:
-        graph.add_node(file_id, "file", Path(rel).name, repo, rel, refs=" ".join(refs))
+    labels = collect_labels(source)
+    if refs or labels:
+        graph.add_node(file_id, "file", Path(rel).name, repo, rel,
+                       refs=" ".join(refs), labels=" ".join(labels))
 
     # 호출 이름을 모아 둔다 — 저장소 함수가 다 들어온 뒤 link_calls가 해소(파일 간 호출).
     from .calls import record_calls

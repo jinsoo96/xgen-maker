@@ -114,12 +114,14 @@ def extract_python_file(graph: Graph, repo: str, repo_root: Path, rel: str,
     walk_body(tree.body, file_id)
 
     # 이 파일이 '다루는' 이름도 색인한다 — 정의부는 심볼 노드가 이미 담으므로 제외한다.
-    from .refs import collect_refs
+    from .refs import collect_refs, collect_labels
     defined = {n.name for n in ast.walk(tree)
                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
     refs = collect_refs(source, defined)
-    if refs:
-        graph.add_node(file_id, "file", Path(rel).name, repo, rel, refs=" ".join(refs))
+    labels = collect_labels(source)
+    if refs or labels:
+        graph.add_node(file_id, "file", Path(rel).name, repo, rel,
+                       refs=" ".join(refs), labels=" ".join(labels))
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
