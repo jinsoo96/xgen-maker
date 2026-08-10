@@ -1742,3 +1742,33 @@ class KoreanUiWordsAreIndexedTest(unittest.TestCase):
         for name in ("extract_python", "extract_typescript", "extract_rust"):
             source = Path(f"xgen_maker/kg/{name}.py").read_text(encoding="utf-8")
             self.assertIn("collect_labels", source, f"{name}이 한글을 안 담는다")
+
+
+class DenseAlsoReadsKoreanLabelsTest(unittest.TestCase):
+    """이름·경로가 영어라 의미 모델이 한글 요청과 이을 다리가 없었다.
+
+    admin-install-files ↔ "다운로드 센터"를 이어 주는 것은 그 파일 안의 UI 문구뿐이다.
+    실측 265건: R@1 0.525 → 0.547 · R@10 0.868 → 0.883 (분할 A·C·D 개선, B 유지).
+    """
+
+    def test_labels_reach_the_embedding_text(self):
+        from xgen_maker.kg.dense import node_text
+        text = node_text({"kind": "file", "name": "AdminInstallFiles.tsx", "repo": "fe",
+                          "path": "features/admin-install-files/src/index.tsx",
+                          "meta": {"labels": "다운로드 센터 목록 사용자"}})
+        self.assertIn("다운로드 센터", text)
+        self.assertIn("admin-install-files", text, "경로도 그대로 남는다")
+
+    def test_labels_do_not_replace_the_docstring(self):
+        """둘 다 신호다 — 하나가 다른 하나를 밀어내면 안 된다."""
+        from xgen_maker.kg.dense import node_text
+        text = node_text({"kind": "function", "name": "f", "repo": "r", "path": "a.py",
+                          "meta": {"doc": "결제를 취소한다", "labels": "취소 버튼"}})
+        self.assertIn("결제를 취소한다", text)
+        self.assertIn("취소 버튼", text)
+
+    def test_char_budget_is_evidence_backed(self):
+        from xgen_maker.kg.dense import _LABEL_CHARS
+        self.assertEqual(_LABEL_CHARS, 300)
+        source = Path("xgen_maker/kg/dense.py").read_text(encoding="utf-8")
+        self.assertIn("0.547", source)

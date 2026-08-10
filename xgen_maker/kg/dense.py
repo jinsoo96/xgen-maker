@@ -23,6 +23,9 @@ from .graph import Graph
 _SKIP_KINDS = frozenset({"repo"})
 _BATCH = 128
 _DOC_CHARS = 400
+# 화면 문구를 임베딩에 실을 분량. 300자가 700자보다 근소하게 나았다
+# (R@1 0.547 vs 0.543 · R@10 동일). 길게 실으면 그 파일의 주제가 흐려진다.
+_LABEL_CHARS = 300
 # Qwen3-Embedding 계열의 표준 사용법: 문서는 원문 그대로, 질의만 "무엇을 찾는지"를
 # 앞에 적는다. 실측(실제 머지된 MR): 지시문 없이 R@1 0.447 → 붙이면 0.518.
 _INSTRUCT = ("Instruct: 개발 요청을 읽고 고쳐야 할 소스 코드 위치를 찾는다\n"
@@ -50,6 +53,11 @@ def node_text(node: dict) -> str:
         if isinstance(value, str) and value.strip():
             parts.append(value.strip()[:_DOC_CHARS])
             break
+    # 화면에 적힌 한글도 넣는다. 사용자는 그 말로 요청하는데, 이름·경로는 영어라
+    # 의미 모델이 이을 다리가 없다(admin-install-files ↔ "다운로드 센터").
+    labels = meta.get("labels")
+    if isinstance(labels, str) and labels.strip():
+        parts.append(labels.strip()[:_LABEL_CHARS])
     return " — ".join(p for p in parts if p.strip())
 
 
