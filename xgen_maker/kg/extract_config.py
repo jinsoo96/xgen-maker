@@ -33,6 +33,10 @@ _TOML_KEY = re.compile(r"^\s*(?:\[([^\]]+)\]|([A-Za-z_][\w.-]{2,})\s*=)", re.M)
 # 근거가 아예 없던 14건 중 7건이 pyproject.toml이었고 질의는 전부 패키지 이름이었다.
 _QUOTED = re.compile(r'"([A-Za-z_][\w.-]{2,})(?:[<>=!~\[\s].*?)?"|\'([A-Za-z_][\w.-]{2,})'
                      r"(?:[<>=!~\[\s].*?)?'")
+# 고정된 버전도 담는다. "xgen-sdk 1.35.1을 올려줘" 같은 요청에서 가장 변별력 높은
+# 말이 그 숫자다 — 이름은 여러 저장소의 매니페스트에 다 있지만, 정확한 버전은 드물다.
+# 순위 쪽 tokenize도 버전을 통째로 한 토큰으로 남긴다(양쪽이 맞아야 소용이 있다).
+_PINNED = re.compile(r"(?<![\w.])\d+(?:\.\d+){1,3}(?![\w.])")
 _JSON_KEY = re.compile(r'"([A-Za-z_][\w.-]{2,})"\s*:')
 _MD_HEAD = re.compile(r"^#{1,3}\s+(.+)$", re.M)
 _SH_FUNC = re.compile(r"^\s*(?:function\s+)?([A-Za-z_][\w-]{2,})\s*\(\)\s*\{", re.M)
@@ -52,11 +56,13 @@ def _names(rel: str, source: str) -> list[str]:
                     if v.lower() not in _NOT_VALUES])
     elif suffix == ".toml":
         found = ([a or b for a, b in _TOML_KEY.findall(source)]
-                 + [a or b for a, b in _QUOTED.findall(source)])
+                 + [a or b for a, b in _QUOTED.findall(source)]
+                 + _PINNED.findall(source))
     elif suffix == ".json":
         # package.json의 dependencies는 키 쪽이지만, scripts 값·workspaces 목록은
         # 값 쪽이다. 양쪽 다 담는다.
-        found = _JSON_KEY.findall(source) + [a or b for a, b in _QUOTED.findall(source)]
+        found = (_JSON_KEY.findall(source) + [a or b for a, b in _QUOTED.findall(source)]
+                 + _PINNED.findall(source))
     elif suffix == ".md":
         found = [h.strip() for h in _MD_HEAD.findall(source)]
     elif suffix == ".sh":

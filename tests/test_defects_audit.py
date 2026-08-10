@@ -1671,3 +1671,37 @@ class EmbedBuildReportsAbortTest(unittest.TestCase):
         source = Path("xgen_maker/cli.py").read_text(encoding="utf-8")
         self.assertIn('stats.get("aborted")', source)
         self.assertIn("SystemExit", source)
+
+
+class VersionLiteralsSurviveTokenizationTest(unittest.TestCase):
+    """회귀: "1.33.0"이 ["1","33","0"]으로 쪼개져 가장 변별력 높은 단서가 사라졌다.
+
+    그 숫자들은 어디에나 있지만 "1.33.0"은 거의 없다. 의존성 갱신 요청에서 남는
+    단서가 그것뿐인 경우가 실제로 있었고, 그런 MR 세 건이 통째로 안 잡혔다.
+    양쪽(질의·매니페스트)에 버전을 통째로 담자 2~3위로 올라왔다.
+    실측 265건: R@10 0.845 → 0.857 · R@1 0.483 → 0.491 (네 분할 모두 개선/유지).
+    """
+
+    def test_query_keeps_the_version_whole(self):
+        from xgen_maker.kg.rank import tokenize
+        got = tokenize("xgen-sdk 1.33.0 (align to latest SDK)")
+        self.assertIn("1.33.0", got)
+        self.assertIn("sdk", got, "쪼갠 단어도 그대로 남는다")
+
+    def test_manifest_keeps_the_pinned_version(self):
+        from xgen_maker.kg.extract_config import _names
+        got = _names("pyproject.toml",
+                     '[project]\ndependencies = ["xgen-sdk==1.35.1", "orjson>=3.11.9"]\n')
+        self.assertIn("1.35.1", got)
+        self.assertIn("xgen-sdk", got)
+
+    def test_plain_numbers_are_not_versions(self):
+        """401·30초까지 버전으로 보면 흔한 숫자가 희소 토큰인 척한다."""
+        from xgen_maker.kg.rank import tokenize
+        got = tokenize("로그인 실패 시 401 반환, 30초 타임아웃")
+        self.assertNotIn("401", [t for t in got if "." in t])
+        self.assertFalse([t for t in got if "." in t])
+
+    def test_paths_are_not_versions(self):
+        from xgen_maker.kg.rank import tokenize
+        self.assertFalse([t for t in tokenize("service/v1.2/handler.py") if t == "1.2"])

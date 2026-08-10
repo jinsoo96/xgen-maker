@@ -18,6 +18,8 @@ from bisect import bisect_left
 
 _SPLIT = re.compile(r"[^0-9a-z가-힣]+")
 _CAMEL = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+# 버전 리터럴 — 점으로 이어진 숫자. 쪼개면 변별력이 통째로 사라진다.
+_VERSION = re.compile(r"(?<![\w.])\d+(?:\.\d+){1,3}(?![\w.])")
 
 # BM25 표준 파라미터. 도메인 값이 아니라 알고리즘 상수다.
 _K1 = 1.5
@@ -98,8 +100,14 @@ def tokenize(text: str) -> list[str]:
     `listApiCollections`·`main-tool-management-api-collections`·`user_id`를 통째로 두면
     어떤 토큰과도 안 맞는다. 코드 이름은 원래 여러 단어를 이어 만든 것이라 그 규칙을
     되돌린다. 단어 목록이 아니라 문자열 규칙이라 새 어휘가 나와도 손댈 게 없다.
+
+    다만 버전만은 쪼개면 안 된다. "1.33.0"이 ["1","33","0"]이 되면 가장 변별력 높은
+    정보가 사라진다 — 그 숫자들은 어디에나 있지만 "1.33.0"은 거의 없다. 의존성 갱신
+    요청("xgen-sdk 1.33.0")에서 남는 단서가 그것뿐인 경우가 실제로 있었다.
     """
-    return [t for t in _SPLIT.split(_CAMEL.sub(" ", text).lower()) if t]
+    versions = _VERSION.findall(text)
+    words = [t for t in _SPLIT.split(_CAMEL.sub(" ", text).lower()) if t]
+    return words + versions
 
 
 def node_terms(node: dict) -> list[str]:
