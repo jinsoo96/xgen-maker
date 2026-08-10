@@ -43,13 +43,21 @@ _STRIP_RULES = (
     re.compile(r"#[^\n]*"),                 # 파이썬·셸 주석
     re.compile(r"//[^\n]*"),                # C 계열 줄 주석
 )
+# 보간식(`${...}` · f-string의 `{...}`)은 문자열 안에 있지만 코드다.
+# 통째로 지우면 거기 있는 진짜 호출이 사라진다 — `총 ${total.toFixed(2)}원`의
+# toFixed, f"결과 {compute(x)}"의 compute. 걷어내기 전에 먼저 건져 둔다.
+_INTERPOLATION = re.compile(r"\$?\{([^{}]*)\}")
 
 
 def strip_noncode(source: str) -> str:
-    """주석·문자열을 지운다. 지운 자리는 빈 칸으로 둬 다른 토큰이 붙지 않게."""
+    """주석·문자열을 지운다. 지운 자리는 빈 칸으로 둬 다른 토큰이 붙지 않게.
+
+    문자열 안의 보간식은 살린다 — 그건 문자열이 아니라 그 자리에서 실행되는 코드다.
+    """
+    kept = " ".join(m.group(1) for m in _INTERPOLATION.finditer(source))
     for rule in _STRIP_RULES:
         source = rule.sub(" ", source)
-    return source
+    return f"{source} {kept}" if kept else source
 
 
 def scan_call_names(source: str, strip: bool = True) -> set[str]:

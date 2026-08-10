@@ -1815,3 +1815,33 @@ class LabelWeightIsTunedTest(unittest.TestCase):
         """문구 무게를 올리면서 요약·문서까지 같이 올리면 다른 실험을 덮어쓴다."""
         from xgen_maker.kg.rank import _FIELD_WEIGHT
         self.assertEqual(_FIELD_WEIGHT["meta"], 1)
+
+
+class InterpolationIsCodeNotStringTest(unittest.TestCase):
+    """회귀: 주석·문자열을 걷어내면서 보간식 안의 진짜 호출까지 지웠다.
+
+    `총 ${total.toFixed(2)}원`의 toFixed, f"결과 {compute(x)}"의 compute는 문자열
+    안에 있지만 그 자리에서 실행되는 코드다. 통째로 지우니 호출 엣지 56개가 사라졌다.
+    """
+
+    def test_template_literal_interpolation_survives(self):
+        from xgen_maker.kg.calls import scan_call_names
+        got = scan_call_names('const s = `총 ${total.toFixed(2)}원`;\n'
+                              'const t = "설명 문구(참고)";')
+        self.assertIn("toFixed", got)
+        self.assertNotIn("참고", got)
+
+    def test_fstring_interpolation_survives(self):
+        from xgen_maker.kg.calls import scan_call_names
+        got = scan_call_names('msg = f"결과 {compute(x)}"\nlog = "그냥 문자열(주의)"')
+        self.assertIn("compute", got)
+
+    def test_prose_is_still_stripped(self):
+        """되살리면서 산문까지 되살리면 원래 결함으로 돌아간다."""
+        from xgen_maker.kg.calls import scan_call_names
+        got = scan_call_names('# 반환 dict 에서 꺼낼 key (없으면 전체)\n'
+                              '"""annotations: MCP annotations (읽기)"""\n'
+                              'real_call(1)')
+        self.assertIn("real_call", got)
+        self.assertNotIn("key", got)
+        self.assertNotIn("annotations", got)
