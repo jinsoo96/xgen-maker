@@ -16,10 +16,17 @@ PROTECTED_BRANCHES = {"main", "master", "develop", "stg", "staging", "release", 
 ALLOWED_BRANCH_PREFIXES = ("feature/", "fix/", "refactor/", "hotfix/", "chore/")
 # 규칙: 브랜치명은 작업 내용을 명확하게. js·251205 등 의미 불명 이름 금지.
 _MEANINGLESS_SLUG = re.compile(r"^(js|ts|py|tmp|test|temp|wip|\d+|[a-z]{1,2}\d*)$", re.I)
+# MAKER는 기능 코드만 고친다. 배포를 바꾸는 파일은 사람이 봐야 한다.
+# ⚠️ 여기 빠진 관례가 있으면 그 파일은 조용히 통과한다 — 실측으로 확인한 구멍:
+# 기존 패턴은 `helm/`·`k8s/`만 알아서 `k3s/helm-chart/values/*.yaml`과
+# `k3s/argocd/projects/*.yaml`이 그대로 통과했다(README에는 charts를 막는다고 적혀 있었다).
+# 디렉터리로 한정한다 — `chart`를 그냥 넣으면 chart_service.py·charting/까지 막힌다.
 INFRA_PATTERNS = re.compile(
     r"(^|/)(docker-compose[^/]*\.ya?ml|Dockerfile[^/]*|\.gitlab-ci\.ya?ml|"
     r"Jenkinsfile[^/]*|\.drone\.ya?ml|azure-pipelines[^/]*\.ya?ml|bitbucket-pipelines\.ya?ml|"
-    r"helm/|infra/|k8s/|\.github/workflows/|\.circleci/)",
+    r"helm[^/]*/|charts?/|infra/|k8s/|k3s/|kubernetes/|argo(cd)?/|flux/|"
+    r"ansible/|terraform/|\.github/workflows/|\.circleci/|"
+    r"kustomization\.ya?ml|values(-[^/]*)?\.ya?ml|[^/]+\.tfvars|[^/]+\.tf)",
     re.I)
 
 # 기본값은 로컬/제네릭 — 실제 엔드포인트는 .env(XGEN_MAKER_LLM_BASE)로만 주입(공개 시 노출 방지)

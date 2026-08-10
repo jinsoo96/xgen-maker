@@ -1845,3 +1845,39 @@ class InterpolationIsCodeNotStringTest(unittest.TestCase):
         self.assertIn("real_call", got)
         self.assertNotIn("key", got)
         self.assertNotIn("annotations", got)
+
+
+class InfraVetoCoversRealConventionsTest(unittest.TestCase):
+    """회귀: 배포를 바꾸는 파일이 통과하고 있었다.
+
+    패턴이 `helm/`·`k8s/`만 알아서 k3s·argocd·terraform·차트 값 파일이 그대로
+    통과했다. README에는 "charts를 vetoes"라고 적혀 있었는데 코드가 안 그랬다.
+    이건 안전 문제다 — 에이전트가 고치고 MR까지 나간다.
+    """
+
+    def test_deployment_definitions_are_blocked(self):
+        from xgen_maker.config import infra_files
+        for path in ("k3s/helm-chart/values/api.yaml", "k3s/argocd/projects/app.yaml",
+                     "helm-chart/values/api.yaml", "charts/api/values.yaml",
+                     "terraform/main.tf", "infra/main.tfvars", "ansible/site.yml",
+                     "kustomization.yaml", "deploy/main.tf",
+                     "dockerfiles/gw/Dockerfile", ".gitlab-ci.yml",
+                     ".github/workflows/ci.yml"):
+            self.assertTrue(infra_files([path]), f"통과하면 안 된다: {path}")
+
+    def test_source_that_merely_mentions_infra_is_allowed(self):
+        """과하게 막으면 기능 코드를 못 고친다 — 이름만 닮은 것은 통과해야 한다."""
+        from xgen_maker.config import infra_files
+        for path in ("controller/chart_service.py", "features/charting/src/index.tsx",
+                     "service/values_helper.py", "service/k8sclient.py",
+                     "packages/api-client/src/charts.ts",
+                     "editor/nodes/flux_node.py", "tests/test_terraform_parser.py",
+                     "config/services.yaml"):
+            self.assertFalse(infra_files([path]), f"막으면 안 된다: {path}")
+
+    def test_readme_claim_matches_code(self):
+        """문서가 막는다고 적은 것을 코드가 실제로 막는지 — 드리프트를 못박는다."""
+        from xgen_maker.config import infra_files
+        self.assertTrue(infra_files(["charts/x/values.yaml"]))
+        readme = Path("README.md").read_text(encoding="utf-8")
+        self.assertIn("charts", readme)
