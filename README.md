@@ -4,8 +4,8 @@
 
 **Ask in plain language. Get a reviewable merge request — grounded in a knowledge graph of your own code.**
 
-[![tests](https://img.shields.io/badge/tests-533%20passing-3aa8c9)](#testing)
-[![retrieval](https://img.shields.io/badge/landing%20R%4010-0.845-3aa8c9)](#measured-not-asserted)
+[![tests](https://img.shields.io/badge/tests-549%20passing-3aa8c9)](#testing)
+[![retrieval](https://img.shields.io/badge/landing%20R%4010-0.906-3aa8c9)](#measured-not-asserted)
 [![python](https://img.shields.io/badge/python-3.12%2B-3aa8c9)](#requirements)
 [![deps](https://img.shields.io/badge/dependencies-stdlib%20first-3aa8c9)](#requirements)
 [![license](https://img.shields.io/badge/license-private-8894a0)](#license)
@@ -69,12 +69,16 @@ The benchmark below is 265 merged MRs across a 12-repository platform (~26,000 g
 ~60,000 edges). Release trains and branch-merge commits are excluded — their titles carry no
 intent, so no retrieval system can or should match them.
 
-| Metric | Lexical only | **+ semantic, fused** |
+| Metric | Lexical only | **Hybrid, tuned** |
 |---|---|---|
-| Landing is exactly right (R@1) | 0.415 | **0.483** |
-| Answer in the agent's evidence list (R@10) | 0.796 | **0.845** |
-| MRR | 0.538 | **0.591** |
-| MR's changed files fully covered | — | **45.7%** (66.9% average) |
+| Landing is exactly right (R@1) | 0.415 | **0.555** |
+| Answer in the agent's evidence list (R@10) | 0.796 | **0.906** |
+| MRR | 0.538 | **0.663** |
+| MR's changed files fully covered | — | **52.1%** (74.3% average) |
+
+Of the 25 remaining misses, 15 have no answer anywhere in a 40-candidate pool, and of the 10
+that do, an LLM shown the whole pool picks correctly for only 2 — the MR title simply does not
+determine the file. The measured ceiling here is the benchmark, not the ranker.
 
 Held across four independent splits of the benchmark (odd/even and first/second half), because a
 gain that only shows up on one slice is noise.
@@ -98,7 +102,8 @@ gain that only shows up on one slice is noise.
   request ─┬─→ lexical (BM25 over graph nodes)  ──┐
            │     names · paths · docstrings       │
            │     referenced identifiers           │
-           │     config keys AND values           ├─→ reciprocal rank fusion ─→ landing
+           │     config keys, values and versions ├─→ reciprocal rank fusion ─→ landing
+           │     the words the UI shows people    │
            ├─→ semantic (dense vectors)         ──┤
            │     for requests whose words         │
            │     never appear in the code         │
@@ -278,7 +283,7 @@ MAKER is designed to be *boring* in production.
 python -m pytest -q
 ```
 
-533 tests covering the graph extractors, incremental-sync equivalence, retrieval ranking, safety
+549 tests covering the graph extractors, incremental-sync equivalence, retrieval ranking, safety
 guards, the convergence loop end-to-end over a real temporary repository, and the dashboard
 endpoints.
 
