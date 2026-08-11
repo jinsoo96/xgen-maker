@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from .. import llm
+from ..codes import ErrorCode
 from ..config import MakerConfig, infra_files
 
 _JUDGE_SYSTEM = (
@@ -40,11 +41,13 @@ def judge(config: MakerConfig, query: str, diff_text: str,
           changed_files: list[str], checks: dict | None = None, cost=None) -> dict:
     if not diff_text.strip() and not changed_files:
         return {"score": 0.0, "passed": False, "veto": "빈 diff — 구현 산출물 없음",
+                "code": ErrorCode.JUDGE_EMPTY_DIFF.value,
                 "reasons": [], "source": "veto"}
     touched_infra = infra_files(changed_files)
     if touched_infra:
         return {"score": 0.0, "passed": False,
                 "veto": f"인프라 파일 변경 감지(기능 코드만 원칙): {touched_infra}",
+                "code": ErrorCode.JUDGE_INFRA_VETO.value,
                 "reasons": [], "source": "veto"}
 
     source = "heuristic"

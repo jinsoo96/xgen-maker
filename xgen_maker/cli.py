@@ -141,7 +141,6 @@ def cmd_kg_merge(args) -> None:
 
 def cmd_kg_dashboard(args) -> None:
     graph = Graph.load(args.kg)
-    _apply_overlay_and_save(graph, args.kg) if False else None  # 오버레이는 로드 시 별도 적용
     from .kg.overlay import load_overlay, apply_overlay
     overlay = load_overlay(_overlay_path(args.kg))
     if overlay["node_overrides"] or overlay["custom_edges"]:

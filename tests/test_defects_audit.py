@@ -3,6 +3,7 @@
 공통 성질: 실패해도 아무도 안 죽는다. 검색이 빈 결과를 내고, 중지 버튼이 안 듣고,
 CI가 초록으로 통과하고, 되돌리기가 조용히 실패한다. 그래서 테스트가 유일한 방어선이다.
 """
+import re
 import subprocess
 import tempfile
 import unittest
@@ -951,8 +952,10 @@ class TestTunedValuesCarryTheirEvidence(unittest.TestCase):
         두 규칙을 나란히 못박는다.
         """
         source = Path("xgen_maker/loop/pipeline.py").read_text(encoding="utf-8")
-        self.assertIn("landing = _fuse(landing[:_LEXICAL_MATERIAL], semantic, k=8, head=0)",
-                      source)
+        # 못박는 것은 head=0이라는 결정이다. 몇 개를 남길지(k)는 그 뒤 단계
+        # (파일당 1개 → 8로 자르기)가 정하므로 여기에 같이 묶지 않는다.
+        self.assertRegex(source, r"_fuse\(landing\[:_LEXICAL_MATERIAL\], semantic,\s+"
+                                 r"k=[_A-Za-z0-9]+, head=0\)")
         self.assertIn("0.483", source, "근거 수치를 남긴다")
 
     def test_fusion_material_is_evidence_backed(self):
@@ -1946,3 +1949,216 @@ class DenseFailureIsVisibleTest(unittest.TestCase):
         source = Path("xgen_maker/doctor.py").read_text(encoding="utf-8")
         self.assertIn("의미 검색", source)
         self.assertIn("임베딩 서버 미응답", source)
+
+
+class TestEveryErrorCodeIsActuallyEmitted(unittest.TestCase):
+    """선언만 되고 아무 데서도 안 실리는 오류 코드는 없어야 한다.
+
+    실측: 13개 중 7개(AGENT_TIMEOUT·JUDGE_EMPTY_DIFF·MR_NO_TOKEN·DEPLOY_REFUSED 등)가
+    선언만 되어 있었고, 정작 그 실패 지점들은 코드 없이 한국어 문장만 돌려주고 있었다.
+    호출자는 문자열을 눈으로 읽는 것 말고는 실패 종류를 구별할 방법이 없었다 —
+    카탈로그가 있는데 아무도 안 쓰는 상태였다. 다시 그렇게 되면 여기서 걸린다.
+    """
+
+    def _sources(self) -> str:
+        return "".join(p.read_text(encoding="utf-8")
+                       for p in Path("xgen_maker").rglob("*.py")
+                       if p.name != "codes.py")
+
+    def test_no_code_is_declared_without_a_caller(self):
+        from xgen_maker.codes import ErrorCode
+        source = self._sources()
+        orphan = [e.name for e in ErrorCode
+                  if not re.search(rf"ErrorCode\.{e.name}\b", source)]
+        self.assertEqual(orphan, [], f"실패 지점에 안 붙은 오류 코드: {orphan}")
+
+    def test_codes_are_carried_as_values_not_names(self):
+        """저널·리포트·API로 나가는 것은 .value여야 한다 — enum 객체는 JSON으로 못 나간다.
+
+        `(A if 조건 else B).value`처럼 감싼 뒤 한 번만 붙이는 것도 정상이라 문자열로는
+        못 가린다. 구문으로 본다: ErrorCode.X 접근이 .value를 무는 식 안에 있으면 통과.
+        """
+        import ast
+        bare: list[str] = []
+        for path in Path("xgen_maker").rglob("*.py"):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            covered = {id(node) for outer in ast.walk(tree)
+                       if isinstance(outer, ast.Attribute) and outer.attr == "value"
+                       for node in ast.walk(outer.value)}
+            bare += [f"{path.name}:{n.lineno} ErrorCode.{n.attr}"
+                     for n in ast.walk(tree)
+                     if isinstance(n, ast.Attribute)
+                     and isinstance(n.value, ast.Name) and n.value.id == "ErrorCode"
+                     and id(n) not in covered]
+        self.assertEqual(bare, [], f".value 없이 실린 코드: {bare}")
+
+
+class TestKindListsAreNotHandWritten(unittest.TestCase):
+    """노드·엣지 종류 목록을 상수로 다시 적지 않는다.
+
+    실측: NODE_KINDS(8종)·EDGE_KINDS(5종)가 아무도 안 읽는 채로 남아 실제 그래프
+    (12종·11종)와 어긋나 있었다 — gateway_route·helm_app·same_package·routes_via가
+    통째로 빠져 있었다. 종류는 추출기가 늘리는 것이라 손으로 적으면 반드시 뒤처진다.
+    """
+
+    def test_graph_module_declares_no_kind_catalog(self):
+        source = Path("xgen_maker/kg/graph.py").read_text(encoding="utf-8")
+        for name in ("NODE_KINDS", "EDGE_KINDS"):
+            self.assertNotIn(f"{name} = (", source,
+                             f"{name}는 그래프에 물어야 한다 — stats()['nodes_by_kind']")
+
+    def test_graph_can_report_its_own_kinds(self):
+        graph = Graph()
+        graph.add_node("r", "repo", "r", "r")
+        graph.add_node("f", "file", "f", "r", "a.py")
+        self.assertEqual(set(graph.stats()["nodes_by_kind"]), {"repo", "file"})
+
+
+class TestJournalCatalogMatchesWhatIsEmitted(unittest.TestCase):
+    """저널 카탈로그는 실제로 나가는 것만 담는다.
+
+    실측: Event.DEPLOY가 페이로드 설명("sent(bool), plan|reason")까지 달고 있었지만
+    파이프라인은 그것을 한 번도 내보내지 않았다 — 내보낼 수도 없다. README는
+    "Never deploys"라고 적혀 있는데 카탈로그만 배포를 예고하고 있었던 셈이다.
+    카탈로그는 관측의 계약이라, 안 나가는 항목이 섞이면 읽는 사람이 오해한다.
+    """
+
+    def _emitted(self) -> set:
+        source = "".join(p.read_text(encoding="utf-8")
+                         for p in Path("xgen_maker").rglob("*.py"))
+        return set(re.findall(r"""(?:journal\.event|\.close)\(\s*["']([a-z_]+)["']""",
+                              source))
+
+    def test_no_catalog_entry_promises_an_event_that_never_fires(self):
+        from xgen_maker.codes import PAYLOADS
+        emitted = self._emitted()
+        # session_end는 Journal이 스스로 닫으며 쓴다(문자열이 아니라 상수로).
+        ghost = [k.value for k in PAYLOADS
+                 if k.value not in emitted and k.value != "session_end"]
+        self.assertEqual(ghost, [], f"설명만 있고 안 나가는 이벤트: {ghost}")
+
+    def test_the_loop_never_emits_a_deploy_event(self):
+        """배포는 사람이 한다 — 루프가 배포를 알리는 일 자체가 없어야 한다."""
+        from xgen_maker.codes import ALL_EVENTS
+        self.assertNotIn("deploy", ALL_EVENTS)
+        self.assertIn("deploy_test", ALL_EVENTS, "렌더 검증(전송 없음)은 남아야 한다")
+
+    def test_the_interlock_is_still_proven_not_merely_declared(self):
+        """발사 봉인 코드를 지우면 안 된다 — doctor가 '거부한다'를 실제로 실행해 본다."""
+        source = Path("xgen_maker/doctor.py").read_text(encoding="utf-8")
+        self.assertIn("trigger_deploy", source)
+        self.assertIn("배포 인터록", source)
+
+
+class TestOneFilePerLandingSlot(unittest.TestCase):
+    """착지 목록에서 한 파일은 한 자리만 차지한다.
+
+    파일 노드와 그 안의 심볼이 나란히 올라와 여덟 자리 중 평균 2.2자리를 같은
+    파일이 먹고 있었다. 그만큼 다른 후보가 에이전트 눈에 안 띄었다.
+    """
+
+    def test_duplicate_files_are_pushed_back_not_dropped(self):
+        from xgen_maker.loop.pipeline import one_per_file
+        hits = [{"id": "a", "repo": "r", "path": "x.py", "kind": "function"},
+                {"id": "b", "repo": "r", "path": "x.py", "kind": "file"},
+                {"id": "c", "repo": "r", "path": "y.py", "kind": "file"}]
+        kept = one_per_file(hits, 3)
+        self.assertEqual([h["id"] for h in kept], ["a", "c", "b"],
+                         "밀린 것은 버리지 말고 뒤로 — 자리가 남으면 다시 쓴다")
+
+    def test_the_best_ranked_entry_survives_with_its_line(self):
+        from xgen_maker.loop.pipeline import one_per_file
+        hits = [{"id": "fn", "repo": "r", "path": "x.py", "line": 42},
+                {"id": "fl", "repo": "r", "path": "x.py", "line": 0}]
+        self.assertEqual(one_per_file(hits, 1)[0]["line"], 42)
+
+    def test_pathless_nodes_do_not_collapse_into_each_other(self):
+        """repo 노드처럼 경로가 없는 것들은 서로 다른 것이다 — 한 덩어리로 묶으면 안 된다."""
+        from xgen_maker.loop.pipeline import one_per_file
+        hits = [{"id": "r1", "repo": "a", "path": "", "kind": "repo"},
+                {"id": "r2", "repo": "b", "path": "", "kind": "repo"}]
+        self.assertEqual(len(one_per_file(hits, 5)), 2)
+
+    def test_the_pipeline_dedupes_after_fusing_not_before(self):
+        source = Path("xgen_maker/loop/pipeline.py").read_text(encoding="utf-8")
+        fuse_at = source.index("semantic,\n                            k=_LEXICAL_MATERIAL")
+        cut_at = source.index("landing = one_per_file(landing, 8)")
+        self.assertLess(fuse_at, cut_at, "중간에 8로 자르면 중복 제거가 소용없다")
+
+
+class TestOutcomeCatalogMatchesTheWire(unittest.TestCase):
+    """Outcome은 "루프가 내보내는 이름의 정본"이라고 스스로 적어 놓았다.
+
+    실측: 실제로는 mr_created·committed_local·deploy_test_failed 세 이름이 카탈로그
+    밖에서 문자열로 돌아다녔고, 반대로 mr_prepared는 아무도 안 내보내는 유령이었다.
+    더 나쁜 것은 배포 렌더 실패였다 — 저널은 deploy_test_failed로 닫는데 리포트는
+    checks_failed라고 적어, 같은 사건을 두 이름으로 부르고 있었다. 그러면 실패를
+    세는 FAILURE_OUTCOMES도 못 세고, 화면에는 라벨 없는 원시 코드가 뜬다.
+    """
+
+    def _closed(self) -> set:
+        blob = "".join(p.read_text(encoding="utf-8")
+                       for p in Path("xgen_maker").rglob("*.py"))
+        return set(re.findall(r"""journal\.close\(\s*["']([a-z_]+)["']""", blob))
+
+    def test_every_name_the_loop_closes_with_is_in_the_catalog(self):
+        from xgen_maker.codes import ALL_OUTCOMES
+        stray = sorted(self._closed() - ALL_OUTCOMES)
+        self.assertEqual(stray, [], f"카탈로그 밖에서 쓰이는 종료 이름: {stray}")
+
+    def test_render_failure_is_called_the_same_thing_everywhere(self):
+        """저널과 리포트가 같은 사건을 같은 이름으로 부른다."""
+        source = Path("xgen_maker/loop/pipeline.py").read_text(encoding="utf-8")
+        block = source[source.index('deploy_test["status"] == "failed"'):][:600]
+        self.assertIn("Outcome.DEPLOY_TEST_FAILED.value", block)
+        self.assertNotIn("Outcome.CHECKS_FAILED.value", block,
+                         "렌더 실패는 테스트 실패가 아니다")
+
+    def test_new_failure_outcomes_are_counted_as_failures(self):
+        """실패 결과가 FAILURE_OUTCOMES에서 빠지면 CI가 초록으로 통과한다."""
+        from xgen_maker.codes import Outcome, FAILURE_OUTCOMES
+        for failing in (Outcome.DEPLOY_TEST_FAILED, Outcome.CHECKS_FAILED,
+                        Outcome.JUDGE_FAILED, Outcome.UNAUTHORIZED):
+            self.assertIn(failing.value, FAILURE_OUTCOMES)
+        for ok in (Outcome.MR_CREATED, Outcome.COMMITTED_LOCAL, Outcome.ANSWERED):
+            self.assertNotIn(ok.value, FAILURE_OUTCOMES)
+
+    def test_the_screen_has_a_word_for_every_outcome(self):
+        """라벨이 없으면 사람에게 maker 내부 코드가 그대로 보인다."""
+        from xgen_maker.codes import ALL_OUTCOMES
+        web = Path("xgen_maker/web.py").read_text(encoding="utf-8")
+        start = web.index("const OUTCOME={")
+        labels = web[start:web.index("};", start)]
+        missing = [o for o in sorted(ALL_OUTCOMES) if f"{o}:" not in labels]
+        self.assertEqual(missing, [], f"화면 라벨 없는 결과: {missing}")
+
+    def test_retired_names_are_kept_not_deleted(self):
+        """이 카탈로그는 덧붙이기만 한다 — 지난 저널이 옛 이름을 그대로 담고 있다."""
+        from xgen_maker.codes import Outcome
+        self.assertEqual(Outcome.MR_PREPARED.value, "mr_prepared")
+
+
+class TestAgentFailureReasonSurvivesToTheReport(unittest.TestCase):
+    """왜 실패했는지가 위층까지 살아서 간다.
+
+    실측: implement가 붙인 not_found·timeout·cancelled가 converge에서 버려지고,
+    pipeline이 원인과 무관하게 nonzero_exit을 하드코딩했다. 값이 비는 게 아니라
+    **틀린 값이 나갔다** — 에이전트가 아예 없어도, 사람이 중지를 눌러도, 운영자에게는
+    똑같이 "비정상 종료"로 보였다.
+    """
+
+    def test_converge_carries_the_code_up(self):
+        source = Path("xgen_maker/loop/converge.py").read_text(encoding="utf-8")
+        self.assertIn('"agent_code": code', source)
+
+    def test_pipeline_prefers_the_carried_code_over_its_default(self):
+        source = Path("xgen_maker/loop/pipeline.py").read_text(encoding="utf-8")
+        self.assertIn('conv.get("agent_code")', source)
+
+    def test_a_user_stop_is_not_reported_as_a_crash(self):
+        from xgen_maker.codes import ErrorCode
+        source = Path("xgen_maker/loop/implement.py").read_text(encoding="utf-8")
+        block = source[source.index("중지됨(사용자 요청)") - 200:][:400]
+        self.assertIn("AGENT_CANCELLED", block)
+        self.assertNotEqual(ErrorCode.AGENT_CANCELLED.value,
+                            ErrorCode.AGENT_EXIT.value)

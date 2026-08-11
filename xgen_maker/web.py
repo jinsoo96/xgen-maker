@@ -191,7 +191,7 @@ _PAGE = """<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
  /* 한글 라벨은 영문 코드보다 길다 — 줄바꿈되면 '답변 완/료'처럼 깨진다 */
  .badge{display:inline-block;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:500;background:var(--neutral-bg);color:var(--text2);white-space:nowrap}
  th{white-space:nowrap}
- .badge.ok,.merged,.fix,.Synced,.badge.mr_prepared,.badge.committed_local,.badge.mr_created,.badge.answered{background:var(--ok-bg);color:var(--ok-fg)}
+ .badge.ok,.merged,.fix,.Synced,.badge.mr_prepared,.badge.deploy_test_failed,.badge.committed_local,.badge.mr_created,.badge.answered{background:var(--ok-bg);color:var(--ok-fg)}
  .badge.fail,.pitfall,.badge.checks_failed,.badge.judge_failed,.badge.unauthorized,.badge.push_failed{background:var(--err-bg);color:var(--err-fg)}
  .opened,.convention,.badge.planned{background:var(--info-bg);color:var(--info-fg)}
  .closed,.note,.badge.muted{background:var(--neutral-bg);color:var(--text2)}
@@ -258,7 +258,7 @@ const OUTCOME={answered:'답변 완료',no_landing:'관련 코드 못 찾음',pl
  branch_failed:'브랜치 생성 실패',implement_failed:'수정 실패',checks_failed:'검증 실패',
  judge_failed:'품질 기준 미달',push_failed:'푸시 실패',unauthorized:'권한 없음',
  mr_prepared:'수정 완료(로컬)',committed_local:'수정 완료 — 내 PC에만',
- mr_created:'MR 생성됨',stopped:'중지됨'};
+ mr_created:'MR 생성됨',deploy_test_failed:'배포 렌더 실패 — MR 차단',stopped:'중지됨'};
 const outcomeLabel=s=>OUTCOME[s]||(s==null||s===''?'-':String(s));
 function line(cls,txt,mark){const d=document.createElement('div');d.className='ev '+cls;
  if(mark){const s=document.createElement('span');s.className='mk';s.textContent=mark;d.appendChild(s);}

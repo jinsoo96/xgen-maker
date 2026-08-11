@@ -9,6 +9,7 @@ import re
 import subprocess
 from pathlib import Path
 
+from ..codes import ErrorCode
 from ..config import is_allowed_branch, is_protected_branch, branch_name_issue
 
 # 인증 URL의 자격을 마스킹(에러/로그/저널로 새는 것 방지):
@@ -80,7 +81,8 @@ class GitRepo:
     def create_branch(self, name: str, base_ref: str = "") -> str:
         issue = branch_name_issue(name)
         if issue:
-            raise GitOpsError(f"브랜치명 '{name}' 규칙 위반 — {issue}")
+            raise GitOpsError(f"[{ErrorCode.GIT_BRANCH_ILLEGAL.value}] "
+                              f"브랜치명 '{name}' 규칙 위반 — {issue}")
         if base_ref:
             self._run("checkout", "-b", name, base_ref)  # 최신 base에서 분기
         else:
@@ -138,7 +140,8 @@ class GitRepo:
         """격리 worktree 생성(동시실행 충돌 방지) — path에 base_ref로부터 branch 체크아웃."""
         issue = branch_name_issue(branch)
         if issue:
-            raise GitOpsError(f"브랜치명 '{branch}' 규칙 위반 — {issue}")
+            raise GitOpsError(f"[{ErrorCode.GIT_BRANCH_ILLEGAL.value}] "
+                              f"브랜치명 '{branch}' 규칙 위반 — {issue}")
         self._run("worktree", "add", "-b", branch, str(path), base_ref or "HEAD")
         return GitRepo(path)
 

@@ -207,8 +207,3 @@ def gitlab_login_password(url: str, user: str, password: str, timeout: int = 25)
                 "(2FA·비번그랜트 비활성이면 PAT 사용)"}
     except (urllib.error.URLError, OSError, json.JSONDecodeError) as error:
         return {"ok": False, "reason": str(error)[:80]}
-
-
-def resolve_gitlab_token() -> str:
-    """env 우선, 없으면 저장된 로그인."""
-    return os.environ.get("XGEN_MAKER_GITLAB_TOKEN", "") or load_auth().gitlab_token

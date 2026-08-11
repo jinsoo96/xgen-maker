@@ -131,9 +131,6 @@ def chat(base: str, model: str, messages: list[dict], max_tokens: int = 800,
     return _chat_openai(base, model, messages, max_tokens, temperature, timeout)
 
 
-_VISION_FORMAT = ('\n\nReply JSON only: '
-                  '{"renders_ok": true/false, "issues": ["..."], "summary": "..."}')
-
 
 def _vision_judge_cli(image_path: str, question: str, timeout: int) -> dict | None:
     """구독 로그인(claude CLI)으로 스크린샷 판정 — API 키 불필요.

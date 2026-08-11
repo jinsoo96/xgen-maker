@@ -10,6 +10,8 @@
 """
 from __future__ import annotations
 
+from ..codes import ErrorCode
+
 import json
 import os
 import shutil
@@ -127,6 +129,7 @@ def trigger_deploy(config: MakerConfig, plan: dict) -> dict:
     if config.deploy_mode == "live":
         if os.environ.get("XGEN_MAKER_DEPLOY_LIVE") != "1":
             return {"status": "refused", "sent": False,
+                    "code": ErrorCode.DEPLOY_REFUSED.value,
                     "reason": "live 인터록 미해제 — XGEN_MAKER_DEPLOY_LIVE=1 필요(오너 승인 표시)"}
         request_spec = plan["request"]
         request = urllib.request.Request(

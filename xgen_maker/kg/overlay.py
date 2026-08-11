@@ -17,7 +17,6 @@ from pathlib import Path
 
 from .graph import Graph
 
-DEFAULT_OVERLAY = "kg/overlay.json"
 _EDIT_KEYS = ("summary", "note", "deprecated", "redirect", "tags")
 
 

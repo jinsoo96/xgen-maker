@@ -2,8 +2,16 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from xgen_maker.loop.testing import (run_checks, check_python_syntax, check_pytest,
+from xgen_maker.loop.testing import (run_checks, check_python_syntax,
                                      check_node_tests)
+from xgen_maker.loop.testenv import run_pytest_with_deps
+
+
+def check_pytest(root, changed, timeout=600):
+    """제품이 타는 경로. 예전에는 testing.check_pytest라는 사본을 검사했는데,
+    그 함수는 아무도 안 부르는 것이었다 — 테스트만 죽은 코드를 지키고 있었다.
+    """
+    return run_pytest_with_deps(str(root), root, changed, timeout)
 
 
 class TestChecks(unittest.TestCase):
@@ -29,7 +37,7 @@ class TestChecks(unittest.TestCase):
         (self.root / "a.py").write_text("x = 1\n", encoding="utf-8")
         result = check_pytest(self.root, ["a.py"])
         self.assertEqual(result["status"], "skipped")
-        self.assertIn("구성 없음", result["reason"])
+        self.assertIn("테스트 폴더 없음", result["reason"])
 
     def test_pytest_runs_and_fails(self):
         (self.root / "calc.py").write_text("def add(a, b):\n    return a - b\n",

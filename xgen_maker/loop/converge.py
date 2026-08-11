@@ -132,11 +132,15 @@ def converge(config, repo_path: Path, repo: str, query: str, intent: str,
         if cost is not None:
             cost.add_agent(prompt, agent_result.get("output", ""))
         if not agent_result["ok"]:
+            # 실패 종류(미발견·타임아웃·중지)를 여기서 버리면, 위층은 원인과 무관하게
+            # "비정상 종료"로 보고한다 — 값이 없는 게 아니라 틀린 값이 나간다.
+            code = agent_result.get("code")
             journal.event("implement", "fail", n=iteration,
-                          error=agent_result.get("error"))
+                          error=agent_result.get("error"), code=code)
             journal.event("iteration", "fail", n=iteration, phase="implement",
-                          error=agent_result.get("error"))
-            last.update({"iterations": iteration, "agent_error": agent_result.get("error")})
+                          error=agent_result.get("error"), code=code)
+            last.update({"iterations": iteration, "agent_error": agent_result.get("error"),
+                         "agent_code": code})
             return {**last, "converged": False, "stopped": "implement_failed"}
 
         repo_git.stage_all()

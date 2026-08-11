@@ -24,33 +24,40 @@ from .mr import build_mr_draft, save_draft, create_gitlab_mr
 from .verify import verify
 
 
-def _prefer(primary: list[dict], fallback: list[dict], k: int = 8) -> list[dict]:
-    """믿을 만한 결과를 앞에 두고, 남는 자리를 다른 결과로 채운다.
-
-    두 결과를 점수로 섞거나 순위로 융합하면 안 된다. 코드는 영문이라 한글 원문 검색은
-    대부분 노이즈인데, 섞는 순간 그 노이즈가 절반의 표를 얻는다("로그인 처리"가 실제
-    login 함수 대신 SSE 세션 관리로 갔다). 그렇다고 버리지도 않는다 — 번역이 놓친
-    것이 원문에 남아 있을 수 있으니 뒤에 붙인다.
-    """
-    seen = set()
-    out: list[dict] = []
-    for group in (primary, fallback):
-        for hit in group or ():
-            if hit["id"] in seen:
-                continue
-            seen.add(hit["id"])
-            out.append(hit)
-            if len(out) >= k:
-                return out
-    return out
-
-
 # 융합에 넣을 각 목록의 재료 개수. 머지된 MR 2,412건(처음 보는 것만)으로 훑어 정했다 —
 # 12: R@10 0.802 MRR 0.568 · 16: 0.807/0.572 ← 채택 · 20: 0.808/0.571 · 24: 0.808/0.569.
 # 12~24가 거의 평평하다. 넉넉히 넣을수록 좋을 것 같지만 그렇지도 않다 — RRF는 순위만
 # 보므로, 뒤쪽 재료가 많아지면 양쪽에서 어중간한 것들이 표를 나눠 가진다.
 # (294건 표본에서는 12가 최적으로 보였다. 그 표본이 작고 치우쳐 있었을 뿐이다.)
 _LEXICAL_MATERIAL = 16
+
+
+def one_per_file(hits: list[dict], k: int) -> list[dict]:
+    """한 파일은 착지 목록에서 한 자리만 차지한다.
+
+    파일 노드와 그 안의 함수·엔드포인트 노드는 서로 다른 노드라 나란히 올라온다.
+    사람에게는 "이 파일의 이 줄"이라 값이 있어 보이지만, 자리는 여덟 개뿐이다 —
+    한 파일이 세 자리를 먹으면 다른 후보 두 개가 목록 밖으로 밀려나고, 에이전트는
+    그 파일들을 아예 못 본다(실측: 상위 10칸 중 평균 2.2칸이 이미 나온 파일이었다).
+
+    가장 높이 오른 것 하나만 남기므로 세밀함은 잃지 않는다 — 함수가 파일보다 높으면
+    함수가(줄 번호까지 달고) 남는다. 밀려난 것은 버리지 않고 뒤로 보낸다.
+
+    실측(층화 1,204건, 제품 설정 그대로 융합 재료 16 → 중복 제거 → 10칸):
+      제한 없음   R@1 0.465 · R@10 0.805 · MRR 0.576  (상위10의 2.14칸이 중복)
+      파일당 1개  R@1 0.465 · R@10 0.825 · MRR 0.586
+    24건이 새로 찾아졌고 잃은 것은 0건이다(McNemar p<10^-6). 1위는 건드리지 않으므로
+    R@1은 그대로다 — 이 조치가 벌어 주는 것은 뒤쪽 자리다.
+    """
+    kept, spill, seen = [], [], set()
+    for hit in hits:
+        key = (hit.get("repo", ""), hit.get("path", ""))
+        if key in seen and key[1]:
+            spill.append(hit)
+            continue
+        seen.add(key)
+        kept.append(hit)
+    return (kept + spill)[:k]
 
 
 def _fuse(primary: list[dict], secondary: list[dict], k: int = 8,
@@ -367,7 +374,8 @@ class MakerLoop:
         if semantic:
             # 어휘 머리를 보존하지 않는다. 의미 검색이 섞이면 그쪽 1위가 더 정확했다
             # (실측 265건: 머리 보존 R@1 0.415 → 보존 안 함 0.483).
-            landing = _fuse(landing[:_LEXICAL_MATERIAL], semantic, k=8, head=0)
+            landing = _fuse(landing[:_LEXICAL_MATERIAL], semantic,
+                            k=_LEXICAL_MATERIAL, head=0)
             journal.event("dense_search", "ok", hits=len(semantic))
         else:
             # 설정해 놓고 못 쓴 것과 아예 안 쓴 것은 다르다. 서버가 죽었으면
@@ -376,7 +384,9 @@ class MakerLoop:
             journal.event("dense_search",
                           "skipped" if "미설정" in reason else "unavailable",
                           note=reason or "의미 검색을 쓰지 않았습니다")
-            landing = landing[:8]
+        # 자르는 것은 맨 마지막에 한 번만 — 중간에 자르면 뒤에 있던 다른 파일이
+        # 중복 제거로 올라올 기회 자체가 사라진다.
+        landing = one_per_file(landing, 8)
         journal.event("kg_search", "ok" if landing else "empty",
                       hits=[{"id": n["id"], "kind": n["kind"], "score": n["score"]}
                             for n in landing[:8]],
@@ -615,7 +625,8 @@ class MakerLoop:
         if conv.get("stopped") == "implement_failed":
             journal.close("implement_failed")
             report.update({"outcome": Outcome.IMPLEMENT_FAILED.value,
-                           "code": ErrorCode.AGENT_EXIT.value,
+                           "code": (conv.get("agent_code")
+                                    or ErrorCode.AGENT_EXIT.value),
                            "error": conv.get("agent_error")})
             return report
 
@@ -718,8 +729,8 @@ class MakerLoop:
             journal.event("deploy_test", deploy_test["status"], **deploy_test)
             report["deploy_test"] = deploy_test
             if deploy_test["status"] == "failed":
-                journal.close("deploy_test_failed")
-                report.update({"outcome": Outcome.CHECKS_FAILED.value,
+                journal.close(Outcome.DEPLOY_TEST_FAILED.value)
+                report.update({"outcome": Outcome.DEPLOY_TEST_FAILED.value,
                                "code": ErrorCode.CHECKS_TEST.value,
                                "failed": [deploy_test],
                                "note": f"배포 렌더 실패 — 브랜치 {branch} 보존(MR 안 냄)"})
@@ -835,7 +846,8 @@ class MakerLoop:
         journal.event("cost", "ok", **cost.summary())
         # 결과를 한 이름으로 뭉치면 "MR 준비 완료"가 로컬 커밋에도 붙어, 원격에 올라간
         # 줄로 읽힌다. 실제로 어디까지 갔는지로 나눈다.
-        outcome = "mr_created" if report.get("mr", {}).get("ok") else "committed_local"
+        outcome = (Outcome.MR_CREATED if report.get("mr", {}).get("ok")
+                   else Outcome.COMMITTED_LOCAL).value
         journal.close(outcome)
         report["outcome"] = outcome
         return report

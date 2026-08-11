@@ -77,12 +77,5 @@ def list_jobs() -> list[dict]:
             for j in data.get("jobs", [])]
 
 
-def job_for_env(env: str) -> str | None:
-    for name, mapped in _job_map().items():
-        if mapped == env:
-            return name
-    return None
-
-
 def available() -> bool:
     return _creds() is not None

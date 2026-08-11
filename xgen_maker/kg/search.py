@@ -71,7 +71,7 @@ def search(graph: Graph, query: str, k: int = 10,
     hint_repo는 "이 저장소일 것 같다"는 바깥 신호(예: LLM 라우팅)다. 거르지 않고
     가중만 준다 — 그 추측이 틀렸을 때 정답을 아예 못 보게 되면 안 된다.
     """
-    scores, matched = _index(graph).search_with_coverage(query)
+    scores = _index(graph).search(query)
     if not scores:
         return []
     if hint_repo and _REPO_HINT != 1.0:

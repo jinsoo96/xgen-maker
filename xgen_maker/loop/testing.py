@@ -42,32 +42,6 @@ def check_python_syntax(repo_root: Path, changed: list[str], timeout: int = 120)
             "files": len(py_files), "output": "" if code == 0 else output}
 
 
-def _has_pytest(repo_root: Path) -> bool:
-    if (repo_root / "pytest.ini").exists() or (repo_root / "tests").is_dir():
-        return True
-    pyproject = repo_root / "pyproject.toml"
-    if pyproject.exists() and "pytest" in pyproject.read_text(encoding="utf-8", errors="ignore"):
-        return True
-    return False
-
-
-def check_pytest(repo_root: Path, changed: list[str], timeout: int = 600) -> dict:
-    if not any(f.endswith(".py") for f in changed):
-        return _skip("pytest", "py 변경 없음", "na")
-    if not _has_pytest(repo_root):
-        return _skip("pytest", "pytest 구성 없음", "na")
-    code, output = _run([sys.executable, "-m", "pytest", "-x", "-q"], repo_root, timeout)
-    if code == 0:
-        return {"name": "pytest", "status": "passed", "output": output[-500:]}
-    if code == 5:
-        return _skip("pytest", "수집된 테스트 없음", "na")
-    if code == 1:
-        return {"name": "pytest", "status": "failed", "output": output}
-    # 2/3/4/124/127 = 환경/수집/타임아웃 — 차단 않되 '미검증(env)'으로 정직하게 기록
-    return {**_skip("pytest", f"실행 불가(exit={code}) — 환경 문제로 분류", "env"),
-            "output": output[-800:]}
-
-
 def _nearest_pkg_with_test(repo_root: Path, rel: str) -> Path | None:
     current = (repo_root / rel).parent
     while current != repo_root.parent and current >= repo_root:

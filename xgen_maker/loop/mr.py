@@ -5,6 +5,8 @@ observe 모드: MR-DRAFT.md 저장까지만. act 모드: GitLab API로 실제 MR
 """
 from __future__ import annotations
 
+from ..codes import ErrorCode
+
 import json
 import urllib.parse
 import urllib.request
@@ -103,15 +105,17 @@ def create_gitlab_mr(config: MakerConfig, repo: str, branch: str,
     """
     project = config.gitlab_projects.get(repo)
     if not project:
-        return {"ok": False, "error": f"gitlab_projects에 '{repo}' 매핑 없음"}
+        return {"ok": False, "code": ErrorCode.MR_NO_PROJECT.value,
+                "error": f"gitlab_projects에 '{repo}' 매핑 없음"}
     root = repo_root or (config.repos or {}).get(repo, "")
     if root:
         from .git_ops import GitRepo
         if not GitRepo(root).token_host_matches(config.gitlab_url):
-            return {"ok": False,
+            return {"ok": False, "code": ErrorCode.MR_NO_PROJECT.value,
                     "error": f"'{repo}'의 원격은 이 GitLab이 아닙니다 — MR을 만들지 않습니다"}
     if not config.gitlab_token:
-        return {"ok": False, "error": "XGEN_MAKER_GITLAB_TOKEN 미설정"}
+        return {"ok": False, "code": ErrorCode.MR_NO_TOKEN.value,
+                "error": "XGEN_MAKER_GITLAB_TOKEN 미설정"}
     encoded = urllib.parse.quote_plus(project)
     # 저장소마다 통합 브랜치가 다르다. 전역 설정값을 그대로 쓰면 없는 브랜치를 대상으로 연다.
     payload = {"source_branch": branch,

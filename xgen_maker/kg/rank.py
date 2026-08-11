@@ -106,6 +106,12 @@ _LABEL_WEIGHT = 2
 # labels = 그 파일이 화면에 보여 주는 한글. 사용자는 UI에 적힌 말로 요청한다.
 _META_KEYS = ("summary", "doc", "package", "route_path", "module", "service",
               "handler", "refs", "labels")
+# 심볼이 자기 파일의 화면 문구를 물려받게 해 봤지만 채택하지 않았다. 층화 603건:
+#   물려받기   0 — R@1 0.463 · R@10 0.821 · 심볼 착지 33%
+#   물려받기 160 — R@1 0.481 · R@10 0.813 · 심볼 착지 43%
+# 심볼 착지율은 올랐지만 그건 설계 취향이지 측정된 품질이 아니다(벤치는 파일 단위로
+# 채점한다). 정작 R@10은 내려갔고, R@1·MRR의 차이는 이 표본의 표준오차(±0.020) 안이다.
+# 끄는 손잡이만 남기면 다음 사람이 근거 없이 다시 켠다 — 기계장치째 들어낸다.
 
 
 def tokenize(text: str) -> list[str]:
@@ -188,13 +194,6 @@ class Bm25Index:
             mine = sum(1 for nid in owners
                        if tok in self.repo_tokens.get(self.meta.get(nid, ("", "", ""))[2], ()))
             self.token_exclusivity[tok] = mine / len(owners)
-        # 저장소별 노드 수 — 크기가 곧 뽑힐 기회라서, 그 기회를 고르게 하는 데 쓴다.
-        self.repo_size: dict[str, int] = {}
-        for kind_path_repo in self.meta.values():
-            repo_name = kind_path_repo[2]
-            self.repo_size[repo_name] = self.repo_size.get(repo_name, 0) + 1
-        self.avg_repo_size = (sum(self.repo_size.values())
-                              / max(len(self.repo_size), 1)) or 1.0
         self.total = len(self.length) or 1
         self.avg_len = sum(self.length.values()) / self.total
         self.vocab = sorted(self.postings)
@@ -230,9 +229,6 @@ class Bm25Index:
         return hits
 
     def search(self, query: str) -> dict[str, float]:
-        return self.search_with_coverage(query)[0]
-
-    def search_with_coverage(self, query: str) -> tuple[dict[str, float], dict[str, int]]:
         """쿼리 → {node_id: 점수}. 임계값으로 자르지 않는다 — 순위는 호출자가 정한다.
 
         점수 = BM25 × 폭넓게 맞은 정도 × 종류 가중치.
@@ -277,7 +273,7 @@ class Bm25Index:
             coverage = len(matched[node_id]) / total
             scores[node_id] = base * (1.0 + coverage ** 1.5 * 2.0) * self._prior(
                 node_id, wants_test, targeted, named)
-        return scores, {nid: len(hit) for nid, hit in matched.items()}
+        return scores
 
     def _prior(self, node_id: str, wants_test: bool,
                targeted: set[str] | None = None,

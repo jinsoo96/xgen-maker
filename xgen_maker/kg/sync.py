@@ -15,14 +15,6 @@ from .build import PY_EXTS, TS_EXTS, RUST_EXTS, git_head, refresh_files
 from .extract_config import CONFIG_EXTS
 
 
-def _git_lines(repo_root: str | Path, *args: str) -> list[str]:
-    result = subprocess.run(["git", *args], cwd=repo_root, capture_output=True,
-                            text=True, encoding="utf-8", errors="replace", timeout=60)
-    if result.returncode != 0:
-        return []
-    return [line for line in result.stdout.splitlines() if line.strip()]
-
-
 def _git_zfields(repo_root: str | Path, *args: str) -> list[str]:
     """NUL 구분으로 받는다 — 경로에 따옴표·이스케이프가 섞이지 않게.
 

@@ -8,8 +8,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-NODE_KINDS = ("repo", "file", "class", "function", "endpoint", "api_call", "route", "feature")
-EDGE_KINDS = ("contains", "imports", "calls", "route_of", "resolves_to")
+# 노드·엣지 종류 목록을 상수로 두지 않는다. 아무도 안 읽는 채로 낡아 실제와 어긋났다
+# (선언 8·5종 vs 실제 12·11종 — gateway_route·helm_app·same_package·routes_via 등이 빠져
+# 있었다). 종류는 추출기가 늘리는 것이라, 목록을 손으로 적으면 반드시 뒤처진다.
+# 지금 무엇이 있는지 알고 싶으면 그래프에 물어라: Graph.stats()["nodes_by_kind"].
 
 
 class Graph:

@@ -64,8 +64,3 @@ def build_cli_provider(engine):
             yield ProviderEvent(type=ET.STOP, tool_input={}, stop_reason="end_turn")
 
     return ClaudeCliProvider
-
-
-def cli_provider(engine, model: str | None = None):
-    """claude-CLI provider 인스턴스 생성(엔진 풀 파이프라인에 주입용)."""
-    return build_cli_provider(engine)(model=model or "claude(subscription)")

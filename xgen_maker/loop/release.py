@@ -7,13 +7,6 @@ from __future__ import annotations
 
 import os
 
-# 기본 사다리 (config.release_stages로 오버라이드 가능). url/jenkins는 env로도 주입.
-DEFAULT_LADDER = [
-    {"branch": "develop", "env": "dev", "role": "개발 통합"},
-    {"branch": "stg", "env": "stg", "role": "스테이징 검증"},
-    {"branch": "main", "env": "prd", "role": "운영 배포"},
-]
-
 # 스테이지 URL·Jenkins job은 전부 .env(XGEN_MAKER_URL_<ENV> / XGEN_MAKER_JENKINS_<ENV>)로만 주입.
 # 하드코딩 없음 — 공개 시 dev/stg 도메인 등 내부 정보 노출 방지.
 def stage_url(env: str) -> str:
@@ -25,8 +18,16 @@ def stage_jenkins(env: str) -> str:
 
 
 def ladder(config=None) -> list[dict]:
-    stages = getattr(config, "release_stages", None) if config else None
-    base = stages or DEFAULT_LADDER
+    """릴리즈 사다리. 정본은 MakerConfig.release_stages 하나다.
+
+    여기에 기본 사다리 사본을 두면 제품에서는 절대 안 읽히는 상수가 된다(config가
+    dataclass 기본값을 늘 채워 주므로). 그런데 테스트만 그 사본을 보고 있어서,
+    실제로 쓰이는 config 쪽이 바뀌어도 아무도 몰랐다.
+    """
+    from ..config import MakerConfig
+    base = getattr(config, "release_stages", None) if config else None
+    if not base:
+        base = MakerConfig().release_stages
     # url·jenkins job을 각 스테이지에 채운다(명시값 우선)
     return [{**s, "url": s.get("url") or stage_url(s["env"]),
              "jenkins": s.get("jenkins") or stage_jenkins(s["env"])}

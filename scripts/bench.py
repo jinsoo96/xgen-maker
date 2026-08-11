@@ -21,7 +21,7 @@ from xgen_maker.kg.graph import Graph
 from xgen_maker.kg.search import lexicon, search as ksearch
 from xgen_maker.kg.lexicon import bridge_terms
 from xgen_maker.kg.dense import DenseIndex
-from xgen_maker.loop.pipeline import _fuse, _LEXICAL_MATERIAL
+from xgen_maker.loop.pipeline import _fuse, one_per_file, _LEXICAL_MATERIAL
 from xgen_maker.kg.anchor import find_anchors, expand as aexp, rank_within
 
 BENCH = pathlib.Path(__file__).resolve().parent.parent / "bench"
@@ -104,7 +104,10 @@ class Benchmark:
         top = np.argsort(-scores)[:material]
         dense = [{"score": float(scores[i]), **self.graph.nodes[self.index.ids[i]]}
                  for i in top if self.index.ids[i] in self.graph.nodes]
-        return _fuse(hits[:material], dense, k=k, head=0)
+        # 파이프라인과 같은 순서: 융합 → 파일당 1개 → 자르기
+        fused = _fuse(hits[:material], dense, k=material, head=0)
+        self.last_fused = fused          # 중복 제거 전/후를 견주려는 실험용
+        return one_per_file(fused, k)
 
     def score(self, subset) -> tuple[float, float, float]:
         r1 = r10 = mrr = 0

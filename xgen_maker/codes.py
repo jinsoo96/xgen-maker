@@ -50,7 +50,6 @@ class Event(str, Enum):
     PUSH = "push"
     MR_CREATE = "mr_create"
     MR_READY = "mr_ready"
-    DEPLOY = "deploy"
     KG_REFRESH = "kg_refresh"
     SESSION_END = "session_end"
 
@@ -66,7 +65,13 @@ class Outcome(str, Enum):
     JUDGE_FAILED = "judge_failed"     # 품질 게이트 θ 미달
     PUSH_FAILED = "push_failed"       # act 푸시 실패
     UNAUTHORIZED = "unauthorized"     # act 인가 실패 — 미인가 작업자/미설정 대상, 작업 전 차단
-    MR_PREPARED = "mr_prepared"       # 정상 — MR 준비(observe) 또는 MR 생성(act)
+    DEPLOY_TEST_FAILED = "deploy_test_failed"  # helm 렌더 실패 → MR 차단(전송 아님)
+    COMMITTED_LOCAL = "committed_local"  # 정상 — 로컬 브랜치·커밋까지(observe)
+    MR_CREATED = "mr_created"         # 정상 — 원격 MR까지 생성(act)
+    # 예전 이름. 두 결과를 한 이름으로 뭉쳐 쓰다가 나눴다("MR 준비 완료"가 로컬
+    # 커밋에도 붙어 원격에 올라간 것처럼 읽혔다). 지난 세션 저널에 남아 있으므로
+    # 지우지 않는다 — 이 카탈로그는 덧붙이기만 한다.
+    MR_PREPARED = "mr_prepared"
 
 
 # 종료코드 1로 다뤄야 하는 결과 — CLI/CI가 성공으로 오인하면 안 되는 것들.
@@ -77,6 +82,7 @@ FAILURE_OUTCOMES = frozenset({
     Outcome.BRANCH_FAILED.value,
     Outcome.IMPLEMENT_FAILED.value,
     Outcome.CHECKS_FAILED.value,
+    Outcome.DEPLOY_TEST_FAILED.value,
     Outcome.JUDGE_FAILED.value,
     Outcome.PUSH_FAILED.value,
     Outcome.UNAUTHORIZED.value,
@@ -91,6 +97,7 @@ class ErrorCode(str, Enum):
     AGENT_NOT_FOUND = "maker.agent.not_found"
     AGENT_TIMEOUT = "maker.agent.timeout"
     AGENT_EXIT = "maker.agent.nonzero_exit"
+    AGENT_CANCELLED = "maker.agent.cancelled"   # 실패가 아니라 사람이 멈춘 것
     CHECKS_SYNTAX = "maker.checks.syntax_failed"
     CHECKS_TEST = "maker.checks.test_failed"
     JUDGE_BELOW_THETA = "maker.judge.below_theta"
@@ -101,7 +108,10 @@ class ErrorCode(str, Enum):
     DEPLOY_REFUSED = "maker.deploy.interlock_refused"
 
 
-# 이벤트별 페이로드 설명(엄격 스키마 아님 — 관측용 문서)
+# 이벤트별 페이로드 설명(엄격 스키마 아님 — 관측용 문서).
+# 배포 이벤트는 없다. 루프는 MR에서 멈추고 사람이 배포한다 — 카탈로그에 자리를
+# 남겨 두면 "언젠가 보낸다"로 읽힌다. 발사 봉인을 지키는 코드(trigger_deploy)는
+# doctor가 "거부한다"를 증명하려고 부를 뿐, 루프에서는 부르지 않는다.
 PAYLOADS: dict[str, str] = {
     Event.INTENT: "intent, scores, source, branch_prefix",
     Event.KG_SEARCH: "hits[] (id, kind, score)",
@@ -113,7 +123,6 @@ PAYLOADS: dict[str, str] = {
     Event.JUDGE: "score, passed, source, theta, reasons[]",
     Event.COMMIT: "sha, files(int)",
     Event.MR_CREATE: "ok, url|error",
-    Event.DEPLOY: "sent(bool), plan|reason",
     Event.SESSION_END: "(status=Outcome 값)",
 }
 

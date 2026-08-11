@@ -4,8 +4,8 @@
 
 **Ask in plain language. Get a reviewable merge request — grounded in a knowledge graph of your own code.**
 
-[![tests](https://img.shields.io/badge/tests-567%20passing-3aa8c9)](#testing)
-[![retrieval](https://img.shields.io/badge/landing%20R%4010-0.868-3aa8c9)](#measured-not-asserted)
+[![tests](https://img.shields.io/badge/tests-586%20passing-3aa8c9)](#testing)
+[![retrieval](https://img.shields.io/badge/landing%20R%4010-0.886-3aa8c9)](#measured-not-asserted)
 [![python](https://img.shields.io/badge/python-3.12%2B-3aa8c9)](#requirements)
 [![deps](https://img.shields.io/badge/dependencies-stdlib%20first-3aa8c9)](#requirements)
 [![license](https://img.shields.io/badge/license-private-8894a0)](#license)
@@ -65,7 +65,7 @@ MAKER is evaluated the only way that means anything: against **merge requests th
 merged**. Each MR title becomes the request; the files that MR changed are the ground truth. If
 MAKER lands where the team actually worked, retrieval is right.
 
-The benchmark is **2,587 merged MRs the tuning has never seen**, drawn from every repository in
+The benchmark is **2,827 merged MRs the tuning has never seen**, drawn from every repository in
 the platform. Exclusions are declared, counted, and tested — not quietly applied. From 4,155 collected MRs:
 667 touch only files the graph does not index, 343 share a title with a different answer (one
 query, several truths), 217 are release trains or branch merges, 101 have titles too short to be
@@ -75,13 +75,22 @@ so the definition cannot drift.
 The graph is built from *today's* code, so an old MR describes a place that has since moved.
 Scores track that distance, which is why the window is stated rather than hidden:
 
-| Metric | Lexical only | **Hybrid, tuned** |
-|---|---|---|
-| Landing is exactly right (R@1) | 0.371 | **0.455** |
-| Answer in the agent's evidence list (R@10) | 0.777 | **0.813** |
-| …restricted to MRs merged in the last ~3 months | — | **0.868** |
-| MRR | 0.505 | **0.572** |
-| MR's changed files fully covered | — | **47.3%** (66.2% average) |
+| Metric | Lexical only | + semantic layer | **Shipping** |
+|---|---|---|---|
+| Landing is exactly right (R@1) | 0.385 | 0.459 | **0.459** |
+| Answer in the agent's evidence list (R@10) | 0.782 | 0.819 | **0.837** |
+| MRR | 0.516 | 0.577 | **0.587** |
+| …restricted to MRs merged in the last ~3 months | — | — | **0.886** (R@10) |
+| MR's changed files fully covered | — | — | **47.3%** (66.2% average) |
+
+All three columns are measured on the same 2,827 requests, so the columns are comparable.
+The last step costs nothing and is not a ranking change: one file may occupy only one of the
+eight slots. A file node and a function inside it are different nodes, so they used to arrive
+side by side and 2.1 of the ten slots went to a file already listed — candidates the agent then
+never saw. Keeping the highest-ranked entry per file loses no precision (a function outranking
+its file survives, line number and all) and, paired over 1,204 requests, found 24 answers it had
+been missing while losing none (McNemar p < 10⁻⁶). R@1 is untouched because the top of the list
+never had a duplicate to remove.
 
 Every ranking constant was re-checked against this set. Three had to move: they had been fitted
 to an earlier 294-MR sample whose answers happened to sit in small repositories (14% and 13% of
@@ -95,8 +104,12 @@ as the full set, and that agreement is itself checked.
 
 Not every measurable gain is kept. Loosening the penalty on test files raises R@1 by nine points
 — but only because the benchmark counts a hit on *any* file the MR touched, and test files are
-easy to find. Score the implementation files alone and the same change makes it worse
-(0.455 → 0.448). The penalty stayed where it was, and the trap is written next to it.
+easy to find. Score the implementation files alone and the same change makes it worse. The
+penalty stayed where it was, and the trap is written next to it. Letting symbols inherit their
+file's UI wording was rejected the same way: it lifted symbol landings from 33% to 43%, which
+looks like the design working, but R@10 fell and the rest of the movement sat inside the
+sample's standard error. The knob was removed along with the machinery, so nobody turns it back
+on without a reason.
 
 **Graph quality is audited against the repositories themselves**, not assumed:
 
@@ -301,7 +314,7 @@ MAKER is designed to be *boring* in production.
 python -m pytest -q
 ```
 
-567 tests covering the graph extractors, incremental-sync equivalence, retrieval ranking, safety
+586 tests covering the graph extractors, incremental-sync equivalence, retrieval ranking, safety
 guards, the convergence loop end-to-end over a real temporary repository, and the dashboard
 endpoints.
 

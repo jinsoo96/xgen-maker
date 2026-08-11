@@ -25,12 +25,19 @@ class TestGitlabAuth(unittest.TestCase):
         self.assertEqual(loaded.gitlab_token, "glpat-xyz")
         self.assertEqual(loaded.gitlab_user, "me")
 
-    def test_resolve_prefers_env(self):
-        os.environ["XGEN_MAKER_GITLAB_TOKEN"] = "env-token"
-        try:
-            self.assertEqual(auth.resolve_gitlab_token(), "env-token")
-        finally:
-            os.environ.pop("XGEN_MAKER_GITLAB_TOKEN", None)
+    def test_env_wins_over_stored_login(self):
+        """해석 규칙은 실제로 쓰이는 쪽(MakerConfig)에서 증명한다.
+
+        예전에는 auth에 같은 규칙의 사본이 있었고 이 테스트가 그 사본만 지켰다 —
+        정작 제품이 쓰는 프로퍼티가 망가져도 초록이었다(두 구현은 이미 갈라져 있었다).
+        """
+        with patch.object(auth, "AUTH_FILE", self.fake),              patch.object(auth, "AUTH_DIR", self.fake.parent):
+            auth.save_auth(auth.Auth(gitlab_token="stored-tok"))
+            os.environ["XGEN_MAKER_GITLAB_TOKEN"] = "env-token"
+            try:
+                self.assertEqual(MakerConfig().gitlab_token, "env-token")
+            finally:
+                os.environ.pop("XGEN_MAKER_GITLAB_TOKEN", None)
 
     def test_config_gitlab_token_from_stored(self):
         with patch.object(auth, "AUTH_FILE", self.fake), \

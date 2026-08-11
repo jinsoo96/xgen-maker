@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+from ..codes import ErrorCode
+
 import json
 import os
 import shutil
@@ -156,7 +158,9 @@ def run_agent(repo_path: str | Path, prompt: str, session_dir: Path,
     else:
         exe = shutil.which("claude")
         if not exe:
-            return {"ok": False, "output": "", "error": "claude CLI 미발견 — config.agent_cmd 필요"}
+            return {"ok": False, "output": "",
+                    "code": ErrorCode.AGENT_NOT_FOUND.value,
+                    "error": "claude CLI 미발견 — config.agent_cmd 필요"}
         # 프롬프트는 stdin으로 전달 — 멀티라인 argv의 셸 인용 문제 회피.
         # stream-json은 작업을 한 줄씩 흘려준다(툴 사용·비용·사용량까지).
         args = ["--permission-mode", "acceptEdits",
@@ -181,7 +185,8 @@ def run_agent(repo_path: str | Path, prompt: str, session_dir: Path,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 text=True, encoding="utf-8", errors="replace")
     except (OSError, FileNotFoundError) as error:
-        return {"ok": False, "output": "", "error": f"에이전트 실행 실패: {error}"}
+        return {"ok": False, "output": "", "code": ErrorCode.AGENT_NOT_FOUND.value,
+                "error": f"에이전트 실행 실패: {error}"}
 
     box: dict = {"lines": [], "err": [], "meta": {}}
 
@@ -220,11 +225,12 @@ def run_agent(repo_path: str | Path, prompt: str, session_dir: Path,
             _kill_tree(proc)
             worker.join(timeout=5)
             return {"ok": False, "output": "", "error": "중지됨(사용자 요청)",
-                    "cancelled": True}
+                    "code": ErrorCode.AGENT_CANCELLED.value, "cancelled": True}
         if time.monotonic() > deadline:
             _kill_tree(proc)
             worker.join(timeout=5)
-            return {"ok": False, "output": "", "error": f"에이전트 타임아웃({timeout}s)"}
+            return {"ok": False, "output": "", "code": ErrorCode.AGENT_TIMEOUT.value,
+                    "error": f"에이전트 타임아웃({timeout}s)"}
         worker.join(timeout=0.25)
     raw_output = "".join(box["lines"]) + "".join(box["err"])
     (session_dir / "agent-output.log").write_text(raw_output, encoding="utf-8")

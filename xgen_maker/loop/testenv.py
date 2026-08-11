@@ -143,11 +143,6 @@ def _next_installable(output: str, tried: set[str]) -> str | None:
     return None
 
 
-def _collected_count(output: str) -> int:
-    m = re.search(r"(\d+)\s+(?:passed|failed|error|deselected|skipped)", output)
-    return int(m.group(1)) if m else 0
-
-
 def _classify(proc, output: str, installed: list[str],
               targets: list[str] | None = None) -> dict:
     tail = output[-1500:]
